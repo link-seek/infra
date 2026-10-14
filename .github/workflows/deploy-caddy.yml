@@ -25,14 +25,18 @@ jobs:
           docker run --rm -v "$PWD/edge/caddy:/c" caddy:2 caddy fmt --overwrite /c/mesh-ali-gz/Caddyfile
           git diff --exit-code -- edge/caddy/ || { echo 'caddy fmt 有改动，请本地 fmt 后再提交'; exit 1; }
 
-      - name: 加入 tailnet（一次性短命节点）
-        # 注：tailscale/github-action v3 起废弃 authkey（强制 OAuth），
-        # 待 Tailscale 侧建好 OAuth client 后迁移（secrets + 本段 3 行）。
-        # issue 跟踪：OAuth 迁移（MIGRATE-TS-OAUTH）。
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
-          tags: tag:ci
+      - name: 加入 tailnet（一次性节点，用完即焚）
+        # 注：tailscale/github-action v2/v3 均已强制 OAuth（authkey 不可用），
+        # 此处直调 CLI：up 用 TAILSCALE_AUTH_KEY，结尾 logout 焚毁节点。
+        # OAuth 迁移（MIGRATE-TS-OAUTH）仍有效，待 Tailscale 侧建 OAuth client 后切回 action。
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-infra-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale ip -4
+          tailscale ping --c=2 100.85.128.116  # mesh-ali-gz（权威值见 docs/topology.md）
 
       - name: 下发 + reload + 验证（经 tailnet，不走公网）
         env:
@@ -53,3 +57,7 @@ jobs:
         run: |
           echo "## deploy-caddy ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- 变更文件：$(git diff --name-only HEAD~1 HEAD -- edge/caddy/ | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 退出 tailnet（焚毁节点）
+        if: always()
+        run: sudo tailscale logout || true
