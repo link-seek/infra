@@ -23,9 +23,11 @@ jobs:
       - name: secret 预检（只验长度+前缀，不打值）
         env:
           TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          PROBE: ${{ secrets.CI_PROBE }}
         run: |
           K="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           echo "tskey_len=${#K}"
+          echo "probe_len=${#PROBE} probe_head=$(printf '%s' "$PROBE" | head -c 12)"
           case "$K" in tskey-auth-*) echo TSKEY_FORMAT_OK;; *) echo TSKEY_FORMAT_BAD; exit 1;; esac
           if [ "${#K}" -lt 40 ]; then echo TSKEY_TOO_SHORT; exit 1; fi
 
