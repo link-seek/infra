@@ -26,7 +26,10 @@ jobs:
           git diff --exit-code -- edge/caddy/ || { echo 'caddy fmt 有改动，请本地 fmt 后再提交'; exit 1; }
 
       - name: 加入 tailnet（一次性短命节点）
-        uses: tailscale/github-action@v3
+        # 注：tailscale/github-action v3 起废弃 authkey（强制 OAuth），
+        # 待 Tailscale 侧建好 OAuth client 后迁移（secrets + 本段 3 行）。
+        # issue 跟踪：OAuth 迁移（MIGRATE-TS-OAUTH）。
+        uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
           tags: tag:ci
