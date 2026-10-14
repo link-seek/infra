@@ -1,0 +1,73 @@
+name: dns-apply（DNS 声明对账）
+
+# records.json 是唯一真相源：只动声明过的记录，未列出的不动；
+# 删记录必须 state=absent 且内容比对一致。密钥只用仓级 CLOUDFLARE_API_TOKEN。
+on:
+  push:
+    branches: [main]
+    paths:
+      - dns/records.json
+      - scripts/cf-dns-apply.py
+      - .github/workflows/dns-apply.yml
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 只打印计划不执行（true/false）
+        required: false
+        default: 'true'
+
+concurrency:
+  group: dns-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: records.json 语法检查
+        run: python3 -c "import json; d=json.load(open('dns/records.json')); print('records:', len(d['records']), 'zone:', d['zone'])"
+
+      - name: secret 预检（只验长度，不打值）
+        run: |
+          C="$(printf '%s' "$CFTOK" | tr -d '\r\n ')"
+          echo "cftoken_len=${#C}"
+          [ "${#C}" -ge 20 ] || { echo CFTOKEN_TOO_SHORT; exit 1; }
+        env:
+          CFTOK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: DNS 对账
+        run: |
+          if [ "${{ github.event_name }}" = 'workflow_dispatch' ] && [ "${{ inputs.dry_run }}" = 'true' ]; then
+            DRY_RUN=1 python3 scripts/cf-dns-apply.py
+          else
+            python3 scripts/cf-dns-apply.py
+          fi
+
+      - name: 解析验证（新记录全球生效可能延迟，重试 5 分钟）
+        run: |
+          python3 - <<'EOF'
+          import json, socket, time
+          want = json.load(open('dns/records.json'))
+          ok = True
+          for rec in want['records']:
+              if rec.get('state', 'present') != 'present' or rec['type'] != 'A':
+                  continue
+              for i in range(10):
+                  try:
+                      ips = {a[4][0] for a in socket.getaddrinfo(rec['name'], 80, socket.AF_INET)}
+                  except OSError:
+                      ips = set()
+                  if rec['content'] in ips:
+                      print('resolve-ok', rec['name'], rec['content'])
+                      break
+                  time.sleep(30)
+              else:
+                  print('resolve-pend', rec['name'], 'want', rec['content'], 'got', sorted(ips))
+                  ok = False
+          raise SystemExit(0 if ok else 1)
+          EOF

@@ -1,0 +1,31 @@
+{
+  "_doc": "全组织 DNS 声明（Cloudflare）。dns-apply.yml 只动这里声明的记录：present=保证存在且一致，absent=保证删除（删前比对 content，不一致则中止该条）。未列出的记录一律不动。",
+  "zone": "xieyucheng.top",
+  "records": [
+    {
+      "name": "hw21-opencode.xieyucheng.top",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "入口=mesh-ali-gz Caddy；二期改 301 到 opencode 后此条改指 hw21 或保留，另议"
+    },
+    {
+      "name": "opencode.xieyucheng.top",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "阶段一新增：与 hw21-opencode 同入口，便于整体迁移"
+    },
+    {
+      "name": "opencode.xieyucheng.top",
+      "type": "CNAME",
+      "content": "opencode.xieyucheng.top.w.kunlunaq.com",
+      "state": "absent",
+      "comment": "9/21 建的华为 WAF 死记录，后端无东西，阶段一删除"
+    }
+  ]
+}
