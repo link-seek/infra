@@ -4,3 +4,11 @@ hw21-opencode.xieyucheng.top {
 		output file /var/log/caddy/opencode.log
 	}
 }
+
+# 阶段一新增：与 hw21-opencode 同后端；阶段二 hw21-opencode 改 301 到此名
+opencode.xieyucheng.top {
+	reverse_proxy 100.91.222.51:4097
+	log {
+		output file /var/log/caddy/opencode.log
+	}
+}

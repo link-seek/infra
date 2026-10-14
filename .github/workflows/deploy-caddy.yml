@@ -68,6 +68,14 @@ jobs:
           ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
             'caddy reload --config /etc/caddy/Caddyfile && sleep 3 && caddy list-modules >/dev/null && echo RELOAD-OK'
           curl -s -m 15 -o /dev/null -w 'hw21-opencode http=%{http_code}\n' https://hw21-opencode.xieyucheng.top/
+          # 新域名证书签发+解析可能延迟，重试 5 分钟；超时则失败（排查 DNS/80 端口）
+          for i in $(seq 1 10); do
+            CODE=$(curl -s -m 15 -o /dev/null -w '%{http_code}' https://opencode.xieyucheng.top/ || true)
+            echo "opencode try$i http=$CODE"
+            [ "$CODE" = '200' ] && break
+            sleep 30
+          done
+          [ "$CODE" = '200' ] || { echo OPENCODE-DOMAIN-NOT-READY; exit 1; }
           rm -f ~/.ssh/ci_key
 
       - name: 部署摘要
