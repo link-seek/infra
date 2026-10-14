@@ -1,0 +1,21 @@
+# 全组织 DNS 声明（权威）
+
+> 二期 `dns-apply.yml` 将按此文件对账 Cloudflare；启用前按 `dns/cloudflare.md` 手动改、改完回填。
+> zone：`xieyucheng.top`（zone id 见 org secret 备注，不进仓）。
+
+```yaml
+records:
+  - name: hw21-opencode.xieyucheng.top
+    type: A
+    content: 120.77.76.20
+    proxied: false
+    purpose: opencode 公网入口（120 Caddy → tailnet → hw21:4097）
+
+  # 待办（opencode 新域名上线时执行）：
+  # - name: opencode.xieyucheng.top
+  #   type: A
+  #   content: 120.77.76.20
+  #   proxied: false
+  #   purpose: opencode 主域名（hw21-opencode 301 至此）
+  # - delete: opencode.xieyucheng.top CNAME *.w.kunlunaq.com（2026-09-21 死记录）
+```

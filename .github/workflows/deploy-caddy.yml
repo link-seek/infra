@@ -1,0 +1,52 @@
+name: deploy-caddy
+
+# Caddy 配置变更 → 自动部署到入口机，全程留痕。
+# 触发：edge/caddy/** 在 main 上变化，或手动 workflow_dispatch。
+
+on:
+  push:
+    branches: [main]
+    paths: ['edge/caddy/**']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-caddy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Caddyfile 一致性检查
+        run: |
+          docker run --rm -v "$PWD/edge/caddy:/c" caddy:2 caddy fmt --overwrite /c/mesh-ali-gz/Caddyfile
+          git diff --exit-code -- edge/caddy/ || { echo 'caddy fmt 有改动，请本地 fmt 后再提交'; exit 1; }
+
+      - name: 加入 tailnet（一次性短命节点）
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tags: tag:ci
+
+      - name: 下发 + reload + 验证（经 tailnet，不走公网）
+        env:
+          SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          NODE=100.85.128.116  # mesh-ali-gz（权威值见 docs/topology.md）
+          scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key \
+            edge/caddy/mesh-ali-gz/Caddyfile root@$NODE:/etc/caddy/Caddyfile
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
+            'caddy reload --config /etc/caddy/Caddyfile && sleep 3 && caddy list-modules >/dev/null && echo RELOAD-OK'
+          curl -s -m 15 -o /dev/null -w 'hw21-opencode http=%{http_code}\n' https://hw21-opencode.xieyucheng.top/
+          rm -f ~/.ssh/ci_key
+
+      - name: 部署摘要
+        run: |
+          echo "## deploy-caddy ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 变更文件：$(git diff --name-only HEAD~1 HEAD -- edge/caddy/ | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
