@@ -49,7 +49,10 @@ def main():
     live = {(r["name"], r["type"]): r for r in got.get("result", [])}
 
     changed = 0
-    for rec in want["records"]:
+    # 两遍：先删（absent），再建/改。Cloudflare 同名只容一种类型，
+    # 若先建 A 会因旧 CNAME 未删报 400。
+    ordered = sorted(want["records"], key=lambda r: 0 if r.get("state") == "absent" else 1)
+    for rec in ordered:
         key = (rec["name"], rec["type"])
         state = rec.get("state", "present")
         cur = live.get(key)
