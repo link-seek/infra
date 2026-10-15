@@ -128,6 +128,8 @@ jobs:
           # 4. 切流：先停旧栈容器（释出 litellm-guard 容器名＋4000 端口，保留网络），再起新栈
           cd /root/stacks/litellm-guard && docker compose stop litellm-guard || true
           docker rm -f litellm-guard || true
+          # 删旧栈残留网络（label 不匹配会致新栈 up 失败；容器已停，网络安全删）
+          docker network rm litellm-guard_default 2>/dev/null || true
           cd /root/stacks/litellm-gateway && docker compose up -d --no-deps --force-recreate litellm-guard
           # 4b. 等 ready（litellm 加载 45 模型＋guard 要时间；最多 3 分钟）
           READY=""
@@ -161,6 +163,7 @@ jobs:
             echo "VERIFY FAIL: 回滚旧栈"
             cd /root/stacks/litellm-gateway && docker compose stop litellm-guard || true
             docker rm -f litellm-guard || true
+            docker network rm litellm-guard_default 2>/dev/null || true
             cd /root/stacks/litellm-guard && docker compose up -d --force-recreate
             sleep 15
             echo "rolled-back: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"

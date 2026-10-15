@@ -11,9 +11,12 @@ services:
     container_name: litellm-guard
     # PID 1 僵尸回收：与 opencode-prod 同一解法（旧栈 380+ 僵尸教训）。
     init: true
-    # 4000 只绑宿主机回环：LAN 经 tailscale serve，公网经隧道（见 README）。不直接暴露。
+    # 4000 绑宿主机回环 + docker 网桥 IP：opencode-prod 等容器经 host.docker.internal
+    # （→172.17.0.1）可达；172.19.0.1 覆盖自定义网段。LAN 经 tailscale serve，公网经隧道。
     ports:
       - "127.0.0.1:4000:4000"
+      - "172.17.0.1:4000:4000"
+      - "172.19.0.1:4000:4000"
     # embedding 走宿主机 ollama：容器内 host.docker.internal 必须可达（网关 500 教训）。
     extra_hosts:
       - "host.docker.internal:host-gateway"
