@@ -70,6 +70,9 @@ jobs:
           # catch-all 必须最后：插到它前面
           catchall = [r for r in ing if 'hostname' not in r]
           rest = [r for r in ing if 'hostname' in r]
+          # Cloudflare 强制最后一条必须是 catch-all（无 hostname/path），否则 1056
+          if not catchall:
+              catchall = [{"service": "http_status:404"}]
           new = rest + [{"hostname": host, "service": "http://127.0.0.1:4000", "originRequest": {}}] + catchall
           out = {"config": {"ingress": new}}
           json.dump(out, open('/tmp/newcfg.json', 'w'))
