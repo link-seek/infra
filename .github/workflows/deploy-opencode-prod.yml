@@ -1,8 +1,7 @@
 name: deploy-opencode-prod
 
-# 生产发版：stacks/opencode-prod/** 进 main 即自动上机（无确认）。
-# 铁律代码化：docker-images 主分支 test-memory 非绿则 fail-closed（除非手动 bypass，用于救火）。
-# 密钥（.env / 本地凭证）永不经本 workflow；卷数据永不删。
+# 生产栈：stacks/opencode-prod/** 进 main 即发 HW21。机制与试用共用 deploy-opencode-stack。
+# 铁律代码化：CI 绿门 fail-closed（手动 bypass 仅救火）。
 
 on:
   push:
@@ -20,12 +19,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-
       - name: CI 绿门（fail-closed）
         if: inputs.bypass_ci_gate != 'true'
         run: |
@@ -34,60 +31,33 @@ jobs:
           echo "memory-e2e on main: $GATE"
           [ "$GATE" = "success" ] || { echo "BLOCKED: CI 未绿，拒绝发生产"; exit 1; }
 
-      - name: secret 预检（只验存在，不打值）
-        env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
-          SSHKEY: ${{ secrets.PROD_SSH_KEY }}
-        run: |
-          [ -n "$TS_AUTHKEY" ] || { echo "TAILSCALE_AUTH_KEY_PROD missing"; exit 1; }
-          [ -n "$SSHKEY" ] || { echo "PROD_SSH_KEY missing: 请在 repo secrets 加 HW21 root 部署 key"; exit 1; }
-          echo "secrets present"
-
-      - name: 加入 tailnet（一次性节点，用完即焚）
-        timeout-minutes: 6
-        env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
-        run: |
-          set -euo pipefail
-          curl -fsSL https://tailscale.com/install.sh | sh
-          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-prod-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          # 笼子自证：目标 :22 必须通，非目标必须不通（否则 abort）
-          timeout 15 bash -c "</dev/tcp/100.91.222.51/22" || { echo "target unreachable"; exit 1; }
-          echo "target reachable"
-          timeout 12 bash -c "</dev/tcp/100.111.231.85/22" && { echo "CONTAINMENT FAIL: 摸到了试用机"; exit 1; } || echo "containment ok (trial unreachable)"
-          timeout 12 bash -c "</dev/tcp/100.85.128.116/22" && { echo "CONTAINMENT FAIL: 摸到了入口机"; exit 1; } || echo "containment ok (entry unreachable)"
-
-      - name: 下发 + 灰度 + 验活（失败自动回滚）
-        timeout-minutes: 12
-        env:
-          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          NODE=100.91.222.51
-          ssh-keyscan -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
-          SSH="ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE"
-          # .env 是命：缺失直接 abort（绝不空跑覆盖）
-          $SSH 'test -f /root/stacks/opencode-prod/.env' || { echo "ABORT: 目标机缺 .env"; exit 1; }
-          TS="$(date -u +%Y%m%dT%H%M%SZ)"
-          $SSH "cp /root/stacks/opencode-prod/compose.yml /root/stacks/opencode-prod/compose.yml.prev-$TS && echo backup=compose.yml.prev-$TS"
-          # 传文件走 tar+ssh 管道：目标机 .bashrc 对非交互 shell 也有回显，scp 协议必死
-          tar -czf - -C stacks/opencode-prod compose.yml README.md .env.example | \
-            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
-            'tar -xzf - -C /root/stacks/opencode-prod && echo synced' 
-          PIN_TOOLS="$(grep -oP '^    image: \S+opencode-tools@\K\S+' stacks/opencode-prod/compose.yml | head -n1)"
-          PIN_BR="$(grep -oP '^    image: \S+chrome-cjk@\K\S+' stacks/opencode-prod/compose.yml | head -n1)"
-          echo "expect tools=$PIN_TOOLS browser=$PIN_BR"
-          $SSH 'cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d'
-          sleep 20
-          if $SSH 'curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/ | grep -q 200' \
-            && $SSH "docker inspect opencode-prod --format '{{.Image}}' | grep -q '${PIN_TOOLS#sha256:}'" \
-            && $SSH "docker inspect opencode-browser --format '{{.Image}}' | grep -q '${PIN_BR#sha256:}'"; then
-            echo "VERIFY OK: 4097 通 + 双 digest 相符"
-          else
-            echo "VERIFY FAIL: 回滚到备份"
-            $SSH "cd /root/stacks/opencode-prod && cp compose.yml.prev-$TS compose.yml && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w 'rollback:%{http_code}\n' http://127.0.0.1:4097/"
-            exit 1
-          fi
+  deploy:
+    needs: gate
+    uses: ./.github/workflows/deploy-opencode-stack.yml
+    with:
+      role: prod
+      target: 100.91.222.51
+      ssh_port: "2244"
+      stack_dir: stacks/opencode-prod
+      remote_dir: /root/stacks/opencode-prod
+      tar_files: compose.yml README.md .env.example
+      forbid: "100.111.231.85:trial 100.85.128.116:entry"
+      hostname_prefix: ci-prod
+      verify_cmd: |
+        test -f /root/stacks/opencode-prod/.env || { echo "ABORT: 目标机缺 .env"; exit 1; }
+        TS="$(date -u +%Y%m%dT%H%M%SZ)"
+        cp /root/stacks/opencode-prod/compose.yml /root/stacks/opencode-prod/compose.yml.prev-$TS && echo backup=compose.yml.prev-$TS
+        cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d
+        sleep 20
+        PIN_TOOLS="$(grep -oP '^    image: \S+opencode-tools@\K\S+' compose.yml | head -n1)"
+        PIN_BR="$(grep -oP '^    image: \S+chrome-cjk@\K\S+' compose.yml | head -n1)"
+        if curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/ | grep -q 200 && docker inspect opencode-prod --format '{{.Image}}' | grep -q "${PIN_TOOLS#sha256:}" && docker inspect opencode-browser --format '{{.Image}}' | grep -q "${PIN_BR#sha256:}"; then
+          echo "VERIFY OK: 4097 通 + 双 digest 相符"
+        else
+          echo "VERIFY FAIL: 回滚到备份"
+          cp compose.yml.prev-$TS compose.yml && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w 'rollback:%{http_code}\n' http://127.0.0.1:4097/
+          exit 1
+        fi
+    secrets:
+      TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
