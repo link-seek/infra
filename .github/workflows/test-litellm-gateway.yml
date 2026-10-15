@@ -234,3 +234,49 @@ jobs:
               print("FAILURES:"); [print(f" - {f}") for f in failures]; sys.exit(1)
           print("ALL PROBES OK")
           EOF
+
+      - name: opencode-loop（成品镜像调网关＋mask/restore 断言）
+        run: |
+          # pin 取自生产栈 compose（部署仓消费打包仓工件，单源头；镜像换 pin 即换被测物）
+          PIN="$(grep -oP '^\s*image:\s*\K\S+opencode-tools@\S+' stacks/opencode-prod/compose.yml | head -n1)"
+          echo "opencode-tools pin: $PIN"
+          docker pull -q "$PIN"
+          mkdir -p /tmp/oc-cfg-gw
+          cat > /tmp/oc-cfg-gw/opencode.jsonc <<'EOF'
+          {"$schema": "https://opencode.ai/config.json",
+           "permission": "allow",
+           "model": "gw/test-chat",
+           "provider": {"gw": {"options": {
+             "baseURL": "http://127.0.0.1:4001/v1",
+             "apiKey": "test-only"}}}}
+          EOF
+          docker run -d --name oc-gwtest --network host \
+            -v /tmp/oc-cfg-gw/opencode.jsonc:/root/.config/opencode/opencode.jsonc:ro \
+            -e OPENCODE_SERVER_PASSWORD=test-srv-pw \
+            "$PIN" serve --port 4096 --hostname 127.0.0.1
+          for i in $(seq 1 24); do
+            curl -sf --max-time 5 http://127.0.0.1:4096/ >/dev/null 2>&1 && break
+            sleep 5
+          done
+          OEX="docker exec -e OPENCODE_PASSWORD=test-srv-pw oc-gwtest opencode run --server http://127.0.0.1:4096"
+          FAIL=""
+          # 1. 连通门（3 轮，小模型偶发慢） — 区分网关故障与模型抖动
+          OK1=""
+          for attempt in 1 2 3; do
+            timeout 280 $OEX "reply with exactly: GW-OK" > /tmp/gw-out.txt 2>&1 && \
+            grep -q "GW-OK" /tmp/gw-out.txt && { OK1=1; echo "OK: opencode->gateway closure (attempt $attempt)"; break; }
+            echo "--- closure attempt $attempt:"; tail -5 /tmp/gw-out.txt
+          done
+          [ -n "$OK1" ] || FAIL="opencode 调网关不通"
+          # 2. mask/restore 门：合成密钥（零真值；example/test/xxx/fake/demo 等白名单词全避开，
+          #    命中 generic-sk 规则 sk-[A-Za-z0-9-_]{16,}）。回包是原文=restore 成功，是假值=restore 掉了。
+          TOK="sk-Q7mZ9vX2pL5nR8wZ4c6bD3eF1"
+          OK2=""
+          for attempt in 1 2 3; do
+            timeout 280 $OEX "repeat exactly this token and nothing else: $TOK" > /tmp/mask-out.txt 2>&1 && \
+            grep -q "$TOK" /tmp/mask-out.txt && { OK2=1; echo "OK: mask/restore round-trip (attempt $attempt)"; break; }
+            echo "--- mask attempt $attempt:"; tail -8 /tmp/mask-out.txt
+          done
+          [ -n "$OK2" ] || FAIL="$FAIL; mask/restore 回包非原文"
+          docker rm -f oc-gwtest >/dev/null 2>&1 || true
+          [ -z "$FAIL" ] && echo "OPENCODE-LOOP OK" || { echo "FAIL: $FAIL"; exit 1; }
