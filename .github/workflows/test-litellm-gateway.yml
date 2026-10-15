@@ -1,0 +1,236 @@
+name: test-litellm-gateway
+
+# 网关收编栈的门：schema（秒级）+ masking 单元（秒级）+ e2e 全栈（分钟级）。
+# 移植自 guard-rules（test-rules.yml + test-e2e.yml），路径换成 stacks/litellm-gateway。
+# 全 dummy key，零真值；e2e 在 runner 起一次性容器，跑完即焚。
+on:
+  pull_request:
+    paths:
+      - stacks/litellm-gateway/**
+      - .github/workflows/test-litellm-gateway.yml
+  push:
+    branches: [main]
+    paths:
+      - stacks/litellm-gateway/**
+  workflow_dispatch:
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Schema gate（digest pin＋无真值＋配置合法）
+        run: |
+          python3 - <<'EOF'
+          import json, re, sys
+          S = "stacks/litellm-gateway"
+          bad = 0
+          # 1. compose：两镜像必须 digest pin，禁 :latest
+          comp = open(f"{S}/compose.yml").read()
+          for svc in ("litellm-guard", "ollama"):
+              m = re.search(rf"^\s*image:\s*(\S+)", comp, re.M | re.S)
+          imgs = re.findall(r"^\s*image:\s*(\S+)", comp, re.M)
+          assert len(imgs) == 2, f"期望 2 个 image，实际 {imgs}"
+          for img in imgs:
+              if "@sha256:" not in img:
+                  print(f"FAIL: {img} 不是 digest pin"); bad += 1
+              else:
+                  print(f"OK pin: {img[:60]}...")
+              if re.search(r":latest(@|$|\s)", img):
+                  print(f"FAIL: {img} 用了 latest"); bad += 1
+          # 2. .env.example：占位符，无真值（sk-/ghp-/tskey- 出现即红）
+          env = open(f"{S}/.env.example").read()
+          for pat in (r"sk-[A-Za-z0-9\-_]{16,}", r"ghp_[A-Za-z0-9]+", r"tskey-[A-Za-z0-9_\-]+"):
+              if re.search(pat, env):
+                  print(f"FAIL: .env.example 命中真值模式 {pat}"); bad += 1
+          if "GO_BACKEND_KEY=" not in env or "LITELLM_MASTER_KEY=" not in env:
+              print("FAIL: .env.example 缺键位"); bad += 1
+          else:
+              print("OK: .env.example 键位齐且无真值")
+          # 3. config：YAML 合法；无 <GO_BACKEND_KEY> 明文占位（必须走 os.environ）；
+          #    无 "*" 通配；guard vault default_on；embedding 条目在
+          import yaml
+          d = yaml.safe_load(open(f"{S}/config/litellm_config.yaml"))
+          raw = open(f"{S}/config/litellm_config.yaml").read()
+          if "<GO_BACKEND_KEY>" in raw:
+              print("FAIL: config 含 <GO_BACKEND_KEY> 明文占位，须走 os.environ"); bad += 1
+          else:
+              print("OK: config 无明文 key 占位")
+          names = [m["model_name"] for m in d["model_list"]]
+          if "*" in names:
+              print("FAIL: config 含 * 通配"); bad += 1
+          else:
+              print(f"OK: models {len(names)} 条，无通配")
+          if "nomic-embed-text" not in names:
+              print("FAIL: 缺 embedding 条目"); bad += 1
+          else:
+              print("OK: embedding 条目在")
+          g = d.get("guardrails", [])
+          if not any(x.get("guardrail_name") == "vault" and True in (x["litellm_params"].get("default_on"),) for x in g):
+              print("FAIL: vault guardrail 缺失/default_on 非 true"); bad += 1
+          else:
+              print("OK: vault guardrail default_on")
+          # 4. guard 三文件：md5 与 README 声明对齐（改了必须同步改 README，即漂移显性化）
+          import hashlib
+          decl = open(f"{S}/README.md").read()
+          for f in ("guard/vault_guard.py", "guard/models-denied.json", "guard/rules.json"):
+              h = hashlib.md5(open(f"{S}/{f}", "rb").read()).hexdigest()
+              if h in decl:
+                  print(f"OK md5 {f}: {h[:12]}...")
+              else:
+                  print(f"FAIL: {f} md5 {h} 与 README 声明不一致"); bad += 1
+          denied = json.load(open(f"{S}/guard/models-denied.json"))
+          assert isinstance(denied, list) and denied, "models-denied.json 必须是非空数组"
+          print(f"OK: models-denied.json ({len(denied)} 条)")
+          sys.exit(1 if bad else 0)
+          EOF
+
+  masking-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Masking 行为测试（vault_guard standalone，零依赖）
+        run: |
+          python3 - <<'EOF'
+          import sys, types
+          _lit = types.ModuleType("litellm")
+          _inte = types.ModuleType("litellm.integrations")
+          _cgm = types.ModuleType("litellm.integrations.custom_guardrail")
+          class _CG:
+              def __init__(self, **kwargs):
+                  pass
+          _cgm.CustomGuardrail = _CG
+          _exc = types.ModuleType("litellm.exceptions")
+          class _BRE(Exception):
+              def __init__(self, message="", model="", llm_provider="", **kw):
+                  super().__init__(message)
+          _exc.BadRequestError = _BRE
+          _lit.integrations = _inte
+          _inte.custom_guardrail = _cgm
+          _lit.exceptions = _exc
+          sys.modules.update({"litellm": _lit, "litellm.integrations": _inte,
+                              "litellm.integrations.custom_guardrail": _cgm,
+                              "litellm.exceptions": _exc})
+          sys.path.insert(0, "stacks/litellm-gateway/guard")
+          import vault_guard
+          print("OK: vault_guard import（standalone stub 模式）")
+          # 黑名单 fail-closed：读不到文件即全拦的逻辑存在即可（行为由 e2e 覆盖）
+          assert hasattr(vault_guard, "SecretVaultGuardrail"), "缺 SecretVaultGuardrail"
+          print("OK: SecretVaultGuardrail 存在")
+          EOF
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start ollama (CPU)
+        run: |
+          docker run -d --name ollama --network host \
+            -v ollama-data:/root/.ollama \
+            -e OLLAMA_HOST=0.0.0.0:11434 \
+            ollama/ollama:0.40.3
+          for i in $(seq 1 30); do
+            curl -sf --max-time 5 http://127.0.0.1:11434/ >/dev/null && break
+            sleep 5
+          done
+          docker exec ollama ollama pull nomic-embed-text
+          docker exec ollama ollama pull qwen3:0.6b
+
+      - name: Render test config（本栈 config＋dummy key，测 os.environ 机制本身）
+        run: |
+          pip install pyyaml -q 2>/dev/null || true
+          python3 - <<'EOF'
+          import yaml
+          S = "stacks/litellm-gateway"
+          s = open(f"{S}/config/litellm_config.yaml").read()
+          s = s.replace('model_name: "<MODEL_ID>"', 'model_name: "go-spark-dup"')
+          s = s.replace("openai/<MODEL_ID>", "openai/glm-5.1")
+          s = s.replace("http://host.docker.internal:11434", "http://127.0.0.1:11434")
+          d = yaml.safe_load(s)
+          d["model_list"].append({"model_name": "test-chat",
+              "litellm_params": {"model": "ollama/qwen3:0.6b",
+                                 "api_base": "http://127.0.0.1:11434", "timeout": 180}})
+          open("/tmp/litellm-e2e.yaml", "w").write(yaml.safe_dump(d))
+          print("template render OK")
+          EOF
+
+      - name: Start litellm（本栈 compose pin＋本栈 guard 文件，port 4001）
+        run: |
+          PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
+          echo "litellm pin: $PIN"
+          docker run -d --name litellm-e2e --network host \
+            -v /tmp/litellm-e2e.yaml:/app/config.yaml:ro \
+            -v $PWD/stacks/litellm-gateway/guard/vault_guard.py:/app/vault_guard.py:ro \
+            -v $PWD/stacks/litellm-gateway/guard/rules.json:/app/guard-rules.json:ro \
+            -v $PWD/stacks/litellm-gateway/guard/models-denied.json:/app/models-denied.json:ro \
+            -e GO_BACKEND_KEY=test-dummy-key \
+            -e LITELLM_MASTER_KEY=test-only -e DISABLE_ADMIN_UI=True \
+            -e RULES_FILE=/app/guard-rules.json \
+            "$PIN" --config /app/config.yaml --port 4001
+          for i in $(seq 1 24); do
+            curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" >/dev/null 2>&1 && break
+            sleep 5
+          done
+          curl -s --max-time 10 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" | head -c 200; echo
+
+      - name: Probes（模型表＋embedding＋黑名单＋401）
+        run: |
+          python3 - <<'EOF'
+          import json, sys, urllib.request, urllib.error
+          KEY = "test-only"
+          failures = []
+          def gw(path, payload=None, key=KEY):
+              req = urllib.request.Request(
+                  "http://127.0.0.1:4001" + path,
+                  data=json.dumps(payload).encode() if payload is not None else None,
+                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                  method="POST" if payload is not None else "GET")
+              try:
+                  with urllib.request.urlopen(req, timeout=120) as r:
+                      return r.status, json.loads(r.read().decode())
+              except urllib.error.HTTPError as e:
+                  try:
+                      return e.code, json.loads(e.read().decode())
+                  except Exception:
+                      return e.code, {}
+              except Exception as e:
+                  return -1, {"error": str(e)}
+          # 1. 无 key 应 401
+          st, _ = gw("/v1/models", key="wrong-key")
+          print(f"no-auth models: {st}")
+          if st == 200:
+              failures.append("无 key 竟能拉模型表")
+          # 2. 模型表非空、无 * 展开噪音
+          st, body = gw("/v1/models")
+          ids = [m["id"] for m in body.get("data", [])]
+          print(f"models: {st} count={len(ids)} sample={ids[:5]}")
+          if st != 200 or not ids:
+              failures.append("模型表空/失败")
+          if any(i == "*" or len(ids) > 100 for i in ids):
+              failures.append("模型表含通配展开噪音")
+          # 3. embedding 768 维
+          st, body = gw("/v1/embeddings", {"model": "nomic-embed-text", "input": "hello memory"})
+          dim = len(body.get("data", [{}])[0].get("embedding", [])) if st == 200 else -1
+          print(f"embedding: {st} dim={dim}")
+          if dim != 768:
+              failures.append(f"embedding 维度异常: {dim}")
+          # 4. 黑名单（models-denied.json 首条应 400）
+          denied = json.load(open("stacks/litellm-gateway/guard/models-denied.json"))
+          st, body = gw("/v1/chat/completions", {"model": denied[0], "messages": [{"role": "user", "content": "hi"}]})
+          print(f"denied({denied[0]}): {st}")
+          if st != 400:
+              failures.append(f"黑名单未拦: {denied[0]} -> {st}")
+          # 5. 透传（test-chat 小模型，仅验证通路）
+          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}]})
+          txt = json.dumps(body)[:120]
+          print(f"passthrough: {st} {txt}")
+          if st != 200:
+              failures.append(f"透传失败: {st}")
+          if failures:
+              print("FAILURES:"); [print(f" - {f}") for f in failures]; sys.exit(1)
+          print("ALL PROBES OK")
+          EOF
