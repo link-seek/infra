@@ -48,3 +48,7 @@ jobs:
           ZID="$(curl -s -H "Authorization: Bearer $CFTOK" 'https://api.cloudflare.com/client/v4/zones?name=xieyucheng.top' | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['result'][0]['id'] if d.get('result') else 'NONE')")"
           echo "zid=$ZID"
           curl -s -H "Authorization: Bearer $CFTOK" "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records?per_page=50" | python3 -c "import json,sys; d=json.load(sys.stdin); [print(r['type'], r['name'], 'proxied='+str(r['proxied']), r['content'][:55]) for r in d.get('result',[])]" || echo 'CF API FAIL'
+      - name: cloudflared 托管模式判定
+        run: |
+          echo '(本地诊断；systemd 单元是否远程托管看 ExecStart 是否带 --config)'
+          systemctl cat cloudflared 2>/dev/null | grep -E 'ExecStart|Environment' | head -5 || true
