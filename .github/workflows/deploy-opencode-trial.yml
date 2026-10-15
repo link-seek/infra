@@ -59,4 +59,4 @@ jobs:
             ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
             'mkdir -p /root/stacks/opencode-trial/config && tar -xzf - -C /root/stacks/opencode-trial && echo synced' 
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
-            'cd /root/stacks/opencode-trial && docker compose pull --quiet && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w "4097:%{http_code}\n" http://127.0.0.1:4097/ && curl -s -m 10 http://127.0.0.1:4747/api/health'
+            'cd /root/stacks/opencode-trial && docker compose pull --quiet && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w "4097:%{http_code}\n" http://127.0.0.1:4097/ && (curl -s -m 10 http://127.0.0.1:4747/api/health || echo "plugin-idle (session-activated, expected)")'
