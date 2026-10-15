@@ -1,6 +1,8 @@
 name: probe-tunnel-health
 on: [workflow_dispatch]
-concurrency: {group: probe-tunnel, cancel-in-progress: false}
+concurrency:
+  group: probe-tunnel
+  cancel-in-progress: false
 jobs:
   probe:
     runs-on: ubuntu-latest
