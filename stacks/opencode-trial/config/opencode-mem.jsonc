@@ -1,0 +1,27 @@
+{
+ "storagePath": "/root/.local/share/opencode/opencode-mem",
+ "embeddingModel": "nomic-embed-text",
+ "embeddingApiUrl": "http://100.91.222.51:4000/v1",
+ "embeddingApiKey": "env://LITELLM_API_KEY",
+ "embeddingDimensions": 768,
+ "webServerEnabled": true,
+ "webServerPort": 4747,
+ "webServerHost": "0.0.0.0",
+ "autoCaptureEnabled": true,
+ "opencodeProvider": "opencode-go",
+ "opencodeModel": "inherit",
+ "opencodeTimeoutMs": 180000,
+ "chatMessage": {
+  "enabled": true,
+  "maxMemories": 3,
+  "injectOn": "first"
+ },
+ "autoUpdate": false,
+ "userProfileStaleDays": 30,
+ "autoCleanupRetentionDays": 180,
+ "userProfileValidationEnabled": true,
+ "showAutoCaptureToasts": false,
+ "showUserProfileToasts": false,
+ "showErrorToasts": false,
+ "webServerApiToken": "env://OPENCODE_MEM_WEB_TOKEN"
+}

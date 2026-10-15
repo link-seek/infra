@@ -1,0 +1,27 @@
+name: opencode-trial
+# 试用栈（记忆系统验证）：glibc 镜像 digest pin，数据卷独立（trial-*），不碰任何生产。
+# 与生产差异（有意）：无 browser sidecar、无云凭证挂载、无邮件；网关走 tailscale 直连 HW21。
+# 配置说明：config/*.jsonc 为测试覆盖版（挂载盖住烘焙版；provider 指测试网关，选型见 PR）。
+# 密钥：试用期 .env 为手工放置（600，见 README）；转正时按 house flow 走 sops。
+services:
+  opencode-trial:
+    image: swr.cn-north-9.myhuaweicloud.com/xieyucheng123/opencode-tools@sha256:0961bee013b5443da271195ca0deba85a7adac19dc1eee65f9fbbcd4da62f7d5
+    pull_policy: always
+    container_name: opencode-trial
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4097:4097"
+      - "127.0.0.1:4747:4747"
+    env_file:
+      - .env
+    volumes:
+      - ./config/opencode.jsonc:/root/.config/opencode/opencode.jsonc:ro
+      - ./config/opencode-mem.jsonc:/root/.config/opencode/opencode-mem.jsonc:ro
+      - trial-work:/workspace
+      - trial-data:/root/.local/share/opencode
+    command: serve --port 4097 --hostname 0.0.0.0
+    restart: unless-stopped
+volumes:
+  trial-work:
+  trial-data:
