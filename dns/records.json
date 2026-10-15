@@ -35,6 +35,15 @@
       "proxied": true,
       "state": "present",
       "comment": "网关试用：经 hw21-opencode 隧道 → HW21:4000。UUID 取自线上 /etc/cloudflared 凭证文件名；deploy-cloudflared 上机前与 tunnel: 锚点比对，不一致 abort"
+    },
+    {
+      "name": "llm.xieyucheng.top",
+      "type": "CNAME",
+      "content": "b759dba6-b698-4a4f-a019-0d6b2d08cf99.cfargotunnel.com",
+      "ttl": 1,
+      "proxied": true,
+      "state": "present",
+      "comment": "网关正式域名：经 hw21-opencode 隧道 → HW21:4000。UUID 同 llm-trial，deploy-cloudflared 锚点校验"
     }
   ]
 }
