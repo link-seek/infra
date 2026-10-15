@@ -1,5 +1,8 @@
 name: probe-tunnel-health
-on: [workflow_dispatch]
+on:
+  push:
+    paths: ['.github/workflows/probe-tunnel-diagnose.yml']
+  workflow_dispatch:
 concurrency:
   group: probe-tunnel
   cancel-in-progress: false
