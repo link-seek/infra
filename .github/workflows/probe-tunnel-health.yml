@@ -1,0 +1,35 @@
+name: probe-tunnel-health
+on: [workflow_dispatch]
+concurrency: {group: probe-tunnel, cancel-in-progress: false}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 进 tailnet
+        timeout-minutes: 6
+        env: {TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-probe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+      - name: 诊断 HW21 tunnel（只读）
+        env: {SSH_KEY: ${{ secrets.PROD_SSH_KEY }}}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          echo "===== cloudflared.service 状态 ====="
+          systemctl is-active cloudflared; systemctl show cloudflared -p ActiveEnterTimestamp --value
+          echo "===== 当前 ingress 段 ====="
+          sed -n '/^ingress:/,$p' /etc/cloudflared/config.yml
+          echo "===== tunnel 连接（用系统内 cloudflared 诊断） ====="
+          timeout 20 /usr/bin/cloudflared tunnel info 2>/dev/null | head -20 || echo "tunnel info 不可用"
+          echo "===== 本机直连网关（排除应用层） ====="
+          curl -s -m 5 -o /dev/null -w "local-4000:%{http_code}\n" http://127.0.0.1:4000/v1/models || echo "local-4000:000"
+          echo "===== systemd 日志尾（最近 30 行，找 1033/重复 hostname 报错） ====="
+          journalctl -u cloudflared -n 30 --no-pager 2>/dev/null | tail -30 || echo "no journal"
+          EOF
