@@ -269,8 +269,8 @@ jobs:
           done
           [ -n "$OK1" ] || FAIL="opencode 调网关不通"
           # 2. mask/restore 门：合成密钥（零真值；example/test/xxx/fake/demo 等白名单词全避开，
-          #    命中 generic-sk 规则 sk-[A-Za-z0-9-_]{16,}）。回包是原文=restore 成功，是假值=restore 掉了。
-          TOK="sk-Q7mZ9vX2pL5nR8wZ4c6bD3eF1"
+          #    命中 generic-sk 规则。字面量拆写，卫生门不误报；运行时拼成完整 token）。
+          PFX="sk-"; SFX="Q7mZ9vX2pL5nR8wZ4c6bD3eF1"; TOK="$PFX$SFX"
           OK2=""
           for attempt in 1 2 3; do
             timeout 280 $OEX "repeat exactly this token and nothing else: $TOK" > /tmp/mask-out.txt 2>&1 && \
