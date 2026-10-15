@@ -6,6 +6,9 @@ services:
     image: swr.cn-north-9.myhuaweicloud.com/xieyucheng123/opencode-tools@sha256:0961bee013b5443da271195ca0deba85a7adac19dc1eee65f9fbbcd4da62f7d5
     pull_policy: always
     container_name: opencode-prod
+    # PID 1 僵尸回收：opencode serve 自身是 PID 1（entrypoint 末尾 exec），不收 git/gh/sleep 孤儿；
+    # 旧栈实测堆到 380+ 拖慢新会话。与 browser 服务同一解法。
+    init: true
     networks:
       - opencode-net
     # bridge 下容器 localhost 不再是宿主机：宿主机本地服务（如 LiteLLM 网关跑在宿主机上）
