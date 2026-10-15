@@ -129,10 +129,19 @@ jobs:
           cd /root/stacks/litellm-guard && docker compose stop litellm-guard || true
           docker rm -f litellm-guard || true
           cd /root/stacks/litellm-gateway && docker compose up -d --no-deps --force-recreate litellm-guard
-          sleep 20
+          # 4b. 等 ready（litellm 加载 45 模型＋guard 要时间；最多 3 分钟）
+          READY=""
+          for i in $(seq 1 18); do
+            sleep 10
+            C0="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
+            echo "ready-probe#$i -> $C0"
+            if [ "$C0" = "401" ] || [ "$C0" = "200" ]; then READY=1; break; fi
+          done
           echo "container: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
+          [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未起"; docker logs litellm-guard --tail 80 || true; }
           # 5. verify（无 key 401 + 有 key 模型数 + 黑名单 400 + opencode 可达）
           PASS=1
+          [ -n "$READY" ] || PASS=0
           C0="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
           echo "no-key: $C0"; [ "$C0" = "401" ] || PASS=0
           MC="$(curl -s -m 10 -H "Authorization: Bearer $MK" http://127.0.0.1:4000/v1/models | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]))' 2>/dev/null || echo -1)"
@@ -147,6 +156,8 @@ jobs:
             echo "===== sync-back 用（模型名，不含 key；回仓对账用） ====="
             grep -E '^ *- model_name:' /root/stacks/litellm-gateway/config/litellm_config.yaml | head -50
           else
+            echo "VERIFY FAIL: 容器日志（定位用）"
+            docker logs litellm-guard --tail 80 || true
             echo "VERIFY FAIL: 回滚旧栈"
             cd /root/stacks/litellm-gateway && docker compose stop litellm-guard || true
             docker rm -f litellm-guard || true
