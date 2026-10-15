@@ -1,0 +1,48 @@
+name: litellm-gateway
+# litellm 网关收编栈（PR1：纯文件收编＋校验，不 up）。
+# 现网运行体是 HW21 本机 /root/litellm-guard（黑户启动），本栈是它的 git 版。
+# 切流（停旧起新）在后续 PR，另配窗口；本栈合后只同步文件到 /root/stacks/litellm-gateway，不碰现网容器。
+services:
+  litellm-guard:
+    # 版本 pin（digest）：升级 = 改这行发 PR，合后按 README 切流步骤执行。禁止改回 :latest。
+    # 2026-10-15：沿用 guard-rules e2e 已验证的上游 digest；切流 PR 用线上 docker inspect 对账。
+    image: ghcr.io/berriai/litellm@sha256:3def0387871a732a6d18b009576c4bf4313c54d448fa938a58f51cf189d1fa33
+    pull_policy: always
+    container_name: litellm-guard
+    # PID 1 僵尸回收：与 opencode-prod 同一解法（旧栈 380+ 僵尸教训）。
+    init: true
+    # 4000 只绑宿主机回环：LAN 经 tailscale serve，公网经隧道（见 README）。不直接暴露。
+    ports:
+      - "127.0.0.1:4000:4000"
+    # embedding 走宿主机 ollama：容器内 host.docker.internal 必须可达（网关 500 教训）。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      DISABLE_ADMIN_UI: "True"
+      RULES_FILE: /app/guard-rules.json
+    volumes:
+      - ./config/litellm_config.yaml:/app/config.yaml:ro
+      - ./guard/vault_guard.py:/app/vault_guard.py:ro
+      - ./guard/guard-rules.json:/app/guard-rules.json:ro
+      - ./guard/models-denied.json:/app/models-denied.json:ro
+    command: --config /app/config.yaml --port 4000 --host 0.0.0.0
+    restart: unless-stopped
+  ollama:
+    # 本地 embedding（nomic-embed-text，768 维，供记忆/RAG 共用）。
+    # 2026-10-15：ollama/ollama 0.40.3 manifest digest；模型第一次 up 后另行 pull（见 README）。
+    image: ollama/ollama@sha256:adca95a12c2b386a8f9a995e7fa0600e187e3323b5e5522f5a6c3b1ec73eff99
+    pull_policy: always
+    container_name: ollama
+    # 只绑回环：宿主机用，容器网段经网桥网关 IP（见 docs 说明），不暴露 LAN。
+    ports:
+      - "127.0.0.1:11434:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+volumes:
+  ollama-data:
+  # 注意：模型可重拉，本卷不进备份（与 trial-* 数据卷不同，见 README）。

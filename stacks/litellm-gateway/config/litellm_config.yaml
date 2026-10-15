@@ -1,0 +1,40 @@
+# litellm_config.yaml（infra 版，无真值）
+#
+# 与 guard-rules 模板的差异：api_key 改 os.environ 引用，密钥只活在目标机 .env（600，sops 下发），
+# 本文件同步到线上即最终形态，无需 sed 渲染（渲染步骤是漂移源头之一）。
+# 真值永不进代码仓。master key 只以 env 注入容器，不写文件。
+general_settings:
+  drop_params: true
+  forward_client_headers_to_llm_api: true  # 必开：透传 x-opencode-session 给 go 后端路由
+litellm_settings:
+  request_timeout: 120
+  num_retries: 2
+  drop_params: true  # 必开且必须放这里：general_settings 下的那份 responses 路径不认
+model_list:
+- model_name: go-spark
+  litellm_params:
+    model: openai/glm-5.1
+    api_base: https://opencode.ai/zen/go/v1
+    api_key: os.environ/GO_BACKEND_KEY
+    timeout: 120
+# ... 上游每个模型一条（43 条全量在切流 PR 从线上对账补齐，见 README；格式与此条一致）：
+- model_name: "<MODEL_ID>"
+  litellm_params:
+    model: openai/<MODEL_ID>
+    api_base: https://opencode.ai/zen/go/v1
+    api_key: os.environ/GO_BACKEND_KEY
+    timeout: 120
+# 注意：不要加 model_name: "*" 通配——它会把 OpenAI 官方 200+ 模型展开进
+# /v1/models 列表造成噪音（CI schema 门会拦）。
+# 本地 embedding（本机 ollama 服务，无 key）：
+- model_name: nomic-embed-text
+  litellm_params:
+    model: ollama/nomic-embed-text
+    api_base: http://host.docker.internal:11434
+    timeout: 120
+guardrails:
+- guardrail_name: vault
+  litellm_params:
+    guardrail: vault_guard.SecretVaultGuardrail
+    mode: [pre_call, post_call]
+    default_on: true
