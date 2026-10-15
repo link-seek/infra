@@ -84,6 +84,9 @@ jobs:
           NODE="${{ inputs.target }}"
           PORT="${{ inputs.ssh_port }}"
           ssh-keyscan -p "$PORT" -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
+          # 先备份线上 compose（必须在同步之前，否则备的是新文件——生产灰度教训）
+          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
+            "test -f ${{ inputs.remote_dir }}/compose.yml && cp ${{ inputs.remote_dir }}/compose.yml ${{ inputs.remote_dir }}/compose.yml.prev-$(date -u +%Y%m%dT%H%M%SZ) && echo backup-ok || { echo 'ABORT: 线上无 compose.yml'; exit 1; }"
           # tar+ssh 管道（目标机 .bashrc 回显杀死 scp，见试用演练）
           tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
