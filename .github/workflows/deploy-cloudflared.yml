@@ -53,22 +53,21 @@ jobs:
           cat /tmp/expect_cname.txt
           scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key \
             edge/cloudflared/hw21-opencode/ingress.yaml \
-            "root@$NODE:/tmp/ci-tunnel-$GITHUB_RUN_ID-ingress.yaml"
+            "root@$NODE:/tmp/ci-tunnel-ingress.yaml"
           scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key \
             /tmp/expect_cname.txt \
-            "root@$NODE:/tmp/ci-tunnel-$GITHUB_RUN_ID-expect_cname.txt"
+            "root@$NODE:/tmp/ci-tunnel-expect.txt"
           ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s <<'APPLY_EOF'
           set -euo pipefail
-          TAG="ci-tunnel-$GITHUB_RUN_ID"
           CFG=/etc/cloudflared/config.yml
           cp "$CFG" "$CFG.prev-$(date -u +%Y%m%dT%H%M%SZ)" && echo "backup-ok"
           # 锚点校验：records.json 的 CNAME 目标必须就是线上 tunnel UUID（错隧道即 abort，不动线上）
           LIVE_UUID="$(grep -oP '^tunnel:\s*\K\S+' "$CFG" | head -n1)"
-          EXPECT_HOST="$(cat /tmp/$TAG-expect_cname.txt | tr -d '\r\n ')"
+          EXPECT_HOST="$(cat /tmp/ci-tunnel-expect.txt | tr -d '\r\n ')"
           [ "$EXPECT_HOST" = "$LIVE_UUID.cfargotunnel.com" ] || { echo "ABORT: CNAME 目标 $EXPECT_HOST 与线上隧道 $LIVE_UUID 不一致"; exit 1; }
           echo "anchor-ok: tunnel $LIVE_UUID"
           # 只换 ingress 段（UUID/credentials 行原样保留），结构校验
-          python3 - "$CFG" "/tmp/$TAG-ingress.yaml" <<'PYEOF'
+          python3 - "$CFG" "/tmp/ci-tunnel-ingress.yaml" <<'PYEOF'
           import sys, yaml
           cfg_path, ingress_path = sys.argv[1], sys.argv[2]
           cfg = yaml.safe_load(open(cfg_path))
@@ -106,5 +105,5 @@ jobs:
             cp "$LATEST" "$CFG" && systemctl restart cloudflared && echo "rolled-back"
             exit 1
           fi
-          rm -f /tmp/$TAG-ingress.yaml /tmp/$TAG-expect_cname.txt
+          rm -f /tmp/ci-tunnel-ingress.yaml /tmp/ci-tunnel-expect.txt
           APPLY_EOF
