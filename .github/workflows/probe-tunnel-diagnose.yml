@@ -13,14 +13,16 @@ jobs:
     steps:
       - name: 进 tailnet
         timeout-minutes: 6
-        env: {TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}}
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-probe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
       - name: 诊断 HW21 tunnel（只读）
-        env: {SSH_KEY: ${{ secrets.PROD_SSH_KEY }}}
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
