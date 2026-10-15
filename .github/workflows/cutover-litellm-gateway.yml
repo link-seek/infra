@@ -156,7 +156,7 @@ jobs:
           if [ "$PASS" = "1" ]; then
             echo "CUTOVER OK"
             echo "===== sync-back 用（模型名，不含 key；回仓对账用） ====="
-            grep -E '^ *- model_name:' /root/stacks/litellm-gateway/config/litellm_config.yaml | head -50
+            grep -E '^ *- model_name:' /root/stacks/litellm-gateway/config/litellm_config.yaml | head -50 || true
           else
             echo "VERIFY FAIL: 容器日志（定位用）"
             docker logs litellm-guard --tail 80 || true
