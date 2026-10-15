@@ -22,7 +22,7 @@ jobs:
 
       - name: secret 预检（只验存在，不打值）
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_TRIAL }}
           SSHKEY: ${{ secrets.TRIAL_SSH_KEY }}
         run: |
           [ -n "$TS_AUTHKEY" ] || { echo "TRIAL_SSH_KEY missing: 请在 repo secrets 加 1.41 root 部署 key"; exit 1; }
@@ -32,13 +32,17 @@ jobs:
       - name: 加入 tailnet（一次性节点，用完即焚）
         timeout-minutes: 6
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_TRIAL }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-infra-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          timeout 90 tailscale ping --timeout=30s --c=2 100.111.231.85
+          # 笼子自证：目标 :22 必须通，非目标必须不通（否则 abort）
+          timeout 15 bash -c "</dev/tcp/100.111.231.85/22" || { echo "target unreachable"; exit 1; }
+          echo "target reachable"
+          timeout 12 bash -c "</dev/tcp/100.91.222.51/22" && { echo "CONTAINMENT FAIL: 摸到了生产"; exit 1; } || echo "containment ok (prod unreachable)"
+          timeout 12 bash -c "</dev/tcp/100.85.128.116/22" && { echo "CONTAINMENT FAIL: 摸到了入口机"; exit 1; } || echo "containment ok (entry unreachable)"
 
       - name: 下发 + up + 验证（经 tailnet，不走公网）
         timeout-minutes: 8
