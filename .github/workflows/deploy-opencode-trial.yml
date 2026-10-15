@@ -54,12 +54,9 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           NODE=100.111.231.85
           ssh-keyscan -p 2244 -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE 'mkdir -p /root/stacks/opencode-trial/config'
-          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key \
-            stacks/opencode-trial/compose.yml stacks/opencode-trial/README.md \
-            root@$NODE:/root/stacks/opencode-trial/
-          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key \
-            stacks/opencode-trial/config/opencode.jsonc stacks/opencode-trial/config/opencode-mem.jsonc \
-            root@$NODE:/root/stacks/opencode-trial/config/
+          # 传文件走 tar+ssh 管道：目标机 .bashrc 对非交互 shell 也有回显，scp 协议必死
+          tar -czf - -C stacks/opencode-trial compose.yml README.md config/opencode.jsonc config/opencode-mem.jsonc | \
+            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
+            'mkdir -p /root/stacks/opencode-trial/config && tar -xzf - -C /root/stacks/opencode-trial && echo synced' 
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
             'cd /root/stacks/opencode-trial && docker compose pull --quiet && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w "4097:%{http_code}\n" http://127.0.0.1:4097/ && curl -s -m 10 http://127.0.0.1:4747/api/health'
