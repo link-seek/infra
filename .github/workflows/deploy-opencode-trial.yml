@@ -39,10 +39,10 @@ jobs:
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-infra-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           # 笼子自证：目标 :22 必须通，非目标必须不通（否则 abort）
-          timeout 15 bash -c "</dev/tcp/100.111.231.85/22" || { echo "target unreachable"; exit 1; }
+          timeout 15 bash -c "</dev/tcp/100.111.231.85/2244" || { echo "target unreachable"; exit 1; }
           echo "target reachable"
-          timeout 12 bash -c "</dev/tcp/100.91.222.51/22" && { echo "CONTAINMENT FAIL: 摸到了生产"; exit 1; } || echo "containment ok (prod unreachable)"
-          timeout 12 bash -c "</dev/tcp/100.85.128.116/22" && { echo "CONTAINMENT FAIL: 摸到了入口机"; exit 1; } || echo "containment ok (entry unreachable)"
+          timeout 12 bash -c "</dev/tcp/100.91.222.51/2244" && { echo "CONTAINMENT FAIL: 摸到了生产"; exit 1; } || echo "containment ok (prod unreachable)"
+          timeout 12 bash -c "</dev/tcp/100.85.128.116/2244" && { echo "CONTAINMENT FAIL: 摸到了入口机"; exit 1; } || echo "containment ok (entry unreachable)"
 
       - name: 下发 + up + 验证（经 tailnet，不走公网）
         timeout-minutes: 8
@@ -53,13 +53,13 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           NODE=100.111.231.85
-          ssh-keyscan -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE 'mkdir -p /root/stacks/opencode-trial/config'
-          scp -o BatchMode=yes -i ~/.ssh/ci_key \
+          ssh-keyscan -p 2244 -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE 'mkdir -p /root/stacks/opencode-trial/config'
+          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key \
             stacks/opencode-trial/compose.yml stacks/opencode-trial/README.md \
             root@$NODE:/root/stacks/opencode-trial/
-          scp -o BatchMode=yes -i ~/.ssh/ci_key \
+          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key \
             stacks/opencode-trial/config/opencode.jsonc stacks/opencode-trial/config/opencode-mem.jsonc \
             root@$NODE:/root/stacks/opencode-trial/config/
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
             'cd /root/stacks/opencode-trial && docker compose pull --quiet && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w "4097:%{http_code}\n" http://127.0.0.1:4097/ && curl -s -m 10 http://127.0.0.1:4747/api/health'
