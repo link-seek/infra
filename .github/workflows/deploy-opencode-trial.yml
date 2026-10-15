@@ -1,0 +1,62 @@
+name: deploy-opencode-trial
+
+# 试用栈下发：stacks/opencode-trial/** 变化 → ephemeral runner 经 tailnet 同步到 1.41 并 up。
+# 密钥（.env）永不经本 workflow：试用期手工放置，转正走 sops（见 stacks/opencode-trial/README.md）。
+
+on:
+  push:
+    branches: [main]
+    paths: ['stacks/opencode-trial/**']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-opencode-trial
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: secret 预检（只验存在，不打值）
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_TRIAL }}
+          SSHKEY: ${{ secrets.TRIAL_SSH_KEY }}
+        run: |
+          [ -n "$TS_AUTHKEY" ] || { echo "TRIAL_SSH_KEY missing: 请在 repo secrets 加 1.41 root 部署 key"; exit 1; }
+          [ -n "$SSHKEY" ] || { echo "TRIAL_SSH_KEY missing: 请在 repo secrets 加 1.41 root 部署 key"; exit 1; }
+          echo "secrets present"
+
+      - name: 加入 tailnet（一次性节点，用完即焚）
+        timeout-minutes: 6
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_TRIAL }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-infra-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          # 笼子自证：目标 :22 必须通，非目标必须不通（否则 abort）
+          timeout 15 bash -c "</dev/tcp/100.111.231.85/2244" || { echo "target unreachable"; exit 1; }
+          echo "target reachable"
+          timeout 12 bash -c "</dev/tcp/100.91.222.51/2244" && { echo "CONTAINMENT FAIL: 摸到了生产"; exit 1; } || echo "containment ok (prod unreachable)"
+          timeout 12 bash -c "</dev/tcp/100.85.128.116/2244" && { echo "CONTAINMENT FAIL: 摸到了入口机"; exit 1; } || echo "containment ok (entry unreachable)"
+
+      - name: 下发 + up + 验证（经 tailnet，不走公网）
+        timeout-minutes: 8
+        env:
+          SSH_KEY: ${{ secrets.TRIAL_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          NODE=100.111.231.85
+          ssh-keyscan -p 2244 -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
+          # 传文件走 tar+ssh 管道：目标机 .bashrc 对非交互 shell 也有回显，scp 协议必死
+          tar -czf - -C stacks/opencode-trial compose.yml README.md config/opencode.jsonc config/opencode-mem.jsonc | \
+            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
+            'mkdir -p /root/stacks/opencode-trial/config && tar -xzf - -C /root/stacks/opencode-trial && echo synced' 
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
+            'cd /root/stacks/opencode-trial && docker compose pull --quiet && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w "4097:%{http_code}\n" http://127.0.0.1:4097/ && (curl -s -m 10 http://127.0.0.1:4747/api/health || echo "plugin-idle (session-activated, expected)")'
