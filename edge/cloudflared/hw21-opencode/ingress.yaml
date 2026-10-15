@@ -1,0 +1,11 @@
+# hw21-opencode 隧道 ingress 声明（唯一源）
+# UUID/credentials-file 留宿主机（/etc/cloudflared/），不进仓。
+# deploy-cloudflared.yml：备份线上 config → 只替换 ingress 段 → restart →
+# 验旧域名＋新域名 → 失败则恢复备份再 restart。合 PR 即执行，执行即闪断窗口。
+ingress:
+  - hostname: hw21-opencode.xieyucheng.top
+    service: http://127.0.0.1:4097
+  - hostname: opendesign.xieyucheng.top
+    service: http://127.0.0.1:7456
+  - hostname: llm-trial.xieyucheng.top
+    service: http://127.0.0.1:4000
