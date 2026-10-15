@@ -125,8 +125,10 @@ jobs:
           echo "env-ok: keys=$(grep -c '=' /root/stacks/litellm-gateway/.env) (值不打印)"
           # 3. 拉镜像（pin 已在仓里）
           cd /root/stacks/litellm-gateway && docker compose pull --quiet litellm-guard
-          # 4. 切流：只重建 litellm-guard（--no-deps 不动 ollama）
-          docker compose up -d --no-deps --force-recreate litellm-guard
+          # 4. 切流：先停旧栈容器（释出 litellm-guard 容器名＋4000 端口，保留网络），再起新栈
+          cd /root/stacks/litellm-guard && docker compose stop litellm-guard || true
+          docker rm -f litellm-guard || true
+          cd /root/stacks/litellm-gateway && docker compose up -d --no-deps --force-recreate litellm-guard
           sleep 20
           echo "container: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
           # 5. verify（无 key 401 + 有 key 模型数 + 黑名单 400 + opencode 可达）
@@ -134,7 +136,7 @@ jobs:
           C0="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
           echo "no-key: $C0"; [ "$C0" = "401" ] || PASS=0
           MC="$(curl -s -m 10 -H "Authorization: Bearer $MK" http://127.0.0.1:4000/v1/models | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]))' 2>/dev/null || echo -1)"
-          echo "models: $MC"; [ "$MC" = "46" ] || PASS=0
+          echo "models: $MC (live=45)"; [ "$MC" = "45" ] || PASS=0
           BC="$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MK" -H 'Content-Type: application/json' \
             -d '{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}]}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
           echo "denied(kimi-k3): $BC"; [ "$BC" = "400" ] || PASS=0
@@ -142,8 +144,12 @@ jobs:
           echo "opencode-reach: $OC"; [ "$OC" = "401" ] || PASS=0
           if [ "$PASS" = "1" ]; then
             echo "CUTOVER OK"
+            echo "===== sync-back 用（模型名，不含 key；回仓对账用） ====="
+            grep -E '^ *- model_name:' /root/stacks/litellm-gateway/config/litellm_config.yaml | head -50
           else
             echo "VERIFY FAIL: 回滚旧栈"
+            cd /root/stacks/litellm-gateway && docker compose stop litellm-guard || true
+            docker rm -f litellm-guard || true
             cd /root/stacks/litellm-guard && docker compose up -d --force-recreate
             sleep 15
             echo "rolled-back: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"

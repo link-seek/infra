@@ -29,6 +29,9 @@ services:
       - ./guard/models-denied.json:/app/models-denied.json:ro
     command: --config /app/config.yaml --port 4000 --host 0.0.0.0
     restart: unless-stopped
+    networks:
+      # 沿用现网网络名：live 容器在 litellm-guard_default 上，换网会让按容器名连它的服务断
+      - gw-net
   ollama:
     # 本地 embedding（nomic-embed-text，768 维，供记忆/RAG 共用）。
     # 2026-10-15：ollama/ollama 0.40.3 manifest digest；模型第一次 up 后另行 pull（见 README）。
@@ -46,3 +49,6 @@ services:
 volumes:
   ollama-data:
   # 注意：模型可重拉，本卷不进备份（与 trial-* 数据卷不同，见 README）。
+networks:
+  gw-net:
+    name: litellm-guard_default   # 与现网同网：容器名解析不变（按 litellm-guard 名可达）
