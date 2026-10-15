@@ -53,6 +53,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           NODE=100.111.231.85
+          ssh-keyscan -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
           ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE 'mkdir -p /root/stacks/opencode-trial/config'
           scp -o BatchMode=yes -i ~/.ssh/ci_key \
             stacks/opencode-trial/compose.yml stacks/opencode-trial/README.md \
