@@ -11,18 +11,23 @@
 | 网关 | 宿主机 4000（host 内部） | tailscale 直连 HW21 `100.91.222.51:4000` |
 | browser sidecar | 有 | 无（记忆试用不需要） |
 | 云凭证/邮件/SSH | 全 | 无（工具在，认证不在——试用不测云） |
-| 密钥 | sops（opencode-secrets） | **例外：手工 .env（600），试用结束 shred** |
+| 密钥 | sops（opencode-secrets） | sops（同体系，`envs/opencode-trial.sops.env`，1.41 为收件人） |
 
 ## 日常
 
-* 启动/更新：`cd /root/stacks/opencode-trial && docker compose up -d`（镜像 digest pin，只会拉到验证过的版本）
-* 验证：`curl 127.0.0.1:4097/` → 200；`:4747/api/health` → ok（插件）；Web 登录密码见 `.env`
-* 记忆验证（跑过，2026-10-14）：`memory add` → `api/search` 命中（similarity 0.45），跨会话以 agent 为准
+* 发版：改本目录文件发 PR → `deploy-opencode-trial` 自动上机（与生产共用
+  `deploy-opencode-stack`，同机制不同参数）。手动：Actions 里 dispatch。
+* `.env` 更新（sops，转正后流程）：持钥机改明文 → `sops -e` 重加密 →
+  secrets 仓 PR → 1.41 上 `sops -d` 落盘 600 → `compose up -d`。
+  workflow 永不碰 `.env`（缺失则 verify abort）。
+* 验证：`curl 127.0.0.1:4097/` → 200；`:4747` 会话激活式，无会话即掉属预期；
+  Web 登录密码见 `.env`（`OPENCODE_SERVER_PASSWORD`，与生产同值，人用，另议轮换）
+* 记忆验证（跑过，2026-10-14/15）：`memory add` → `api/search` 命中（similarity 0.45），跨会话以 agent 为准
 * auto-capture：开（inherit 会话模型），画像 10 prompt 学一次
-* 试用结束清理：`docker compose down -v` ＋ `shred -u .env`（密钥随试用终结）
+* 试用结束清理：`docker compose down -v` ＋ shred `.env`（sops 密文留仓，收件人可删）
 
 ## 转正清单（进生产前）
 
-1. 1.41 入 sops 收件人＋全量重加密＋值轮换（持钥人操作）；
-2. 本目录 compose/config 原样搬 infra 正式栈（或就地转正改名）；
-3. infra 灰度流程（影子→切流，老容器保留回滚）。
+1. ~~1.41 入 sops~~ ✅ 已转正（2026-10-15：收件人＋重加密＋mem token 轮换）；
+2. 机制 parity ✅（本栈与生产共用 reusable workflow，试用演练即生产演练）；
+3. 待：CI 转绿 → 合 infra#12 → 灰度（老容器保留回滚）。

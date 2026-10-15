@@ -1,0 +1,92 @@
+name: deploy-opencode-stack
+
+# 通用部署（试用/生产同一套机制，只换参数）：
+# tailnet 进网 → 笼子自证 → keyscan → tar+ssh 同步 → 远端 verify_cmd。
+# .env 永不经手；调用方只传参，不写步骤。
+
+on:
+  workflow_call:
+    inputs:
+      role:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      ssh_port:
+        required: true
+        type: string
+      stack_dir:
+        required: true
+        type: string
+      remote_dir:
+        required: true
+        type: string
+      tar_files:
+        required: true
+        type: string
+      verify_cmd:
+        required: true
+        type: string
+      forbid:
+        required: true
+        type: string
+      hostname_prefix:
+        required: true
+        type: string
+    secrets:
+      TS_AUTHKEY:
+        required: true
+      SSH_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: secret 预检（只验存在，不打值）
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          SSHKEY: ${{ secrets.SSH_KEY }}
+        run: |
+          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
+          [ -n "$SSHKEY" ] || { echo "SSH key missing"; exit 1; }
+          echo "secrets present"
+
+      - name: 加入 tailnet（一次性节点，用完即焚）
+        timeout-minutes: 6
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.hostname_prefix }}-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          # 笼子自证：目标必须通，forbid 列表必须不通
+          timeout 15 bash -c "</dev/tcp/${{ inputs.target }}/${{ inputs.ssh_port }}" || { echo "target unreachable"; exit 1; }
+          echo "target reachable"
+          for f in ${{ inputs.forbid }}; do
+            ip="${f%%:*}"; label="${f#*:}"
+            timeout 12 bash -c "</dev/tcp/$ip/${{ inputs.ssh_port }}" && { echo "CONTAINMENT FAIL: 摸到了 $label"; exit 1; } || echo "containment ok ($label unreachable)"
+          done
+
+      - name: 下发 + verify（经 tailnet，不走公网）
+        timeout-minutes: 12
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          NODE="${{ inputs.target }}"
+          PORT="${{ inputs.ssh_port }}"
+          ssh-keyscan -p "$PORT" -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
+          # tar+ssh 管道（目标机 .bashrc 回显杀死 scp，见试用演练）
+          tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
+            ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
+            "mkdir -p ${{ inputs.remote_dir }} && tar -xzf - -C ${{ inputs.remote_dir }} && echo synced"
+          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
+            "${{ inputs.verify_cmd }}"
