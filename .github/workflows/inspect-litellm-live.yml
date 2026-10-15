@@ -1,0 +1,51 @@
+name: inspect-litellm-live
+
+# 常驻只读取证（dispatch 手动跑）：HW21 现网网关/隧道形态，密钥一律打码。
+# 用途：栈文件与生产对账。禁 cat 密钥原文；长随机串一律折叠。
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: inspect-litellm-live
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 加入 tailnet
+        timeout-minutes: 6
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-inspect-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          timeout 15 bash -c "</dev/tcp/100.91.222.51/2244"
+
+      - name: 只读取证
+        timeout-minutes: 5
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          mask() { sed -E -e 's/(api_key:|KEY|TOKEN|key|token)(=|:| +).*/\1\2 <redacted>/i' -e 's/(sk-[A-Za-z0-9\-_]{8})[A-Za-z0-9\-_]+/\1<redacted>/g' -e 's/(ghp_)[A-Za-z0-9]+/\1<redacted>/g' -e 's/[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}/<uuid>/g'; }
+          echo "===== 模型名全量（名＋api_base，无 key） ====="
+          grep -E "model_name:|api_base:" /root/litellm-guard/litellm_config.yaml 2>/dev/null | mask || echo "无此文件"
+          echo "===== restart-guard.sh（打码） ====="
+          mask < /root/litellm-guard/restart-guard.sh 2>/dev/null || echo "无此文件"
+          echo "===== ollama 真 digest ====="
+          docker inspect ollama --format '{{.Config.Image}} | {{.Image}}' 2>/dev/null || echo "无 ollama 容器"
+          echo "===== 隧道 ingress（hostname＋service，长串折叠） ====="
+          mask < /etc/cloudflared/config.yml 2>/dev/null || echo "无 /etc/cloudflared/config.yml"
+          mask < /root/.cloudflared/config.yml 2>/dev/null || echo "无 /root/.cloudflared/config.yml"
+          echo "===== guard diff（仓新 vs 线旧，只报行数，不贴内容） ====="
+          echo "(vault_guard diff 在切流 PR 前由持钥人本地做，不进 CI 日志)"
+          wc -l /root/litellm-guard/vault_guard.py /root/litellm-guard/guard-rules.json /root/litellm-guard/models-denied.json 2>/dev/null || true
+          EOF
