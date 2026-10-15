@@ -1,0 +1,63 @@
+name: deploy-opencode-prod
+
+# 生产栈：stacks/opencode-prod/** 进 main 即发 HW21。机制与试用共用 deploy-opencode-stack。
+# 铁律代码化：CI 绿门 fail-closed（手动 bypass 仅救火）。
+
+on:
+  push:
+    branches: [main]
+    paths: ['stacks/opencode-prod/**']
+  workflow_dispatch:
+    inputs:
+      bypass_ci_gate:
+        description: "跳过 CI 绿门（仅救火，run 记录留痕）"
+        required: false
+        default: "false"
+
+concurrency:
+  group: deploy-opencode-prod
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: CI 绿门（fail-closed）
+        if: inputs.bypass_ci_gate != 'true'
+        run: |
+          set -euo pipefail
+          GATE="$(curl -s --max-time 30 "https://api.github.com/repos/link-seek/docker-images/actions/workflows/test-memory.yml/runs?branch=main&status=completed&per_page=1" | python3 -c "import json,sys; r=json.load(sys.stdin)['workflow_runs'][0]; print(r['conclusion'])"))"
+          echo "memory-e2e on main: $GATE"
+          [ "$GATE" = "success" ] || { echo "BLOCKED: CI 未绿，拒绝发生产"; exit 1; }
+
+  deploy:
+    needs: gate
+    uses: ./.github/workflows/deploy-opencode-stack.yml
+    with:
+      role: prod
+      target: 100.91.222.51
+      ssh_port: "2244"
+      stack_dir: stacks/opencode-prod
+      remote_dir: /root/stacks/opencode-prod
+      tar_files: compose.yml README.md .env.example
+      forbid: "100.111.231.85:trial 100.85.128.116:entry"
+      hostname_prefix: ci-prod
+      verify_cmd: |
+        test -f /root/stacks/opencode-prod/.env || { echo "ABORT: 目标机缺 .env"; exit 1; }
+        TS="$(date -u +%Y%m%dT%H%M%SZ)"
+        cp /root/stacks/opencode-prod/compose.yml /root/stacks/opencode-prod/compose.yml.prev-$TS && echo backup=compose.yml.prev-$TS
+        cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d
+        sleep 20
+        PIN_TOOLS="$(grep -oP '^    image: \S+opencode-tools@\K\S+' compose.yml | head -n1)"
+        PIN_BR="$(grep -oP '^    image: \S+chrome-cjk@\K\S+' compose.yml | head -n1)"
+        if curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/ | grep -q 200 && docker inspect opencode-prod --format '{{.Image}}' | grep -q "${PIN_TOOLS#sha256:}" && docker inspect opencode-browser --format '{{.Image}}' | grep -q "${PIN_BR#sha256:}"; then
+          echo "VERIFY OK: 4097 通 + 双 digest 相符"
+        else
+          echo "VERIFY FAIL: 回滚到备份"
+          cp compose.yml.prev-$TS compose.yml && docker compose up -d && sleep 15 && curl -s -m 10 -o /dev/null -w 'rollback:%{http_code}\n' http://127.0.0.1:4097/
+          exit 1
+        fi
+    secrets:
+      TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
