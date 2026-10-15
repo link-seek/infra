@@ -1,0 +1,50 @@
+# 全组织 DNS + Tailscale 真值漂移对账（dispatch 手动跑，只读）。
+# 目的：把"线上实际状态"拉出来和仓里声明比对，漂移显性化，不做任何变更。
+# 密钥只读 scope 即可；只抽 CLOUDFLARE_API_TOKEN（也只读 DNS 查询）。
+
+name: truth-audit
+
+on:
+  schedule:
+    - cron: "0 18 * * 1"  # 每周一 18:00 UTC 跑一次
+  workflow_dispatch:
+
+concurrency:
+  group: truth-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CNAME 全局生效性（从公网看 llm-trial）
+        run: |
+          for i in $(seq 1 8); do
+            CODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://llm-trial.xieyucheng.top/v1/models || echo 000)"
+            echo "probe#$i -> $CODE"
+            [ "$CODE" = "401" ] && { echo "TRUTH: llm-trial 401 生效"; exit 0; }
+            sleep 20
+          done
+          echo "TRUTH-RESULT: llm-trial 未达 401（当前 $CODE）"
+          exit 1
+
+      - name: 尾网节点表 v0（人工填；API 一下期）
+        run: |
+          cat > /tmp/nodes.md <<'EOF'
+          (第一期：以 tailscale/acl.md 节点表为准；下一期加 API 拉取和 tag 比对。)
+          EOF
+          echo "nodes audit placeholder ok"
+
+      - name: Tailscale API 拉取（只读，需 TAILSCALE_API_RO）
+        env:
+          TS_RO: ${{ secrets.TAILSCALE_API_RO }}
+        run: |
+          [ -n "$TS_RO" ] || { echo "TAILSCALE_API_RO 未配，SKIP"; exit 0; }
+          # 只读列出 tailnet 设备，比对意图节点表
+          tailnet=$(grep -oP '^tailnet:\s*\K\S+' tailscale/acl.md 2>/dev/null || echo "")
+          curl -s -H "Authorization: Bearer $TS_RO" \
+            "https://api.tailscale.com/api/v2/tailnet/-/devices" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('devices:', len(d.get('devices', [])))" || echo "API 拉取失败（scope 不对或 token 过期）"

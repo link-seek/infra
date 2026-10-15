@@ -40,3 +40,11 @@ jobs:
           echo "===== systemd 日志尾（最近 30 行，找 1033/重复 hostname 报错） ====="
           journalctl -u cloudflared -n 30 --no-pager 2>/dev/null | tail -30 || echo "no journal"
           EOF
+      - name: CF API 拉 zone DNS 记录
+        if: always()
+        env:
+          CFTOK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          ZID="$(curl -s -H "Authorization: Bearer $CFTOK" 'https://api.cloudflare.com/client/v4/zones?name=xieyucheng.top' | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['result'][0]['id'] if d.get('result') else 'NONE')")"
+          echo "zid=$ZID"
+          curl -s -H "Authorization: Bearer $CFTOK" "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records?per_page=50" | python3 -c "import json,sys; d=json.load(sys.stdin); [print(r['type'], r['name'], 'proxied='+str(r['proxied']), r['content'][:55]) for r in d.get('result',[])]" || echo 'CF API FAIL'
