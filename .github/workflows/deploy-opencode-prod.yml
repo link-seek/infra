@@ -73,9 +73,10 @@ jobs:
           $SSH 'test -f /root/stacks/opencode-prod/.env' || { echo "ABORT: 目标机缺 .env"; exit 1; }
           TS="$(date -u +%Y%m%dT%H%M%SZ)"
           $SSH "cp /root/stacks/opencode-prod/compose.yml /root/stacks/opencode-prod/compose.yml.prev-$TS && echo backup=compose.yml.prev-$TS"
-          scp -o BatchMode=yes -i ~/.ssh/ci_key \
-            stacks/opencode-prod/compose.yml stacks/opencode-prod/README.md stacks/opencode-prod/.env.example \
-            root@$NODE:/root/stacks/opencode-prod/
+          # 传文件走 tar+ssh 管道：目标机 .bashrc 对非交互 shell 也有回显，scp 协议必死
+          tar -czf - -C stacks/opencode-prod compose.yml README.md .env.example | \
+            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
+            'tar -xzf - -C /root/stacks/opencode-prod && echo synced' 
           PIN_TOOLS="$(grep -oP '^    image: \S+opencode-tools@\K\S+' stacks/opencode-prod/compose.yml | head -n1)"
           PIN_BR="$(grep -oP '^    image: \S+chrome-cjk@\K\S+' stacks/opencode-prod/compose.yml | head -n1)"
           echo "expect tools=$PIN_TOOLS browser=$PIN_BR"
