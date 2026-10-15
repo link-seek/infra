@@ -1,0 +1,94 @@
+name: tunnel-route-register
+
+# Cloudflare Tunnel Public Hostname 的代码化登记（替代 Dashboard 手点）。
+# 本地 config.yml 在这条远程托管隧道上不参与路由，hostname 必须经 API 注册才生效。
+# 默认只读：dispatch 时 apply=true 才写。写前必 GET 打印现状，写后必验 401。
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "true=登记 llm-trial（读后写）；false=只读"
+        required: false
+        default: 'false'
+
+concurrency:
+  group: tunnel-route
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CFTOK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: 取 account_id（zone 属主）
+        id: acct
+        run: |
+          ACC="$(curl -s -H "Authorization: Bearer $CFTOK" \
+            "https://api.cloudflare.com/client/v4/zones/f46e66f694af4a9e8f8830d0673822b9" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['result']['account']['id'] if d.get('result') else 'NONE')")"
+          echo "account=$ACC"
+          echo "account=$ACC" >> "$GITHUB_OUTPUT"
+          [ "$ACC" != "NONE" ] || { echo "FAIL: 取不到 account_id（token scope?）"; exit 1; }
+
+      - name: GET 隧道当前配置（只读）
+        id: get
+        run: |
+          curl -s -H "Authorization: Bearer $CFTOK" \
+            "https://api.cloudflare.com/client/v4/accounts/${{ steps.acct.outputs.account }}/cfd_tunnel/b759dba6-b698-4a4f-a019-0d6b2d08cf99" \
+            | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          if not d.get('success'):
+              print('FAIL:', json.dumps(d.get('errors'))[:400]); sys.exit(1)
+          t=d['result']
+          print('name:', t.get('name'), '| status:', t.get('status'))
+          cfg=t.get('config') or {}
+          src=cfg.get('config-src'); print('config-src:', src)
+          ing=(cfg.get('ingress') or [])
+          print('ingress 条数:', len(ing))
+          for r in ing:
+              print(' -', r.get('hostname','(catch-all)'), '->', r.get('service'))
+          json.dump(t, open('/tmp/tunnel.json','w'))
+          "
+
+      - name: 登记 llm-trial（apply=true 时）
+        if: inputs.apply == 'true'
+        env:
+          ACC: ${{ steps.acct.outputs.account }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          t = json.load(open('/tmp/tunnel.json'))
+          ing = list((t.get('config') or {}).get('ingress') or [])
+          host = "llm-trial.xieyucheng.top"
+          # 幂等：已是目标值就不动
+          for r in ing:
+              if r.get('hostname') == host and r.get('service') == 'http://127.0.0.1:4000':
+                  print("already-registered: " + host); raise SystemExit(0)
+          # catch-all 必须最后：插到它前面
+          catchall = [r for r in ing if 'hostname' not in r]
+          rest = [r for r in ing if 'hostname' in r]
+          new = rest + [{"hostname": host, "service": "http://127.0.0.1:4000", "originRequest": {}}] + catchall
+          out = {"config": {"ingress": new}}
+          json.dump(out, open('/tmp/newcfg.json', 'w'))
+          print("new ingress 条数:", len(new))
+          EOF
+          curl -s -X PUT -H "Authorization: Bearer $CFTOK" \
+            -H "Content-Type: application/json" \
+            --data @/tmp/newcfg.json \
+            "https://api.cloudflare.com/client/v4/accounts/${{ steps.acct.outputs.account }}/cfd_tunnel/b759dba6-b698-4a4f-a019-0d6b2d08cf99/configurations" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('PUT success:', d.get('success'), json.dumps(d.get('errors'))[:300] if not d.get('success') else '')"
+
+      - name: 验证 llm-trial（401 = TLS+ingress+路由全通）
+        if: always()
+        run: |
+          for i in $(seq 1 20); do
+            CODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://llm-trial.xieyucheng.top/v1/models || echo 000)"
+            echo "probe#$i -> $CODE"
+            [ "$CODE" = "401" ] && { echo "REGISTERED OK: 401（无 key 符合预期）"; exit 0; }
+            sleep 15
+          done
+          echo "STILL BLOCKED: $CODE（未登记或 token 无 Tunnel 写权限）"
+          exit 1
