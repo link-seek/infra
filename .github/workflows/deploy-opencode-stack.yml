@@ -88,5 +88,7 @@ jobs:
           tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
             "mkdir -p ${{ inputs.remote_dir }} && tar -xzf - -C ${{ inputs.remote_dir }} && echo synced"
-          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
-            "${{ inputs.verify_cmd }}"
+          # verify 经 heredoc 下发：verify_cmd 内任意引号都不破（试用终检的 -w "..." 曾撑破外层双引号）
+          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s <<'VERIFY_EOF'
+          ${{ inputs.verify_cmd }}
+          VERIFY_EOF
