@@ -36,23 +36,27 @@ jobs:
 
       - name: secret 预检（只验存在，不打值）
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
           SSHKEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
-          [ -n "$TS_AUTHKEY" ] || { echo "TAILSCALE_AUTH_KEY missing"; exit 1; }
+          [ -n "$TS_AUTHKEY" ] || { echo "TAILSCALE_AUTH_KEY_PROD missing"; exit 1; }
           [ -n "$SSHKEY" ] || { echo "PROD_SSH_KEY missing: 请在 repo secrets 加 HW21 root 部署 key"; exit 1; }
           echo "secrets present"
 
       - name: 加入 tailnet（一次性节点，用完即焚）
         timeout-minutes: 6
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-prod-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          timeout 90 tailscale ping --timeout=30s --c=2 100.91.222.51
+          # 笼子自证：目标 :22 必须通，非目标必须不通（否则 abort）
+          timeout 15 bash -c "</dev/tcp/100.91.222.51/22" || { echo "target unreachable"; exit 1; }
+          echo "target reachable"
+          timeout 12 bash -c "</dev/tcp/100.111.231.85/22" && { echo "CONTAINMENT FAIL: 摸到了试用机"; exit 1; } || echo "containment ok (trial unreachable)"
+          timeout 12 bash -c "</dev/tcp/100.85.128.116/22" && { echo "CONTAINMENT FAIL: 摸到了入口机"; exit 1; } || echo "containment ok (entry unreachable)"
 
       - name: 下发 + 灰度 + 验活（失败自动回滚）
         timeout-minutes: 12
@@ -63,6 +67,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           NODE=100.91.222.51
+          ssh-keyscan -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
           SSH="ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE"
           # .env 是命：缺失直接 abort（绝不空跑覆盖）
           $SSH 'test -f /root/stacks/opencode-prod/.env' || { echo "ABORT: 目标机缺 .env"; exit 1; }
