@@ -59,24 +59,21 @@ jobs:
           ACC: ${{ steps.acct.outputs.account }}
         run: |
           python3 - <<'EOF'
-          import json, os
+          import json, yaml
           t = json.load(open('/tmp/tunnel.json'))
-          ing = list((t.get('config') or {}).get('ingress') or [])
-          host = "llm-trial.xieyucheng.top"
-          # 幂等：已是目标值就不动
-          for r in ing:
-              if r.get('hostname') == host and r.get('service') == 'http://127.0.0.1:4000':
-                  print("already-registered: " + host); raise SystemExit(0)
-          # catch-all 必须最后：插到它前面
-          catchall = [r for r in ing if 'hostname' not in r]
-          rest = [r for r in ing if 'hostname' in r]
-          # Cloudflare 强制最后一条必须是 catch-all（无 hostname/path），否则 1056
-          if not catchall:
-              catchall = [{"service": "http_status:404"}]
-          new = rest + [{"hostname": host, "service": "http://127.0.0.1:4000", "originRequest": {}}] + catchall
-          out = {"config": {"ingress": new}}
-          json.dump(out, open('/tmp/newcfg.json', 'w'))
-          print("new ingress 条数:", len(new))
+          # 正本 = 仓里声明的 ingress.yaml（代码即代码，不在这拼）
+          want = yaml.safe_load(open('edge/cloudflared/hw21-opencode/ingress.yaml'))['ingress']
+          assert isinstance(want, list) and all('hostname' in r and 'service' in r for r in want), 'ingress 声明格式错'
+          # Cloudflare 强制最后一条 catch-all
+          if any('hostname' not in r for r in want):
+              catch = [r for r in want if 'hostname' not in r][0]
+              rest = [r for r in want if 'hostname' in r]
+              want = rest + [catch]
+          else:
+              want = want + [{'service': 'http_status:404'}]
+          json.dump({'config': {'ingress': want}}, open('/tmp/newcfg.json', 'w'))
+          hosts = [r.get('hostname', '(catch-all)') for r in want]
+          print('declared ingress:', hosts)
           EOF
           curl -s -X PUT -H "Authorization: Bearer $CFTOK" \
             -H "Content-Type: application/json" \
