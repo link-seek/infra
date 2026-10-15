@@ -48,8 +48,8 @@ jobs:
         cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d
         sleep 20
         # 同工件比对必须用镜像 ID（RepoDigest 和 Id 是两个命名空间，混比永假——灰度误报根因）
-        PIN_TOOLS="$(grep -oP '^    image: \S+opencode-tools@\K\S+' compose.yml | head -n1)"
-        PIN_BR="$(grep -oP '^    image: \S+chrome-cjk@\K\S+' compose.yml | head -n1)"
+        PIN_TOOLS="$(grep -oP '^    image: \K\S+opencode-tools@\S+' compose.yml | head -n1)"
+        PIN_BR="$(grep -oP '^    image: \K\S+chrome-cjk@\S+' compose.yml | head -n1)"
         EXP_TOOLS="$(docker inspect "$PIN_TOOLS" --format '{{.Id}}')"
         EXP_BR="$(docker inspect "$PIN_BR" --format '{{.Id}}')"
         RUN_TOOLS="$(docker inspect opencode-prod --format '{{.Image}}')"
@@ -63,8 +63,9 @@ jobs:
           ROLL_OK=""
           for i in 1 2 3; do
             sleep 15
-            if curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/ | grep -q 200; then ROLL_OK=1; echo "rollback:%{http_code}"; break; fi
-            echo "rollback retry $i..."
+            CODE="$(curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/)"
+            if [ "$CODE" = "200" ]; then echo "rollback:$CODE"; ROLL_OK=1; break; fi
+            echo "rollback retry $i (got $CODE)..."
           done
           [ -n "$ROLL_OK" ] || exit 1
           exit 1
