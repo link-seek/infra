@@ -41,13 +41,10 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key \
-            stacks/litellm-gateway/guard/vault_guard.py \
-            stacks/litellm-gateway/guard/rules.json \
-            root@100.91.222.51:/tmp/ci-cut- 2>/dev/null || \
-          for f in stacks/litellm-gateway/guard/vault_guard.py stacks/litellm-gateway/guard/rules.json; do
-            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "cat > /tmp/ci-cut-$(basename $f)" < "$f"
+          for f in guard/vault_guard.py guard/rules.json; do
+            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "cat > /tmp/ci-cut-$(basename $f)" < "stacks/litellm-gateway/$f"
           done
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "md5sum /tmp/ci-cut-vault_guard.py /tmp/ci-cut-rules.json"
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           mask() { sed -E -e 's/(sk-[A-Za-z0-9\-_]{6})[A-Za-z0-9\-_]+/\1<redacted>/g'; }
           echo "===== vault_guard diff（仓 vs live；空=无 hotfix） ====="
@@ -57,7 +54,18 @@ jobs:
           diff -u /root/litellm-guard/guard-rules.json /tmp/ci-cut-rules.json | mask | head -30 || true
           echo "===== live GO_BACKEND_KEY 唯一性（多把=中止，.env 只支持一把） ====="
           N="$(grep -oP 'api_key:\s*\K\S+' /root/litellm-guard/litellm_config.yaml | sort -u | wc -l)"
-          echo "unique-api_key-count=$N"
+          echo "unique-api-key-count=$N"
+          if [ "$N" != "1" ]; then
+            python3 - <<'PY2'
+          import yaml, collections
+          d = yaml.safe_load(open('/root/litellm-guard/litellm_config.yaml'))
+          m = collections.defaultdict(list)
+          for e in d.get('model_list', []):
+              m[(e.get('litellm_params') or {}).get('api_key','')].append(e.get('model_name'))
+          for i,(k,v) in enumerate(sorted(m.items(), key=lambda x:-len(x[1])),1):
+              print(f"  KEY#{i}: {len(v)} models, e.g. {v[:4]}")
+          PY2
+          fi
           echo "===== ollama digest 对账 ====="
           echo "live: $(docker inspect ollama --format '{{.Config.Image}} | {{.Image}}')"
           echo "repo: $(grep -oP '^\s*image:\s*\K\S+ollama\S+' /root/stacks/litellm-gateway/compose.yml)"
@@ -80,25 +88,39 @@ jobs:
           set -euo pipefail
           TS="$(date -u +%Y%m%dT%H%M%SZ)"
           # 0. 前置门禁
-          N="$(grep -oP 'api_key:\s*\K\S+' /root/litellm-guard/litellm_config.yaml | sort -u | wc -l)"
-          [ "$N" = "1" ] || { echo "ABORT: api_key 不唯一（$N 把），.env 设计只支持一把"; exit 1; }
           [ -f /root/stacks/litellm-guard/compose.yml ] || { echo "ABORT: 旧栈 compose 不在，回滚无依"; exit 1; }
+          [ -f /root/litellm-guard/litellm_config.yaml ] || { echo "ABORT: live 配置不在"; exit 1; }
           # 1. 备份旧栈（compose + .env + 配置），切流可回滚
           mkdir -p /root/backups
           tar -czf "/root/backups/litellm-guard-precut-$TS.tar.gz" -C /root/stacks litellm-guard
           cp -a /root/litellm-guard "/root/backups/litellm-guard-files-precut-$TS"
           echo "backup-ok: /root/backups/litellm-guard-precut-$TS.tar.gz"
-          # 2. .env 就地生成（从 live 取值，绝不打印）
-          GO_KEY="$(grep -oP 'api_key:\s*\K\S+' /root/litellm-guard/litellm_config.yaml | sort -u | head -n1)"
+          # 2. 按 live 原样生成 config＋.env（多 key 映射；密钥不打印、不进日志）
           MK="$(cat /root/litellm-guard/.master 2>/dev/null || docker inspect litellm-guard --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^LITELLM_MASTER_KEY=' | cut -d= -f2-)"
           RULES_URL_LIVE="$(docker inspect litellm-guard --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^RULES_URL=' | cut -d= -f2- || true)"
-          {
-            echo "GO_BACKEND_KEY=$GO_KEY"
-            echo "LITELLM_MASTER_KEY=$MK"
-            [ -n "$RULES_URL_LIVE" ] && echo "RULES_URL=$RULES_URL_LIVE"
-            echo "DISABLE_ADMIN_UI=True"
-            echo "RULES_FILE=/app/guard-rules.json"
-          } > /root/stacks/litellm-gateway/.env
+          python3 - "$MK" "$RULES_URL_LIVE" <<'PY2'
+          import sys, yaml
+          mk, rules_url = sys.argv[1], sys.argv[2]
+          live = yaml.safe_load(open('/root/litellm-guard/litellm_config.yaml'))
+          keys, mapping = [], {}
+          for e in live.get('model_list', []):
+              p = e.setdefault('litellm_params', {})
+              k = p.get('api_key')
+              if k is None:
+                  continue
+              if k not in mapping:
+                  keys.append(k); mapping[k] = f"GO_BACKEND_KEY_{len(keys)}"
+              p['api_key'] = f"os.environ/{mapping[k]}"
+          live.setdefault('general_settings', {})['forward_client_headers_to_llm_api'] = True
+          live.setdefault('litellm_settings', {})['drop_params'] = True
+          yaml.safe_dump(live, open('/root/stacks/litellm-gateway/config/litellm_config.yaml', 'w'), allow_unicode=True)
+          lines = [f"{mapping[k]}={k}" for k in keys]
+          lines += [f"LITELLM_MASTER_KEY={mk}", "DISABLE_ADMIN_UI=True", "RULES_FILE=/app/guard-rules.json"]
+          if rules_url:
+              lines.append(f"RULES_URL={rules_url}")
+          open('/root/stacks/litellm-gateway/.env', 'w').write("\n".join(lines) + "\n")
+          print(f"config-ok: models={len(live.get('model_list', []))} keyvars={len(keys)}")
+          PY2
           chmod 600 /root/stacks/litellm-gateway/.env
           echo "env-ok: keys=$(grep -c '=' /root/stacks/litellm-gateway/.env) (值不打印)"
           # 3. 拉镜像（pin 已在仓里）
