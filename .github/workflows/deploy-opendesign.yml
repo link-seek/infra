@@ -47,6 +47,7 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
           OD_PROD_ENV: ${{ secrets.OD_PROD_ENV }}
+          UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -87,13 +88,13 @@ jobs:
           [ -n "$READY" ] || PASS=0
           C1="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:7456/ || echo 000)"
           echo "verify: od-root=$C1 (expect 401)"; [ "$C1" = "401" ] || PASS=0
-          MK="$(cat /root/litellm-guard/.master 2>/dev/null || echo MISSING)"
+          # 透明代理语义（cutover 9eb0b07 同构）：网关不验 key，上游验
           C2="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
-          echo "verify: gw-no-key=$C2 (expect 401)"; [ "$C2" = "401" ] || PASS=0
-          if [ "$MK" != "MISSING" ]; then
-            MC="$(curl -s -m 10 -H "Authorization: Bearer $MK" http://127.0.0.1:4000/v1/models | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]))' 2>/dev/null || echo -1)"
-            echo "verify: gw-models=$MC (expect 45)"; [ "$MC" = "45" ] || PASS=0
-          fi
+          echo "verify: gw-no-key=$C2 (expect 200)"; [ "$C2" = "200" ] || PASS=0
+          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $UNIFIED_API_KEY" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "verify: gw-chat-valid=$CC (expect 200)"; [ "$CC" = "200" ] || PASS=0
+          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "verify: gw-chat-invalid=$IC (expect 401 from upstream)"; [ "$IC" = "401" ] || PASS=0
           if docker logs opendesign --tail 100 2>&1 | grep -qi -E "ECONNREFUSED|ETIMEDOUT|model_not_found"; then
             echo "verify: OD 日志见网关报错"; PASS=0
           else
