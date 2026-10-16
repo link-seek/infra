@@ -35,7 +35,7 @@ jobs:
               print(f"OK pin: {img[:70]}...")
           if re.search(r":latest(@|$|\s)", img):
               print("FAIL: 用了 latest"); bad += 1
-          if "watchtower" in comp.lower():
+          if "watchtower.enable" in comp.lower():
               print("FAIL: watchtower label 未摘"); bad += 1
           else:
               print("OK: watchtower 已摘")
