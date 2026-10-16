@@ -154,6 +154,14 @@ jobs:
           d["model_list"].append({"model_name": "test-chat",
               "litellm_params": {"model": "ollama/qwen3:0.6b",
                                  "api_base": "http://127.0.0.1:11434", "timeout": 180}})
+          # 免费档上游（e2e 专用，不进生产栈）：走 inference 端口（非 go 端口，免 Go 订阅）；
+          # key 用 org OPENCODE_API_KEY（Console key）。prompt 只用合成词（部分免费档拿数据改进模型）。
+          for _name, _up in (("free-probe-a", "openai/deepseek-v4.1-flash-free"),
+                             ("free-probe-b", "openai/muse-spark-1.3-contributor-free")):
+              d["model_list"].append({"model_name": _name,
+                  "litellm_params": {"model": _up,
+                                     "api_base": "https://opencode.ai/inference/openai/v1",
+                                     "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}})
           open("/tmp/litellm-e2e.yaml", "w").write(yaml.safe_dump(d))
           print("template render OK")
           EOF
@@ -235,17 +243,18 @@ jobs:
           print(f"passthrough: {st} {txt}")
           if st != 200:
               failures.append(f"透传失败: {st}")
-          # 5b. 直调上游（隔离 key 与网关；状态码只打码，body 200 即 key 有效）
+          # 5b. 直调上游（隔离 key 与网关；inference 端口免费档，免 Go 订阅）
           ust, ubody = (lambda: (0, {}))(), None
           try:
               import os
               ukey = os.environ.get("GO_BACKEND_KEY", "")
               ureq = urllib.request.Request(
-                  "https://opencode.ai/zen/go/v1/models",
+                  "https://opencode.ai/inference/openai/v1/models",
                   headers={"Authorization": f"Bearer {ukey}"})
               with urllib.request.urlopen(ureq, timeout=30) as r:
                   ust, ubody = r.status, json.loads(r.read().decode())
-              print(f"direct-upstream models: {ust} count={len(ubody.get('data', []))}")
+              free_ids = [m.get("id", "") for m in ubody.get("data", []) if "free" in m.get("id", "")]
+              print(f"direct-upstream models: {ust} total={len(ubody.get('data', []))} free={free_ids[:8]}")
               if ust != 200:
                   failures.append(f"直调上游非 200: {ust}（key 或上游 entitlement 问题，与网关无关）")
           except urllib.error.HTTPError as e:
@@ -271,16 +280,16 @@ jobs:
                       return True
               print(f"  FAIL-body: {txt[:800]}")
               return False
-          if not chat("glm-5.3-flash", [{"role": "user", "content": "reply with exactly: FREE-OK"}], "FREE-OK"):
-              failures.append("真模型单聊失败: glm-5.3-flash")
+          if not chat("free-probe-a", [{"role": "user", "content": "reply with exactly: FREE-OK"}], "FREE-OK"):
+              failures.append("真模型单聊失败: free-probe-a(deepseek-v4.1-flash-free)")
           # 7. 切模型（free 档 qwen3.8-flash；跨模型路由）
-          if not chat("qwen3.8-flash", [{"role": "user", "content": "reply with exactly: SWITCH-OK"}], "SWITCH-OK"):
-              failures.append("切模型失败: qwen3.8-flash")
+          if not chat("free-probe-b", [{"role": "user", "content": "reply with exactly: SWITCH-OK"}], "SWITCH-OK"):
+              failures.append("切模型失败: free-probe-b(muse-spark-1.3-contributor-free)")
           # 8. 多轮（同 history 两问，记数字再问回；经 guard 全程）
           hist = [{"role": "user", "content": "记住这个数字：7421，收到只回复：记住了"},
                   {"role": "assistant", "content": "记住了"},
                   {"role": "user", "content": "我让你记的数字是多少？只回复数字"}]
-          if not chat("glm-5.3-flash", hist, "7421"):
+          if not chat("free-probe-a", hist, "7421"):
               failures.append("多轮失败: 7421 未召回")
           if failures:
               print("FAILURES:"); [print(f" - {f}") for f in failures]; sys.exit(1)
