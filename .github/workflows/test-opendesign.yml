@@ -153,14 +153,21 @@ jobs:
                "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
                                   "api_base": "https://opencode.ai/inference/openai/v1",
                                   "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}}]}
+          d["guardrails"] = [{"guardrail_name": "vault",
+              "litellm_params": {"guardrail": "vault_guard.SecretVaultGuardrail",
+                                 "mode": ["pre_call", "post_call"], "default_on": True}}]
           open("/tmp/litellm-od.yaml", "w").write(yaml.safe_dump(d))
           print("backend render OK")
           EOF
           PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           docker run -d --name litellm-od --network host \
             -v /tmp/litellm-od.yaml:/app/config.yaml:ro \
+            -v $PWD/stacks/litellm-gateway/guard/vault_guard.py:/app/vault_guard.py:ro \
+            -v $PWD/stacks/litellm-gateway/guard/rules.json:/app/guard-rules.json:ro \
+            -v $PWD/stacks/litellm-gateway/guard/models-denied.json:/app/models-denied.json:ro \
             -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \
             -e LITELLM_MASTER_KEY=test-only -e DISABLE_ADMIN_UI=True \
+            -e RULES_FILE=/app/guard-rules.json \
             "$PIN" --config /app/config.yaml --port 4001
           for i in $(seq 1 24); do
             curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" >/dev/null 2>&1 && break
