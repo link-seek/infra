@@ -121,27 +121,29 @@ jobs:
             curl -sf --max-time 5 http://127.0.0.1:11434/ >/dev/null && break
             sleep 5
           done
-          docker exec ollama ollama pull qwen3:0.6b
+          docker exec ollama ollama pull qwen3:8b
           pip install pyyaml -q 2>/dev/null || true
           python3 - <<'EOF'
           import yaml
           # 注意：drop_params 必须放 litellm_settings（general_settings 下那份 responses 路径不认，
           # OD 驱动的新版 opencode CLI 会发 store 参数，ollama 后端直接拒，见 run 38850031800）。
-          d = {"general_settings": {"drop_params": True},
+          # forward_client_headers 必开：免费档锁 OpenCode 客户端，头不到上游就 403（opencode-loop 全配置已证实放行）。
+          # 后端模型用 qwen3:8b（test-memory 同款；0.6b 复读触顶 repeat-limit，见 run 38850850005）。
+          d = {"general_settings": {"drop_params": True, "forward_client_headers_to_llm_api": True},
                "litellm_settings": {"drop_params": True, "request_timeout": 120, "num_retries": 2},
                "model_list": [
               {"model_name": "test-chat",
-               "litellm_params": {"model": "ollama/qwen3:0.6b",
+               "litellm_params": {"model": "ollama/qwen3:8b",
                                   "api_base": "http://127.0.0.1:11434", "timeout": 180}},
               {"model_name": "test-chat-b",
-               "litellm_params": {"model": "ollama/qwen3:0.6b",
+               "litellm_params": {"model": "ollama/qwen3:8b",
                                   "api_base": "http://127.0.0.1:11434", "timeout": 180}},
               # OD 会给部分 byok 模型加 open-design-byok/ 前缀（run 38850031800 实证），网关侧同上游双注册
               {"model_name": "open-design-byok/test-chat",
-               "litellm_params": {"model": "ollama/qwen3:0.6b",
+               "litellm_params": {"model": "ollama/qwen3:8b",
                                   "api_base": "http://127.0.0.1:11434", "timeout": 180}},
               {"model_name": "open-design-byok/test-chat-b",
-               "litellm_params": {"model": "ollama/qwen3:0.6b",
+               "litellm_params": {"model": "ollama/qwen3:8b",
                                   "api_base": "http://127.0.0.1:11434", "timeout": 180}},
               {"model_name": "free-probe-a",
                "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
