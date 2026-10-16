@@ -74,7 +74,7 @@ jobs:
             2>/dev/null || echo none)
           if [ "$STATE" != "active" ]; then
             gh api -X POST orgs/link-seek/invitations \
-              -f invitee_id="$USER_ID" -f role=direct_member \
+              -F invitee_id="$USER_ID" -f role=direct_member \
               --jq '{login: .login, role}' || true
             echo "INVITE_PENDING: 请 $LOGIN 先接受组织邀请再重跑"
             exit 1
