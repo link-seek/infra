@@ -159,7 +159,10 @@ jobs:
           EOF
 
       - name: Start litellm（本栈 compose pin＋本栈 guard 文件，port 4001）
+        env:
+          GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
+          [ -n "$GO_BACKEND_KEY" ] || { echo "FAIL: OPENCODE_API_KEY 未配（org secret，free 档测试用）"; exit 1; }
           PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           echo "litellm pin: $PIN"
           docker run -d --name litellm-e2e --network host \
@@ -167,7 +170,7 @@ jobs:
             -v $PWD/stacks/litellm-gateway/guard/vault_guard.py:/app/vault_guard.py:ro \
             -v $PWD/stacks/litellm-gateway/guard/rules.json:/app/guard-rules.json:ro \
             -v $PWD/stacks/litellm-gateway/guard/models-denied.json:/app/models-denied.json:ro \
-            -e GO_BACKEND_KEY=test-dummy-key \
+            -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \
             -e LITELLM_MASTER_KEY=test-only -e DISABLE_ADMIN_UI=True \
             -e RULES_FILE=/app/guard-rules.json \
             "$PIN" --config /app/config.yaml --port 4001
@@ -230,6 +233,29 @@ jobs:
           print(f"passthrough: {st} {txt}")
           if st != 200:
               failures.append(f"透传失败: {st}")
+          # 6. 真模型单聊（free 档 glm-5.3-flash；GO_BACKEND_KEY=org OPENCODE_API_KEY，CI 打码）
+          def chat(model, messages, marker, tries=2):
+              for a in range(1, tries + 1):
+                  st, body = gw("/v1/chat/completions", {"model": model, "messages": messages})
+                  try:
+                      txt = body["choices"][0]["message"]["content"] or ""
+                  except Exception:
+                      txt = json.dumps(body)[:200]
+                  print(f"upstream({model}) attempt{a}: {st} {txt[:80]}")
+                  if st == 200 and marker in txt:
+                      return True
+              return False
+          if not chat("glm-5.3-flash", [{"role": "user", "content": "reply with exactly: FREE-OK"}], "FREE-OK"):
+              failures.append("真模型单聊失败: glm-5.3-flash")
+          # 7. 切模型（free 档 qwen3.8-flash；跨模型路由）
+          if not chat("qwen3.8-flash", [{"role": "user", "content": "reply with exactly: SWITCH-OK"}], "SWITCH-OK"):
+              failures.append("切模型失败: qwen3.8-flash")
+          # 8. 多轮（同 history 两问，记数字再问回；经 guard 全程）
+          hist = [{"role": "user", "content": "记住这个数字：7421，收到只回复：记住了"},
+                  {"role": "assistant", "content": "记住了"},
+                  {"role": "user", "content": "我让你记的数字是多少？只回复数字"}]
+          if not chat("glm-5.3-flash", hist, "7421"):
+              failures.append("多轮失败: 7421 未召回")
           if failures:
               print("FAILURES:"); [print(f" - {f}") for f in failures]; sys.exit(1)
           print("ALL PROBES OK")
