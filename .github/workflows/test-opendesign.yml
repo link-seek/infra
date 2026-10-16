@@ -85,7 +85,10 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u xieyucheng123 --password-stdin
           IMG="ghcr.io/link-seek/opendesign:0.24.1-oc2.0.6"
           docker pull -q "$IMG"
+          # agent 要写 home(/home/open-design)与工作区(/app/.od)：CI 用 /tmp 绑定＋777（一次性，跑完即焚；生产是具名卷＋固定属主）
+          mkdir -p /tmp/odtest-home /tmp/odtest-od && chmod 777 /tmp/odtest-home /tmp/odtest-od
           docker run -d --name od-e2e --network host \
+            -v /tmp/odtest-home:/home/open-design -v /tmp/odtest-od:/app/.od \
             -e OD_API_TOKEN=dummy-token -e OD_ALLOWED_ORIGINS=https://example.invalid \
             -e OD_ALLOWED_INTERNAL_HOSTS=127.0.0.1 \
             -e LITELLM_BASE_URL=http://127.0.0.1:4000 -e LITELLM_API_KEY=dummy \
@@ -175,7 +178,7 @@ jobs:
               sleep 10
               curl -s -m 15 -H "$AUTH" "$OD/api/runs/$_rid" > /tmp/odrun.json 2>/dev/null || continue
               _st="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('status','?'))" 2>/dev/null || echo ?)"
-              echo "poll#$i -> $_st"
+              echo "poll#$i -> $_st" >&2
               case "$_st" in succeeded|failed|canceled) break;; esac
             done
             echo "$_st"
