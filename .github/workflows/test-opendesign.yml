@@ -341,7 +341,7 @@ jobs:
                 --arg k "$GO_BACKEND_KEY" \
                 '{projectId:$p, clientRequestId:$r, message:"reply with exactly: OD-FREE-OK",
                   agentId:"byok-opencode", model:"free-probe-a",
-                  byokProvider:{protocol:"openai", apiKey:$k, baseUrl:"http://127.0.0.1:4001/v1", model:"free-probe-a"}}')" \
+                  byokProvider:{protocol:"openai", apiKey:"test-only", baseUrl:"http://127.0.0.1:4001/v1", model:"free-probe-a"}}')" \
               "$OD/api/runs" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
             echo "run-free: ${RF:0:12}..."
             if [ -n "$RF" ]; then
