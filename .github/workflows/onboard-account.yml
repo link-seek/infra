@@ -1,7 +1,7 @@
 name: onboard-account
 
-# 新号 onboarding：dispatch 填 login + 一次性 PAT，自动邀 collaborator、存 secret、写
-# AI 名单变量、指派验证，全程 Actions。
+# 新号 onboarding（组织制）：dispatch 填 login + 一次性 PAT，自动发 org 邀请、
+# 建 secret 团队 ai-agents（push 挂目标仓）、存 secret、写 AI 名单变量、指派验证。
 #
 # 人闸：只认 xieyucheng123 dispatch（oh-xyc 是 god 权限，不设闸等于交总钥匙）。
 # PAT 会落 run 输入日志：setup_pat 必须用一次性短效 key（classic，repo + workflow），
@@ -20,7 +20,7 @@ on:
         default: "docker-images"
         required: true
       permission:
-        description: "collaborator 权限"
+        description: "团队仓库权限（write→push）"
         default: "write"
         type: choice
         options: [pull, triage, write, maintain]
@@ -63,9 +63,37 @@ jobs:
           echo "::add-mask::$SETUP_PAT"
           T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          echo "== 1/5 邀 collaborator =="
-          gh api -X PUT "repos/$TARGET/collaborators/$LOGIN" \
-            -f permission="$PERMISSION" --jq '{invitee: .invitee.login, permissions}'
+          echo "== 1/5 组织邀请 + 团队授权 =="
+          USER_ID=$(gh api "users/$LOGIN" --jq .id)
+          # 清掉旧的仓库 collaborator 邀请（组织制下不需要，best-effort）
+          for IID in $(gh api "repos/$TARGET/invitations" --paginate \
+            --jq ".[] | select(.invitee.login==\"$LOGIN\") | .id"); do
+            gh api -X DELETE "repos/$TARGET/invitations/$IID" || true
+          done
+          STATE=$(gh api "orgs/link-seek/memberships/$LOGIN" --jq .state \
+            2>/dev/null || echo none)
+          if [ "$STATE" != "active" ]; then
+            gh api -X POST orgs/link-seek/invitations \
+              -f invitee_id="$USER_ID" -f role=direct_member \
+              --jq '{login: .login, role}' || true
+            echo "INVITE_PENDING: 请 $LOGIN 先接受组织邀请再重跑"
+            exit 1
+          fi
+          # secret 团队 ai-agents：建了复用，push 挂目标仓，以后新号直接进组
+          TEAM=$(gh api -X POST orgs/link-seek/teams \
+            -f name=ai-agents \
+            -f description="自建 AI 机器号（onboard-account 维护）" \
+            -f privacy=secret --jq .slug 2>/dev/null \
+            || echo ai-agents)
+          case "$PERMISSION" in
+            pull|triage) TEAM_PERM=$PERMISSION ;;
+            maintain) TEAM_PERM=maintain ;;
+            *) TEAM_PERM=push ;;
+          esac
+          gh api -X PUT "orgs/link-seek/teams/$TEAM/repos/link-seek/$REPO" \
+            -f permission="$TEAM_PERM" --jq '{permission}' --header Accept:application/vnd.github+json
+          gh api -X PUT "orgs/link-seek/teams/$TEAM/memberships/$LOGIN" \
+            -f role=member --jq '{state}'
 
           echo "== 2/5 验 PAT（login + scope） =="
           GOT=$(GH_TOKEN="$SETUP_PAT" gh api user --jq .login)
@@ -89,10 +117,10 @@ jobs:
             gh variable set AI_ASSIGNEES --repo "$TARGET" --body "$NEW"
 
           echo "== 5/5 指派验证 =="
-          # 新号必须先接受 collaborator 邀请，否则指派 404
-          PERM=$(GH_TOKEN="$ADMIN_TOKEN" gh api "repos/$TARGET/collaborators/$LOGIN/permission" \
-            --jq .permission)
-          [ "$PERM" != "none" ] || { echo "INVITE_PENDING: 请 $LOGIN 先接受 collaborator 邀请再重跑"; exit 1; }
+          # 组织 member + 团队 push 已在 1/5 落定；这里只做最终门禁
+          STATE=$(gh api "orgs/link-seek/memberships/$LOGIN" --jq .state \
+            2>/dev/null || echo none)
+          [ "$STATE" = "active" ] || { echo "INVITE_PENDING: $LOGIN 组织成员未激活"; exit 1; }
           URL=$(GH_TOKEN="$ADMIN_TOKEN" gh issue create --repo "$TARGET" \
             --title "TEST: onboarding 指派验证 $LOGIN（勿动构建）" \
             --body "onboard-account 自动验证：只改 README 注释一行，不要碰 workflow/Dockerfile，不要打镜像。合 PR 不要直推 main。")
