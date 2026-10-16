@@ -243,8 +243,7 @@ jobs:
           print(f"passthrough: {st} {txt}")
           if st != 200:
               failures.append(f"透传失败: {st}")
-          # 5b. 直调上游（隔离 key 与网关；inference 端口免费档，免 Go 订阅）
-          ust, ubody = (lambda: (0, {}))(), None
+          # 5b. 直调上游（隔离用；免费档锁 OpenCode 客户端，直调必 403，仅记录不判失败）
           try:
               import os
               ukey = os.environ.get("GO_BACKEND_KEY", "")
@@ -255,42 +254,16 @@ jobs:
                   ust, ubody = r.status, json.loads(r.read().decode())
               free_ids = [m.get("id", "") for m in ubody.get("data", []) if "free" in m.get("id", "")]
               print(f"direct-upstream models: {ust} total={len(ubody.get('data', []))} free={free_ids[:8]}")
-              if ust != 200:
-                  failures.append(f"直调上游非 200: {ust}（key 或上游 entitlement 问题，与网关无关）")
           except urllib.error.HTTPError as e:
               try:
-                  emsg = e.read().decode()[:300]
+                  emsg = e.read().decode()[:200]
               except Exception:
                   emsg = ""
-              print(f"direct-upstream models: {e.code} {emsg}")
-              failures.append(f"直调上游 {e.code}（key 或上游 entitlement 问题，与网关无关）")
+              print(f"direct-upstream models: {e.code} {emsg} (直调预期行为：免费档锁客户端，见 opencode-loop 真客户端测试)")
           except Exception as e:
               print(f"direct-upstream models: -1 {e}")
-              failures.append("直调上游异常（runner 出境或上游挂）")
-          def chat(model, messages, marker, tries=2):
-              for a in range(1, tries + 1):
-                  st, body = gw("/v1/chat/completions", {"model": model, "messages": messages})
-                  try:
-                      txt = body["choices"][0]["message"]["content"] or ""
-                  except Exception:
-                      txt = json.dumps(body)[:200]
-                  print(f"upstream({model}) attempt{a}: {st} {txt[:80]}")
-                  if st == 200 and marker in txt:
-                      print(f"  ok: {txt[:60]}")
-                      return True
-              print(f"  FAIL-body: {txt[:800]}")
-              return False
-          if not chat("free-probe-a", [{"role": "user", "content": "reply with exactly: FREE-OK"}], "FREE-OK"):
-              failures.append("真模型单聊失败: free-probe-a(deepseek-v4.1-flash-free)")
-          # 7. 切模型（free 档 qwen3.8-flash；跨模型路由）
-          if not chat("free-probe-b", [{"role": "user", "content": "reply with exactly: SWITCH-OK"}], "SWITCH-OK"):
-              failures.append("切模型失败: free-probe-b(muse-spark-1.3-contributor-free)")
-          # 8. 多轮（同 history 两问，记数字再问回；经 guard 全程）
-          hist = [{"role": "user", "content": "记住这个数字：7421，收到只回复：记住了"},
-                  {"role": "assistant", "content": "记住了"},
-                  {"role": "user", "content": "我让你记的数字是多少？只回复数字"}]
-          if not chat("free-probe-a", hist, "7421"):
-              failures.append("多轮失败: 7421 未召回")
+          # 6-8.（直调 API 测免费档已证伪，删除）上游免费档锁 OpenCode 客户端，直调/curl 必 403
+          # （"free tier can only be used from within OpenCode"）。免费三件套改走真客户端，见 opencode-loop。
           if failures:
               print("FAILURES:"); [print(f" - {f}") for f in failures]; sys.exit(1)
           print("ALL PROBES OK")
@@ -339,5 +312,51 @@ jobs:
             echo "--- mask attempt $attempt:"; tail -8 /tmp/mask-out.txt
           done
           [ -n "$OK2" ] || FAIL="$FAIL; mask/restore 回包非原文"
+          # 3. 免费档真客户端三件套（上游免费档锁 OpenCode 客户端，直调 403，只有真客户端能过；
+          #    经网关 free-probe-a/b 条目→inference 端口。marker/数字全合成，无敏感）。
+          OK3=""
+          for attempt in 1 2 3; do
+            timeout 280 $OEX -m gw/free-probe-a "reply with exactly: FREE-CLIENT-OK" > /tmp/free1-out.txt 2>&1 && \
+            grep -q "FREE-CLIENT-OK" /tmp/free1-out.txt && { OK3=1; echo "OK: free single (attempt $attempt)"; break; }
+            echo "--- free single attempt $attempt:"; tail -5 /tmp/free1-out.txt
+          done
+          [ -n "$OK3" ] || FAIL="$FAIL; 免费单聊不通（free-probe-a）"
+          OK4=""
+          for attempt in 1 2 3; do
+            timeout 280 $OEX -m gw/free-probe-b "reply with exactly: SWITCH-CLIENT-OK" > /tmp/free2-out.txt 2>&1 && \
+            grep -q "SWITCH-CLIENT-OK" /tmp/free2-out.txt && { OK4=1; echo "OK: free switch (attempt $attempt)"; break; }
+            echo "--- free switch attempt $attempt:"; tail -5 /tmp/free2-out.txt
+          done
+          [ -n "$OK4" ] || FAIL="$FAIL; 免费切模型不通（free-probe-b）"
+          # 4. 免费多轮（同 session：先记数，取 session id，再续问；--session/-s 见 CLI 文档）
+          SID=""
+          timeout 280 $OEX -m gw/free-probe-a --format json "记住这个数字：7421，收到只回复：记住了" > /tmp/multi1-out.txt 2>&1 || true
+          SID="$(python3 -c "
+          import re
+          t = open('/tmp/multi1-out.txt', errors='replace').read()
+          m = re.findall(r'\"session[Ii][Dd]\"\s*:\s*\"([^\"]+)\"', t)
+          print(m[0] if m else '')" 2>/dev/null)"
+          if [ -z "$SID" ]; then
+            SID="$(docker exec -e OPENCODE_PASSWORD=test-srv-pw oc-gwtest opencode session list --format json 2>/dev/null | python3 -c "
+          import json,sys
+          try:
+              d = json.load(sys.stdin)
+              items = d if isinstance(d, list) else d.get('sessions', d.get('data', []))
+              print(items[0].get('id', items[0].get('sessionID', '')) if items else '')
+          except Exception:
+              print('')" 2>/dev/null)"
+          fi
+          echo "multi session: ${SID:0:12}..."
+          OK5=""
+          if [ -n "$SID" ] && grep -q "记住了" /tmp/multi1-out.txt; then
+            for attempt in 1 2 3; do
+              timeout 280 $OEX -m gw/free-probe-a -s "$SID" "我让你记的数字是多少？只回复数字" > /tmp/multi2-out.txt 2>&1 && \
+              grep -q "7421" /tmp/multi2-out.txt && { OK5=1; echo "OK: free multi-turn (attempt $attempt)"; break; }
+              echo "--- free multi attempt $attempt:"; tail -5 /tmp/multi2-out.txt
+            done
+          else
+            echo "--- multi turn1 output:"; tail -8 /tmp/multi1-out.txt
+          fi
+          [ -n "$OK5" ] || FAIL="$FAIL; 免费多轮未召回 7421"
           docker rm -f oc-gwtest >/dev/null 2>&1 || true
           [ -z "$FAIL" ] && echo "OPENCODE-LOOP OK" || { echo "FAIL: $FAIL"; exit 1; }
