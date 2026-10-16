@@ -48,6 +48,7 @@ jobs:
 
       - name: Onboard
         env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ADMIN_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET: link-seek/${{ inputs.repo }}
           LOGIN: ${{ inputs.login }}
@@ -61,8 +62,7 @@ jobs:
 
           echo "== 1/5 邀 collaborator =="
           gh api -X PUT "repos/$TARGET/collaborators/$LOGIN" \
-            -f permission="$PERMISSION" --jq '{invitee: .invitee.login, permissions}' \
-            --header "Authorization: Bearer $ADMIN_TOKEN"
+            -f permission="$PERMISSION" --jq '{invitee: .invitee.login, permissions}'
 
           echo "== 2/5 验 PAT（login + scope） =="
           GOT=$(GH_TOKEN="$SETUP_PAT" gh api user --jq .login)
