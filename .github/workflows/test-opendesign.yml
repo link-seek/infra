@@ -1,0 +1,102 @@
+name: test-opendesign
+
+# OD 收编栈的门：schema（秒级）+ boot e2e（分钟级，一次性容器，dummy 密钥）。
+# 全程在 runner，不碰生产。SWR 匿名拉（与 test-memory 同模式，无需登录）。
+on:
+  pull_request:
+    paths:
+      - stacks/opendesign/**
+      - .github/workflows/test-opendesign.yml
+  push:
+    branches: [main]
+    paths:
+      - stacks/opendesign/**
+  workflow_dispatch:
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Schema gate（digest pin＋无真值＋watchtower 已摘）
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          S = "stacks/opendesign"
+          bad = 0
+          comp = open(f"{S}/compose.yml").read()
+          imgs = re.findall(r"^\s*image:\s*(\S+)", comp, re.M)
+          assert len(imgs) == 1, f"期望 1 个 image，实际 {imgs}"
+          img = imgs[0]
+          if "@sha256:" not in img:
+              print(f"FAIL: {img} 不是 digest pin"); bad += 1
+          else:
+              print(f"OK pin: {img[:70]}...")
+          if re.search(r":latest(@|$|\s)", img):
+              print("FAIL: 用了 latest"); bad += 1
+          if "watchtower" in comp.lower():
+              print("FAIL: watchtower label 未摘"); bad += 1
+          else:
+              print("OK: watchtower 已摘")
+          if "OD_API_TOKEN=" in comp or "LITELLM_API_KEY=" in comp:
+              print("FAIL: compose 含明文 key 赋值"); bad += 1
+          else:
+              print("OK: compose 无明文 key")
+          env = open(f"{S}/.env.example").read()
+          for k in ("OD_API_TOKEN=", "OD_ALLOWED_ORIGINS=", "OD_ALLOWED_INTERNAL_HOSTS=",
+                    "LITELLM_BASE_URL=", "LITELLM_API_KEY="):
+              if k not in env:
+                  print(f"FAIL: .env.example 缺 {k}"); bad += 1
+          for pat in (r"sk-[A-Za-z0-9\-_]{16,}", r"ghp_[A-Za-z0-9]+", r"tskey-[A-Za-z0-9_\-]+"):
+              if re.search(pat, env):
+                  print(f"FAIL: .env.example 命中真值模式 {pat}"); bad += 1
+          print("OK: .env.example 键位齐且无真值")
+          # 卷复用声明必须在（丢卷=丢 OD 全量数据）
+          if "name: opendesign_od-data" not in comp:
+              print("FAIL: 卷未显式同名复用"); bad += 1
+          else:
+              print("OK: 卷显式复用现网卷")
+          sys.exit(1 if bad else 0)
+          EOF
+
+      - name: compose config 合法性（不拉镜像，只渲染）
+        run: |
+          cd stacks/opendesign
+          sed -e 's#^ *- /root/opendesign/home:.*#      - /tmp/odtest-home:/home/open-design#' compose.yml > /tmp/odtest-compose.yml
+          mkdir -p /tmp/odtest-home
+          printf 'OD_API_TOKEN=dummy\nOD_ALLOWED_ORIGINS=https://example.invalid\nOD_ALLOWED_INTERNAL_HOSTS=127.0.0.1\nLITELLM_BASE_URL=http://127.0.0.1:4000\nLITELLM_API_KEY=dummy\n' > /tmp/odtest.env
+          docker compose -f /tmp/odtest-compose.yml --env-file /tmp/odtest.env config >/dev/null && echo "OK: compose config 合法"
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 拉 pin 镜像（SWR 匿名，与 test-memory 同模式）
+        run: |
+          PIN="$(grep -oP '^\s*image:\s*\K\S+opendesign@\S+' stacks/opendesign/compose.yml | head -n1)"
+          echo "opendesign pin: ${PIN:0:80}..."
+          docker pull -q "$PIN"
+          echo "OK: pin 可拉取（SWR 匿名）"
+
+      - name: Boot（dummy 密钥，401 门即活）
+        run: |
+          PIN="$(grep -oP '^\s*image:\s*\K\S+opendesign@\S+' stacks/opendesign/compose.yml | head -n1)"
+          docker run -d --name od-e2e --network host \
+            -e OD_API_TOKEN=dummy-token -e OD_ALLOWED_ORIGINS=https://example.invalid \
+            -e OD_ALLOWED_INTERNAL_HOSTS=127.0.0.1 \
+            -e LITELLM_BASE_URL=http://127.0.0.1:4000 -e LITELLM_API_KEY=dummy \
+            -e OD_BIND_HOST=0.0.0.0 -e OD_PORT=7457 \
+            "$PIN"
+          PASS=0
+          for i in $(seq 1 18); do
+            CODE="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:7457/ || echo 000)"
+            echo "boot-probe#$i -> $CODE"
+            [ "$CODE" = "401" ] && { PASS=1; break; }
+            sleep 10
+          done
+          docker logs od-e2e --tail 20 || true
+          docker rm -f od-e2e >/dev/null 2>&1 || true
+          [ "$PASS" = "1" ] && echo "E2E OK: 401 认证门（dummy key，应用活）" || { echo "FAIL: 3 分钟未见 401 门"; exit 1; }

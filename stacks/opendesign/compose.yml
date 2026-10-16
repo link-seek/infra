@@ -1,0 +1,37 @@
+name: opendesign
+# OD 收编栈（只收编，不切流）。
+# 现网运行体：HW21 /root/opendesign/compose.yml（黑户启动，tunnel → 127.0.0.1:7456）。
+# 与现网差异（有意，见 README 对账表）：
+#   镜像 tag → digest pin；明文 key 出 compose → .env；watchtower label 摘掉（改 pin PR＋deploy）。
+# 切流另起 dispatch（deploy-opendesign.yml），合 PR 不触发，不碰生产。
+services:
+  opendesign:
+    # 版本 pin（digest）：升级 = 改这行发 PR。禁止改回 :latest（watchtower 已摘，见 README）。
+    # 2026-10-16：线上 docker images --digests 取证（运行中容器 image ID 36f614176bcc 对应 manifest）。
+    image: swr.cn-north-9.myhuaweicloud.com/xieyucheng123/opendesign@sha256:d5688efe0e6821d679c7607a778c91d1b098b6ddb48931bb92bdc2d1bef4e2ae
+    pull_policy: always
+    container_name: opendesign
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 真值只活在目标机 .env（600，sops 下发），compose 里只留引用。现网 compose 明文写死的
+      # OD_API_TOKEN/ORIGINS/INTERNAL_HOSTS 在此全部改引用（密钥永不进仓，house rule）。
+      - OD_API_TOKEN=${OD_API_TOKEN}
+      - OD_ALLOWED_ORIGINS=${OD_ALLOWED_ORIGINS}
+      - OD_ALLOWED_INTERNAL_HOSTS=${OD_ALLOWED_INTERNAL_HOSTS}
+    # 7456 只绑宿主机回环：公网经隧道（见 edge/cloudflared ingress）。与现网一致，不加网桥绑定
+    #（现网 inspect 确认只有 127.0.0.1:7456；谁连 OD 只走隧道，见 README）。
+    ports:
+      - "127.0.0.1:7456:7456"
+    volumes:
+      # 数据卷沿用现网具名卷（不清、不迁、不重建；切流 verify 会校验卷仍在）：
+      - od-data:/app/.od
+      # home 数据留在原路径（/root/opendesign/home），不搬家；切流后旧目录归档，不断引用。
+      - /root/opendesign/home:/home/open-design
+    mem_limit: 512m
+volumes:
+  od-data:
+    # 显式同名复用现网卷（docker volume ls 取证：opendesign_od-data，local）。
+    # 即使 stack 目录改名也不会另建卷；deploy 永不 down -v。
+    name: opendesign_od-data
