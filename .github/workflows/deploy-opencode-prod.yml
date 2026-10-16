@@ -45,6 +45,7 @@ jobs:
       hostname_prefix: ci-prod
       verify_cmd: |
         test -f /root/stacks/opencode-prod/.env || { echo "ABORT: 目标机缺 .env"; exit 1; }
+          grep -q "^PIPELINE_MANAGED=true" /root/stacks/opencode-prod/.env || { echo "ABORT: .env 缺 PIPELINE_MANAGED=true 标记（可能被手动篡改）"; exit 1; }
         cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d
         sleep 20
         # 同工件比对必须用镜像 ID（RepoDigest 和 Id 是两个命名空间，混比永假——灰度误报根因）
