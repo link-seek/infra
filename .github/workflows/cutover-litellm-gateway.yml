@@ -95,33 +95,10 @@ jobs:
           tar -czf "/root/backups/litellm-guard-precut-$TS.tar.gz" -C /root/stacks litellm-guard
           cp -a /root/litellm-guard "/root/backups/litellm-guard-files-precut-$TS"
           echo "backup-ok: /root/backups/litellm-guard-precut-$TS.tar.gz"
-          # 2. 生成 config＋.env：key 统一用 GitHub secret（透传方案），不从 live 容器读
-          MK="${{ secrets.UNIFIED_API_KEY }}"
+          # 2. pass-through 模式：.env 不需要 key，只留非密钥项
           RULES_URL_LIVE="$(docker inspect litellm-guard --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^RULES_URL=' | cut -d= -f2- || true)"
-          python3 - "$MK" "$RULES_URL_LIVE" <<'PY2'
-          import sys, yaml
-          mk, rules_url = sys.argv[1], sys.argv[2]
-          live = yaml.safe_load(open('/root/litellm-guard/litellm_config.yaml'))
-          keys, mapping = [], {}
-          for e in live.get('model_list', []):
-              p = e.setdefault('litellm_params', {})
-              k = p.get('api_key')
-              if k is None:
-                  continue
-              if k not in mapping:
-                  keys.append(k); mapping[k] = f"GO_BACKEND_KEY_{len(keys)}"
-              p['api_key'] = f"os.environ/{mapping[k]}"
-          live.setdefault('general_settings', {})['forward_client_headers_to_llm_api'] = True
-          live.setdefault('litellm_settings', {})['drop_params'] = True
-          yaml.safe_dump(live, open('/root/stacks/litellm-gateway/config/litellm_config.yaml', 'w'), allow_unicode=True)
-          # 透传方案：所有 GO_BACKEND_KEY 和 LITELLM_MASTER_KEY 统一用同一个 key
-          lines = [f"{mapping[k]}={mk}" for k in keys]
-          lines += [f"LITELLM_MASTER_KEY={mk}", "DISABLE_ADMIN_UI=True", "RULES_FILE=/app/guard-rules.json"]
-          if rules_url:
-              lines.append(f"RULES_URL={rules_url}")
-          open('/root/stacks/litellm-gateway/.env', 'w').write("\n".join(lines) + "\n")
-          print(f"config-ok: models={len(live.get('model_list', []))} keyvars={len(keys)}")
-          PY2
+          printf 'DISABLE_ADMIN_UI=True\nRULES_FILE=/app/guard-rules.json\n' > /root/stacks/litellm-gateway/.env
+          [ -n "$RULES_URL_LIVE" ] && printf 'RULES_URL=%s\n' "$RULES_URL_LIVE" >> /root/stacks/litellm-gateway/.env
           chmod 600 /root/stacks/litellm-gateway/.env
           echo "env-ok: keys=$(grep -c '=' /root/stacks/litellm-gateway/.env) (值不打印)"
           # 3. 拉镜像（pin 已在仓里）
