@@ -29,6 +29,7 @@ services:
       - ./config/litellm_config.yaml:/app/config.yaml:ro
       - ./guard/vault_guard.py:/app/vault_guard.py:ro
       - ./guard/always_allow_auth.py:/app/always_allow_auth.py:ro
+      - ./guard/passthrough_key.py:/app/passthrough_key.py:ro
       - ./guard/guard-rules.json:/app/guard-rules.json:ro
       - ./guard/models-denied.json:/app/models-denied.json:ro
     command: --config /app/config.yaml --port 4000 --host 0.0.0.0

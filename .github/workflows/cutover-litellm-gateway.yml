@@ -46,7 +46,7 @@ jobs:
           done
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "md5sum /tmp/ci-cut-vault_guard.py /tmp/ci-cut-rules.json"
           # 同步 compose.yml 和 guard 文件到目标机
-          tar -czf - -C stacks/litellm-gateway compose.yml guard/always_allow_auth.py guard/vault_guard.py guard/guard-rules.json guard/models-denied.json | \
+          tar -czf - -C stacks/litellm-gateway compose.yml guard/always_allow_auth.py guard/passthrough_key.py guard/vault_guard.py guard/guard-rules.json guard/models-denied.json | \
             ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 \
             "cd /root/stacks/litellm-gateway && tar -xzf - && echo files-synced"
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
@@ -124,15 +124,21 @@ jobs:
           echo "container: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
           [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未起"; docker logs litellm-guard --tail 80 || true; }
           MK="${{ secrets.UNIFIED_API_KEY }}"
-          # 5. verify（pass-through 模式：不检查 key 验证，检查透传是否生效）
+          # 5. verify（透明代理：litellm 不验证 key，上游验证）
           PASS=1
           [ -n "$READY" ] || PASS=0
+          # 无 key 也能通（litellm user_custom_auth 接受任意 key）
           C0="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
-          echo "no-key: $C0 (pass-through)"; [ "$C0" != "000" ] || PASS=0
+          echo "no-key: $C0 (expect 200)"; [ "$C0" = "200" ] || PASS=0
+          # 有 key 的 chat 请求能透传到 opencode.ai 并返回 200
           CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MK" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
-          echo "chat-passthrough: $CC (expect 200)"; [ "$CC" = "200" ] || PASS=0
-          OC="$(docker exec opencode-prod curl -s -m 10 -o /dev/null -w '%{http_code}' http://host.docker.internal:4000/v1/models || echo 000)"
-          echo "opencode-reach: $OC"; [ "$OC" != "000" ] || PASS=0
+          echo "chat-valid-key: $CC (expect 200)"; [ "$CC" = "200" ] || PASS=0
+          # 无效 key 透传后上游返回 401（litellm 不拦截）
+          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "chat-invalid-key: $IC (expect 401 from upstream)"; [ "$IC" = "401" ] || PASS=0
+          # opencode session drain
+          OC="$(docker exec opencode-prod opencode run 'reply with exactly: PT-OK' 2>&1 | tail -1)"
+          echo "session-drain: $OC"; echo "$OC" | grep -q "PT-OK" || PASS=0
           if [ "$PASS" = "1" ]; then
             echo "CUTOVER OK"
             # session drain 回归测试：opencode run 必须成功（验证 key 透传 litellm → opencode.ai）
