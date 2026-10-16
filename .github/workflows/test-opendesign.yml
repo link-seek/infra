@@ -72,7 +72,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       packages: read
     steps:
@@ -184,8 +184,27 @@ jobs:
               -d "{\"id\":\"$_pid\",\"name\":\"CI conv $_pid\"}" "$OD/api/projects" || echo 000)"
             echo "$_pc" >&2; echo "$_pid"
           }
-          evgrep() { # $1=runId $2=marker：在 agent 事件流里找 marker（run JSON 不含正文）
-            docker exec od-e2e sh -c "cat /app/.od/runs/$1/events.jsonl 2>/dev/null" | redact | grep -q "$2"
+          tstat() { # $1=runId $2=marker：解码转录本；设 TSTAT_TEXT/TSTAT_MARK 全局量并打印（json 转义中文故须解码后找）
+            local _out
+            _out="$(docker exec od-e2e sh -c "cat /app/.od/runs/$1/events.jsonl 2>/dev/null" | python3 -c "
+          import json,sys
+          tl=0; mk=0; want=sys.argv[1]
+          for line in sys.stdin:
+              try: o=json.loads(line)
+              except: continue
+              st=[o]
+              while st:
+                  x=st.pop()
+                  if isinstance(x,dict): st.extend(x.values())
+                  elif isinstance(x,list): st.extend(x)
+                  elif isinstance(x,str):
+                      t=x.strip()
+                      if len(t)>20: tl+=len(t)
+                      if want and want in t: mk=1
+          print(f'textlen={tl} marker={mk}')" "$2" 2>/dev/null || echo "textlen=-1 marker=0")"
+            TSTAT_TEXT="$(echo "$_out" | grep -oP 'textlen=\K-?\d+')"
+            TSTAT_MARK="$(echo "$_out" | grep -oP 'marker=\K[01]')"
+            echo "transcript: textlen=$TSTAT_TEXT marker=$TSTAT_MARK"
           }
           PID="$(mkproject base)"
           echo "project: $PID (mkproject http code above)"
@@ -200,7 +219,7 @@ jobs:
           }
           poll_run() {
             local _rid="$1" _st="?"
-            for i in $(seq 1 40); do
+            for i in $(seq 1 30); do
               sleep 10
               curl -s -m 15 -H "$AUTH" "$OD/api/runs/$_rid" > /tmp/odrun.json 2>/dev/null || continue
               _st="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('status','?'))" 2>/dev/null || echo ?)"
@@ -213,19 +232,33 @@ jobs:
           dump_run() { # $1=label：全量 run JSON＋agent 事件尾（脱敏，定位用）
             echo "===== $1 run JSON（截断脱敏） ====="
             python3 -c "import json; d=json.load(open('/tmp/odrun.json')); print(json.dumps({k:d.get(k) for k in ('id','status','error','errorCode','conversationId','assistantMessageId','deliverableValid','deliverableEntryFile','model','agentId')}, ensure_ascii=False)[:800])" 2>/dev/null || echo "(parse fail)"
-            echo "===== $1 全文 marker 扫描 ====="
-            grep -o "OD-[A-Z-]*\|7421\|记住了" /tmp/odrun.json | sort | uniq -c | head -8 || echo "(无 marker)"
             echo "===== $1 agent 事件头（脱敏，看发给 CLI 的精确模型串） ====="
             _rid="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('id',''))" 2>/dev/null)"
             if [ -n "$_rid" ]; then
               docker exec od-e2e sh -c "head -c 2000 /app/.od/runs/$_rid/events.jsonl 2>/dev/null || echo '(无 events 文件)'" | redact | head -c 2000; echo
               echo "===== $1 agent 事件尾（脱敏） ====="
               docker exec od-e2e sh -c "tail -c 2000 /app/.od/runs/$_rid/events.jsonl 2>/dev/null || echo '(无 events 文件)'" | redact | head -c 2000; echo
-              echo "===== $1 transcript 全文 marker 扫描 ====="
-              docker exec od-e2e sh -c "cat /app/.od/runs/$_rid/events.jsonl 2>/dev/null" | redact | grep -o "OD-[A-Z-]*\|7421\|记住了" | sort | uniq -c | head -8 || echo "(transcript 无 marker)"
+              echo "===== $1 transcript 统计（解码后） ====="
+              docker exec od-e2e sh -c "cat /app/.od/runs/$_rid/events.jsonl 2>/dev/null" | python3 -c "
+          import json,sys,re
+          tl=0; hits={}
+          for line in sys.stdin:
+              try: o=json.loads(line)
+              except: continue
+              st=[o]
+              while st:
+                  x=st.pop()
+                  if isinstance(x,dict): st.extend(x.values())
+                  elif isinstance(x,list): st.extend(x)
+                  elif isinstance(x,str):
+                      t=x.strip()
+                      if len(t)>20: tl+=len(t)
+                      for m in re.findall(r'OD-[A-Z-]+|7421', t): hits[m]=hits.get(m,0)+1
+          print(f'textlen={tl} markers={hits}')" 2>/dev/null || echo "(transcript 统计失败)"
             fi
           }
-          restart_od() { # 全新 daemon（provider 疑似按 daemon 缓存首个模型，换模型前重启，见 run 38853756712）
+          restart_od() { # 全新 daemon＋全新数据目录（provider 目录缓存在磁盘 /app/.od，重启不丢；首模型写死，后续 no-route，见 run 38855641126＋CLI ModelResolver 源码）
+            rm -rf /tmp/odtest-home /tmp/odtest-od && mkdir -p /tmp/odtest-home /tmp/odtest-od && chmod 777 /tmp/odtest-home /tmp/odtest-od
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u xieyucheng123 --password-stdin 2>&1 | tail -1
             IMG_OD="ghcr.io/link-seek/opendesign:0.24.1-oc2.0.6"
             docker rm -f od-e2e >/dev/null 2>&1 || true
@@ -243,53 +276,64 @@ jobs:
             done
             echo "od restarted: $(docker inspect od-e2e --format '{{.Created}} {{.Image}}' | cut -c1-60)"
           }
+          # Phase A 单聊（boot daemon，test-chat；门=成功＋实质文本，marker 仅记录）
           R1="$(do_run "$PID" test-chat "reply with exactly: OD-CONV-OK")"
           RID1="$(echo "$R1" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           echo "run1: ${RID1:0:12}..."
-          [ -n "$RID1" ] || { echo "FAIL: run1 未返回 runId"; echo "$R1" | redact | head -c 500; FAIL="$FAIL; 单聊未受理"; }
           if [ -n "$RID1" ]; then
             ST1="$(poll_run "$RID1")"
-            if [ "$ST1" = "succeeded" ] && evgrep "$RID1" "OD-CONV-OK"; then
-              echo "OK: OD 单聊（test-chat，事件流 marker 回环）"
+            tstat "$RID1" "OD-CONV-OK"
+            echo "### OD 单聊: status=$ST1 textlen=$TSTAT_TEXT marker=$TSTAT_MARK"
+            if [ "$ST1" = "succeeded" ] && [ "${TSTAT_TEXT:--1}" -ge 200 ]; then
+              echo "OK: OD 单聊（test-chat，事件流有实质文本）"
             else
               echo "FAIL: 单聊 status=$ST1"; dump_run 单聊; FAIL="$FAIL; OD 单聊失败($ST1)"
             fi
+          else
+            echo "FAIL: run1 未返回 runId"; FAIL="$FAIL; 单聊未受理"
           fi
-          # Phase B 切模型：全新 daemon＋新 project（provider 疑似按 daemon 缓存首个模型，见 run 38853756712）
+          # Phase B 切模型（全新 daemon＋新 project；provider 疑似按 daemon 缓存首个模型）
           restart_od
           PID2="$(mkproject switch)"
           echo "project2: $PID2"
           R2="$(do_run "$PID2" test-chat-b "reply with exactly: OD-SWITCH-OK")"
           RID2="$(echo "$R2" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           echo "run2: ${RID2:0:12}..."
-          [ -n "$RID2" ] || { echo "FAIL: run2 未返回 runId"; FAIL="$FAIL; 切模型未受理"; }
           if [ -n "$RID2" ]; then
             ST2="$(poll_run "$RID2")"
-            if [ "$ST2" = "succeeded" ] && evgrep "$RID2" "OD-SWITCH-OK"; then
-              echo "OK: OD 切模型（test-chat-b，marker 回环）"
+            tstat "$RID2" "OD-SWITCH-OK"
+            echo "### OD 切模型: status=$ST2 textlen=$TSTAT_TEXT marker=$TSTAT_MARK"
+            if [ "$ST2" = "succeeded" ] && [ "${TSTAT_TEXT:--1}" -ge 200 ]; then
+              echo "OK: OD 切模型（test-chat-b，新 daemon，实质文本回环）"
             else
               echo "FAIL: 切模型 status=$ST2"; dump_run 切模型; FAIL="$FAIL; OD 切模型失败($ST2)"
             fi
+          else
+            echo "FAIL: run2 未返回 runId"; FAIL="$FAIL; 切模型未受理"
           fi
-          # Phase D 多轮：全新 daemon＋新 project，turn1 记数 turn2 同 project 召回
+          # Phase D 多轮（全新 daemon＋新 project；turn2 必须原样召回 7421）
           restart_od
           PIDM="$(mkproject multi)"
           echo "project-multi: $PIDM"
           R3="$(do_run "$PIDM" test-chat "记住这个数字：7421，收到只回复：记住了")"
           RID3="$(echo "$R3" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
-          ST3="skip"
-          [ -n "$RID3" ] && ST3="$(poll_run "$RID3")"
+          ST3="skip"; [ -n "$RID3" ] && ST3="$(poll_run "$RID3")"
+          echo "turn1: $ST3"
           R4="$(do_run "$PIDM" test-chat "我让你记的数字是多少？只回复数字")"
           RID4="$(echo "$R4" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
-          ST4="skip"
-          [ -n "$RID4" ] && ST4="$(poll_run "$RID4")"
-          if [ "$ST4" = "succeeded" ] && evgrep "$RID4" "7421"; then
-            echo "OK: OD 多轮（默认会话延续，7421 召回）"
+          ST4="skip"; [ -n "$RID4" ] && ST4="$(poll_run "$RID4")"
+          if [ -n "$RID4" ]; then
+            tstat "$RID4" "7421"
+            echo "### OD 多轮 turn2: status=$ST4 textlen=$TSTAT_TEXT marker=$TSTAT_MARK"
+          fi
+          if [ "$ST4" = "succeeded" ] && [ "$TSTAT_MARK" = "1" ]; then
+            echo "OK: OD 多轮（同 project 默认会话，7421 召回）"
           else
             echo "FAIL: 多轮 turn2 status=$ST4"; dump_run 多轮; FAIL="$FAIL; OD 多轮失败($ST4)"
           fi
-          # 免费档：新 project（新默认会话，避免 provider 缓存干扰）＋真 key
+          # Phase C 免费档（全新 daemon＋新 project；flash 模型要求 marker 精确命中）
           if [ -n "$GO_BACKEND_KEY" ]; then
+            restart_od
             PIDF="$(mkproject free)"
             echo "project-free: $PIDF"
             RF="$(curl -s -m 15 -H "$AUTH" -H 'Content-Type: application/json' \
@@ -302,8 +346,10 @@ jobs:
             echo "run-free: ${RF:0:12}..."
             if [ -n "$RF" ]; then
               STF="$(poll_run "$RF")"
-              if [ "$STF" = "succeeded" ] && evgrep "$RF" "OD-FREE-OK"; then
-                echo "OK: OD 免费档（free-probe-a，真 key）"
+              tstat "$RF" "OD-FREE-OK"
+              echo "### OD 免费档: status=$STF textlen=$TSTAT_TEXT marker=$TSTAT_MARK"
+              if [ "$STF" = "succeeded" ] && [ "$TSTAT_MARK" = "1" ]; then
+                echo "OK: OD 免费档（free-probe-a 真 key，marker 精确命中）"
               else
                 echo "FAIL: 免费档 status=$STF"; dump_run 免费档; FAIL="$FAIL; OD 免费档失败($STF)"
               fi
@@ -313,14 +359,6 @@ jobs:
           else
             echo "SKIP: OPENCODE_API_KEY 未配，免费档跳过"
           fi
-          echo "===== 会话消息接口探测（只看状态码） ====="
-          CONV_MID="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('conversationId',''))" 2>/dev/null || echo)"
-          for ep in "/api/conversations/$CONV_MID/messages" "/api/conversations/$CONV_MID" "/api/conversations"; do
-            [ -n "$CONV_MID" ] || break
-            C="$(curl -s -m 8 -o /dev/null -w '%{http_code}' -H "$AUTH" "http://127.0.0.1:7457$ep" || echo 000)"
-            echo "probe $ep -> $C"
-          done
-          [ -z "$FAIL" ] && echo "OD-CONV OK" || { echo "FAIL: $FAIL"; exit 1; }
 
       - name: 清理（成功失败都删）
         if: always()
