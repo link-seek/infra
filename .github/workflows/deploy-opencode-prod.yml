@@ -46,7 +46,7 @@ jobs:
       verify_cmd: |
         test -f /root/stacks/opencode-prod/.env || { echo "ABORT: 目标机缺 .env"; exit 1; }
         # 用 GitHub secret 注入统一 key（透传方案：opencode → litellm → opencode.ai 同一 key）
-        sed -i "s|^LITELLM_API_KEY=.*|LITELLM_API_KEY=${{ secrets.UNIFIED_API_KEY }}|" /root/stacks/opencode-prod/.env
+        sed -i "s|^LITELLM_API_KEY=.*|LITELLM_API_KEY=__UNIFIED_KEY__|" /root/stacks/opencode-prod/.env
         cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d
         sleep 20
         # 同工件比对必须用镜像 ID（RepoDigest 和 Id 是两个命名空间，混比永假——灰度误报根因）
@@ -95,3 +95,4 @@ jobs:
     secrets:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}

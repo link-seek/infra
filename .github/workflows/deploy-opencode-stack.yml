@@ -39,6 +39,8 @@ on:
         required: true
       SSH_KEY:
         required: true
+      UNIFIED_API_KEY:
+        required: false
 
 jobs:
   deploy:
@@ -77,6 +79,7 @@ jobs:
         timeout-minutes: 12
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
+          UNIFIED_KEY: ${{ secrets.UNIFIED_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -91,7 +94,12 @@ jobs:
           tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
             "mkdir -p ${{ inputs.remote_dir }} && tar -xzf - -C ${{ inputs.remote_dir }} && echo synced"
-          # verify 经 heredoc 下发：verify_cmd 内任意引号都不破（试用终检的 -w "..." 曾撑破外层双引号）
-          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s <<'VERIFY_EOF'
+          # verify 经临时文件下发：先写 verify_cmd，替换 __UNIFIED_KEY__ 占位符，再 SSH 发送
+          cat > /tmp/verify_cmd.sh <<'VERIFY_EOF'
           ${{ inputs.verify_cmd }}
           VERIFY_EOF
+          if [ -n "$UNIFIED_KEY" ]; then
+            sed -i "s|__UNIFIED_KEY__|$UNIFIED_KEY|g" /tmp/verify_cmd.sh
+          fi
+          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s < /tmp/verify_cmd.sh
+          rm -f /tmp/verify_cmd.sh
