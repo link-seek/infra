@@ -90,7 +90,7 @@ jobs:
             maintain) TEAM_PERM=maintain ;;
             *) TEAM_PERM=push ;;
           esac
-          gh api -X PUT "orgs/link-seek/teams/$TEAM/repos/link-seek/$REPO" \
+          gh api -X PUT "orgs/link-seek/teams/$TEAM/repos/$TARGET" \
             -f permission="$TEAM_PERM" --jq '{permission}' --header Accept:application/vnd.github+json
           gh api -X PUT "orgs/link-seek/teams/$TEAM/memberships/$LOGIN" \
             -f role=member --jq '{state}'
