@@ -119,18 +119,15 @@ jobs:
           done
           echo "container: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
           [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未起"; docker logs litellm-guard --tail 80 || true; }
-          # 5. verify（无 key 401 + 有 key 模型数 + 黑名单 400 + opencode 可达）
+          # 5. verify（pass-through 模式：不检查 key 验证，检查透传是否生效）
           PASS=1
           [ -n "$READY" ] || PASS=0
           C0="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
-          echo "no-key: $C0"; [ "$C0" = "401" ] || PASS=0
-          MC="$(curl -s -m 10 -H "Authorization: Bearer $MK" http://127.0.0.1:4000/v1/models | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]))' 2>/dev/null || echo -1)"
-          echo "models: $MC (live=45)"; [ "$MC" = "45" ] || PASS=0
-          BC="$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MK" -H 'Content-Type: application/json' \
-            -d '{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}]}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
-          echo "denied(kimi-k3): $BC"; [ "$BC" = "400" ] || PASS=0
+          echo "no-key: $C0 (pass-through)"; [ "$C0" != "000" ] || PASS=0
+          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MK" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "chat-passthrough: $CC (expect 200)"; [ "$CC" = "200" ] || PASS=0
           OC="$(docker exec opencode-prod curl -s -m 10 -o /dev/null -w '%{http_code}' http://host.docker.internal:4000/v1/models || echo 000)"
-          echo "opencode-reach: $OC"; [ "$OC" = "401" ] || PASS=0
+          echo "opencode-reach: $OC"; [ "$OC" != "000" ] || PASS=0
           if [ "$PASS" = "1" ]; then
             echo "CUTOVER OK"
             # session drain 回归测试：opencode run 必须成功（验证 key 透传 litellm → opencode.ai）
