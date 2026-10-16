@@ -175,18 +175,27 @@ jobs:
           set -u
           OD="http://127.0.0.1:7457"; AUTH="Authorization: Bearer dummy-token"
           FAIL=""
-          PID="od-ci-$GITHUB_RUN_ID"
-          PC="$(curl -s -m 15 -o /dev/null -w '%{http_code}' -H "$AUTH" -H 'Content-Type: application/json' \
-            -d "{\"id\":\"$PID\",\"name\":\"CI conv $PID\"}" "$OD/api/projects" || echo 000)"
-          echo "project: $PC"
-          case "$PC" in 200|201|409) echo "OK: project 就绪";; *) FAIL="$FAIL; 建 project 失败($PC)";; esac
+          # 建 project（每个模型独立 project = 独立默认 conversation；OD 疑似按 conversation 缓存 provider 配置，
+          # 同会话换模型会被拒 no-route（run 38852669994 事件流实证）；多轮靠默认会话延续不显式传 conversationId）
+          mkproject() {
+            local _pid="od-ci-$GITHUB_RUN_ID-$1"
+            local _pc
+            _pc="$(curl -s -m 15 -o /dev/null -w '%{http_code}' -H "$AUTH" -H 'Content-Type: application/json' \
+              -d "{\"id\":\"$_pid\",\"name\":\"CI conv $_pid\"}" "$OD/api/projects" || echo 000)"
+            echo "$_pc" >&2; echo "$_pid"
+          }
+          evgrep() { # $1=runId $2=marker：在 agent 事件流里找 marker（run JSON 不含正文）
+            docker exec od-e2e sh -c "cat /app/.od/runs/$1/events.jsonl 2>/dev/null" | redact | grep -q "$2"
+          }
+          PID="$(mkproject base)"
+          echo "project: $PID (mkproject http code above)"
           do_run() {
-            local _model="$1" _msg="$2" _extra="${3:-{}}"
+            local _pj="$1" _model="$2" _msg="$3"
             local _rid="req-$(cat /proc/sys/kernel/random/uuid)"
             curl -s -m 15 -H "$AUTH" -H 'Content-Type: application/json' \
-              -d "$(jq -n --arg p "$PID" --arg r "$_rid" --arg m "$_msg" --arg mo "$_model" --argjson ex "$_extra" \
+              -d "$(jq -n --arg p "$_pj" --arg r "$_rid" --arg m "$_msg" --arg mo "$_model" \
                 '{projectId:$p, clientRequestId:$r, message:$m, agentId:"byok-opencode", model:$mo,
-                  byokProvider:{protocol:"openai", apiKey:"test-only", baseUrl:"http://127.0.0.1:4001/v1", model:$mo}} * $ex')" \
+                  byokProvider:{protocol:"openai", apiKey:"test-only", baseUrl:"http://127.0.0.1:4001/v1", model:$mo}}')" \
               "$OD/api/runs" || echo '{"error":"CURLFAIL"}'
           }
           poll_run() {
@@ -212,49 +221,53 @@ jobs:
               docker exec od-e2e sh -c "tail -c 1500 /app/.od/runs/$_rid/events.jsonl 2>/dev/null || echo '(无 events 文件)'" | redact | head -c 1500; echo
             fi
           }
-          R1="$(do_run test-chat "reply with exactly: OD-CONV-OK")"
+          R1="$(do_run "$PID" test-chat "reply with exactly: OD-CONV-OK")"
           RID1="$(echo "$R1" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           echo "run1: ${RID1:0:12}..."
           [ -n "$RID1" ] || { echo "FAIL: run1 未返回 runId"; echo "$R1" | redact | head -c 500; FAIL="$FAIL; 单聊未受理"; }
           if [ -n "$RID1" ]; then
             ST1="$(poll_run "$RID1")"
-            if [ "$ST1" = "succeeded" ] && grep -q "OD-CONV-OK" /tmp/odrun.json; then
-              echo "OK: OD 单聊（test-chat，marker 回环）"
+            if [ "$ST1" = "succeeded" ] && evgrep "$RID1" "OD-CONV-OK"; then
+              echo "OK: OD 单聊（test-chat，事件流 marker 回环）"
             else
               echo "FAIL: 单聊 status=$ST1"; dump_run 单聊; FAIL="$FAIL; OD 单聊失败($ST1)"
             fi
-            CONV1="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('conversationId',''))" 2>/dev/null)"
           fi
-          R2="$(do_run test-chat-b "reply with exactly: OD-SWITCH-OK")"
+          # 切模型用新 project（新默认 conversation；同会话换模型会被拒 no-route，见 run 38852669994）
+          PID2="$(mkproject switch)"
+          echo "project2: $PID2"
+          R2="$(do_run "$PID2" test-chat-b "reply with exactly: OD-SWITCH-OK")"
           RID2="$(echo "$R2" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           echo "run2: ${RID2:0:12}..."
           [ -n "$RID2" ] || { echo "FAIL: run2 未返回 runId"; FAIL="$FAIL; 切模型未受理"; }
           if [ -n "$RID2" ]; then
             ST2="$(poll_run "$RID2")"
-            if [ "$ST2" = "succeeded" ] && grep -q "OD-SWITCH-OK" /tmp/odrun.json; then
+            if [ "$ST2" = "succeeded" ] && evgrep "$RID2" "OD-SWITCH-OK"; then
               echo "OK: OD 切模型（test-chat-b，marker 回环）"
             else
               echo "FAIL: 切模型 status=$ST2"; dump_run 切模型; FAIL="$FAIL; OD 切模型失败($ST2)"
             fi
           fi
-          if [ -n "${CONV1:-}" ]; then
-            R3="$(do_run test-chat "记住这个数字：7421，收到只回复：记住了" "{\"conversationId\":\"$CONV1\"}")"
-            RID3="$(echo "$R3" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
-            ST3="$(poll_run "$RID3")"
-            R4="$(do_run test-chat "我让你记的数字是多少？只回复数字" "{\"conversationId\":\"$CONV1\"}")"
-            RID4="$(echo "$R4" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
-            ST4="$(poll_run "$RID4")"
-            if [ "$ST4" = "succeeded" ] && grep -q "7421" /tmp/odrun.json; then
-              echo "OK: OD 多轮（同 conversation，7421 召回）"
-            else
-              echo "FAIL: 多轮 status=$ST4"; dump_run 多轮; FAIL="$FAIL; OD 多轮失败($ST4)"
-            fi
+          # 多轮：默认会话延续（两转都不传 conversationId，同进默认会话；显式传曾触发 BAD_REQUEST）
+          R3="$(do_run "$PID" test-chat "记住这个数字：7421，收到只回复：记住了")"
+          RID3="$(echo "$R3" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
+          ST3="skip"
+          [ -n "$RID3" ] && ST3="$(poll_run "$RID3")"
+          R4="$(do_run "$PID" test-chat "我让你记的数字是多少？只回复数字")"
+          RID4="$(echo "$R4" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
+          ST4="skip"
+          [ -n "$RID4" ] && ST4="$(poll_run "$RID4")"
+          if [ "$ST4" = "succeeded" ] && evgrep "$RID4" "7421"; then
+            echo "OK: OD 多轮（默认会话延续，7421 召回）"
           else
-            echo "FAIL: 无 conversationId，多轮跳过"; FAIL="$FAIL; 多轮无 conversationId"
+            echo "FAIL: 多轮 turn2 status=$ST4"; dump_run 多轮; FAIL="$FAIL; OD 多轮失败($ST4)"
           fi
+          # 免费档：新 project（新默认会话，避免 provider 缓存干扰）＋真 key
           if [ -n "$GO_BACKEND_KEY" ]; then
+            PIDF="$(mkproject free)"
+            echo "project-free: $PIDF"
             RF="$(curl -s -m 15 -H "$AUTH" -H 'Content-Type: application/json' \
-              -d "$(jq -n --arg p "$PID" --arg r "req-$(cat /proc/sys/kernel/random/uuid)" \
+              -d "$(jq -n --arg p "$PIDF" --arg r "req-$(cat /proc/sys/kernel/random/uuid)" \
                 --arg k "$GO_BACKEND_KEY" \
                 '{projectId:$p, clientRequestId:$r, message:"reply with exactly: OD-FREE-OK",
                   agentId:"byok-opencode", model:"free-probe-a",
@@ -263,7 +276,7 @@ jobs:
             echo "run-free: ${RF:0:12}..."
             if [ -n "$RF" ]; then
               STF="$(poll_run "$RF")"
-              if [ "$STF" = "succeeded" ] && grep -q "OD-FREE-OK" /tmp/odrun.json; then
+              if [ "$STF" = "succeeded" ] && evgrep "$RF" "OD-FREE-OK"; then
                 echo "OK: OD 免费档（free-probe-a，真 key）"
               else
                 echo "FAIL: 免费档 status=$STF"; dump_run 免费档; FAIL="$FAIL; OD 免费档失败($STF)"
