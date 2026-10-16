@@ -46,6 +46,7 @@ jobs:
         timeout-minutes: 18
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          OD_PROD_ENV: ${{ secrets.OD_PROD_ENV }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -55,11 +56,13 @@ jobs:
           tar -czf - -C stacks/opendesign compose.yml README.md .env.example | \
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
             "mkdir -p /root/stacks/opendesign && tar -xzf - -C /root/stacks/opendesign && echo synced"
+          # 0. 渲染 .env（runner 侧：GitHub Secrets → 本机 600；机器随时可回收，真值只活 GitHub）
+          #    OD_PROD_ENV 为整份 .env（5 行，见 stacks/opendesign/.env.example）；值由 GitHub 自动打码，日志只列键名。
+          printf '%s\n' "$OD_PROD_ENV" | ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
+            "cat > /root/stacks/opendesign/.env && chmod 600 /root/stacks/opendesign/.env && cut -d= -f1 /root/stacks/opendesign/.env"
           ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s <<'EOF'
           set -euo pipefail
           TS="$(date -u +%Y%m%dT%H%M%SZ)"
-          # 0. 门禁：.env 必须已落盘（sops，600），缺失直接 abort，不猜密钥
-          [ -f /root/stacks/opendesign/.env ] || { echo "ABORT: /root/stacks/opendesign/.env 缺失（先按 sops 落盘 600）"; exit 1; }
           [ -f /root/opendesign/compose.yml ] || { echo "ABORT: 旧目录不在，回滚无依"; exit 1; }
           # 1. 备份旧目录（compose＋.env＋home 引用不断，只备文件）
           mkdir -p /root/backups
