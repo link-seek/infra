@@ -80,11 +80,14 @@ jobs:
             exit 1
           fi
           # secret 团队 ai-agents：建了复用，push 挂目标仓，以后新号直接进组
-          TEAM=$(gh api -X POST orgs/link-seek/teams \
-            -f name=ai-agents \
-            -f description="自建 AI 机器号（onboard-account 维护）" \
-            -f privacy=secret --jq .slug 2>/dev/null \
-            || echo ai-agents)
+          if gh api orgs/link-seek/teams/ai-agents --jq .slug >/dev/null 2>&1; then
+            TEAM=ai-agents
+          else
+            TEAM=$(gh api -X POST orgs/link-seek/teams \
+              -f name=ai-agents \
+              -f description="自建 AI 机器号（onboard-account 维护）" \
+              -f privacy=secret --jq .slug)
+          fi
           case "$PERMISSION" in
             pull|triage) TEAM_PERM=$PERMISSION ;;
             maintain) TEAM_PERM=maintain ;;
