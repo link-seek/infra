@@ -5,6 +5,7 @@ general_settings:
   drop_params: true
   forward_client_headers_to_llm_api: true
   enforce_user_api_key_auth: false
+  dangerously_permit_weak_or_unset_master_key: true
   pass_through_endpoints:
     - path: /v1/chat/completions
       target: https://opencode.ai/zen/go/v1/chat/completions
