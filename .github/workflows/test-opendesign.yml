@@ -201,6 +201,17 @@ jobs:
             echo "$_st"
           }
           redact() { sed -E -e 's/(sk-[A-Za-z0-9\-_]{6})[A-Za-z0-9\-_]+/\1<redacted>/g' -e 's/(Bearer )[A-Za-z0-9\-_\.]+/\1<redacted>/g'; }
+          dump_run() { # $1=label：全量 run JSON＋agent 事件尾（脱敏，定位用）
+            echo "===== $1 run JSON（截断脱敏） ====="
+            python3 -c "import json; d=json.load(open('/tmp/odrun.json')); print(json.dumps({k:d.get(k) for k in ('id','status','error','errorCode','conversationId','assistantMessageId','deliverableValid','deliverableEntryFile','model','agentId')}, ensure_ascii=False)[:800])" 2>/dev/null || echo "(parse fail)"
+            echo "===== $1 全文 marker 扫描 ====="
+            grep -o "OD-[A-Z-]*\|7421\|记住了" /tmp/odrun.json | sort | uniq -c | head -8 || echo "(无 marker)"
+            echo "===== $1 agent 事件尾（脱敏） ====="
+            _rid="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('id',''))" 2>/dev/null)"
+            if [ -n "$_rid" ]; then
+              docker exec od-e2e sh -c "tail -c 1500 /app/.od/runs/$_rid/events.jsonl 2>/dev/null || echo '(无 events 文件)'" | redact | head -c 1500; echo
+            fi
+          }
           R1="$(do_run test-chat "reply with exactly: OD-CONV-OK")"
           RID1="$(echo "$R1" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           echo "run1: ${RID1:0:12}..."
@@ -210,7 +221,7 @@ jobs:
             if [ "$ST1" = "succeeded" ] && grep -q "OD-CONV-OK" /tmp/odrun.json; then
               echo "OK: OD 单聊（test-chat，marker 回环）"
             else
-              echo "FAIL: 单聊 status=$ST1"; grep -oE '"error":"[^"]{0,200}|"errorCode":"[^"]{0,60}' /tmp/odrun.json | redact | head -5; FAIL="$FAIL; OD 单聊失败($ST1)"
+              echo "FAIL: 单聊 status=$ST1"; dump_run 单聊; FAIL="$FAIL; OD 单聊失败($ST1)"
             fi
             CONV1="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('conversationId',''))" 2>/dev/null)"
           fi
@@ -223,7 +234,7 @@ jobs:
             if [ "$ST2" = "succeeded" ] && grep -q "OD-SWITCH-OK" /tmp/odrun.json; then
               echo "OK: OD 切模型（test-chat-b，marker 回环）"
             else
-              echo "FAIL: 切模型 status=$ST2"; FAIL="$FAIL; OD 切模型失败($ST2)"
+              echo "FAIL: 切模型 status=$ST2"; dump_run 切模型; FAIL="$FAIL; OD 切模型失败($ST2)"
             fi
           fi
           if [ -n "${CONV1:-}" ]; then
@@ -236,7 +247,7 @@ jobs:
             if [ "$ST4" = "succeeded" ] && grep -q "7421" /tmp/odrun.json; then
               echo "OK: OD 多轮（同 conversation，7421 召回）"
             else
-              echo "FAIL: 多轮 status=$ST4"; FAIL="$FAIL; OD 多轮失败($ST4)"
+              echo "FAIL: 多轮 status=$ST4"; dump_run 多轮; FAIL="$FAIL; OD 多轮失败($ST4)"
             fi
           else
             echo "FAIL: 无 conversationId，多轮跳过"; FAIL="$FAIL; 多轮无 conversationId"
@@ -255,7 +266,7 @@ jobs:
               if [ "$STF" = "succeeded" ] && grep -q "OD-FREE-OK" /tmp/odrun.json; then
                 echo "OK: OD 免费档（free-probe-a，真 key）"
               else
-                echo "FAIL: 免费档 status=$STF"; grep -oE '"error":"[^"]{0,200}' /tmp/odrun.json | redact | head -3; FAIL="$FAIL; OD 免费档失败($STF)"
+                echo "FAIL: 免费档 status=$STF"; dump_run 免费档; FAIL="$FAIL; OD 免费档失败($STF)"
               fi
             else
               FAIL="$FAIL; 免费档未受理"
