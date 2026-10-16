@@ -314,23 +314,35 @@ jobs:
           [ -n "$OK2" ] || FAIL="$FAIL; mask/restore 回包非原文"
           # 3. 免费档真客户端三件套（上游免费档锁 OpenCode 客户端，直调 403，只有真客户端能过；
           #    经网关 free-probe-a/b 条目→inference 端口。marker/数字全合成，无敏感）。
+          #    注意：-m 传自定义模型会被客户端拒（provider.no-route，只认 models.dev），故按模型分
+          #    config 文件、serve 重启切换（config 默认模型直通网关，已由 GW-OK 证实）。
+          start_gw() { # $1 = a|b（config 后缀），$2 = 模型名
+            mkdir -p "/tmp/oc-cfg-gw-$1"
+            sed "s#gw/test-chat#gw/$2#" /tmp/oc-cfg-gw/opencode.jsonc > "/tmp/oc-cfg-gw-$1/opencode.jsonc"
+            docker rm -f oc-gwtest >/dev/null 2>&1 || true
+            sleep 3
+            docker run -d --name oc-gwtest --network host \
+              -v "/tmp/oc-cfg-gw-$1/opencode.jsonc:/root/.config/opencode/opencode.jsonc:ro" \
+              -e OPENCODE_SERVER_PASSWORD=test-srv-pw \
+              "$PIN" serve --port 4096 --hostname 127.0.0.1
+            for i in $(seq 1 24); do
+              curl -sf --max-time 5 http://127.0.0.1:4096/ >/dev/null 2>&1 && break
+              sleep 5
+            done
+            curl -sf --max-time 10 http://127.0.0.1:4096/ >/dev/null || { echo "FAIL: serve ($2) 未起"; exit 1; }
+            echo "serve ok: $2"
+          }
+          start_gw a free-probe-a
           OK3=""
           for attempt in 1 2 3; do
-            timeout 280 $OEX -m gw/free-probe-a "reply with exactly: FREE-CLIENT-OK" > /tmp/free1-out.txt 2>&1 && \
+            timeout 280 $OEX "reply with exactly: FREE-CLIENT-OK" > /tmp/free1-out.txt 2>&1 && \
             grep -q "FREE-CLIENT-OK" /tmp/free1-out.txt && { OK3=1; echo "OK: free single (attempt $attempt)"; break; }
             echo "--- free single attempt $attempt:"; tail -5 /tmp/free1-out.txt
           done
           [ -n "$OK3" ] || FAIL="$FAIL; 免费单聊不通（free-probe-a）"
-          OK4=""
-          for attempt in 1 2 3; do
-            timeout 280 $OEX -m gw/free-probe-b "reply with exactly: SWITCH-CLIENT-OK" > /tmp/free2-out.txt 2>&1 && \
-            grep -q "SWITCH-CLIENT-OK" /tmp/free2-out.txt && { OK4=1; echo "OK: free switch (attempt $attempt)"; break; }
-            echo "--- free switch attempt $attempt:"; tail -5 /tmp/free2-out.txt
-          done
-          [ -n "$OK4" ] || FAIL="$FAIL; 免费切模型不通（free-probe-b）"
-          # 4. 免费多轮（同 session：先记数，取 session id，再续问；--session/-s 见 CLI 文档）
+          # 4. 免费多轮（同 server 同 session：先记数，取 session id，再续问；--session/-s 见 CLI 文档）
           SID=""
-          timeout 280 $OEX -m gw/free-probe-a --format json "记住这个数字：7421，收到只回复：记住了" > /tmp/multi1-out.txt 2>&1 || true
+          timeout 280 $OEX --format json "记住这个数字：7421，收到只回复：记住了" > /tmp/multi1-out.txt 2>&1 || true
           SID="$(python3 -c "
           import re
           t = open('/tmp/multi1-out.txt', errors='replace').read()
@@ -350,7 +362,7 @@ jobs:
           OK5=""
           if [ -n "$SID" ] && grep -q "记住了" /tmp/multi1-out.txt; then
             for attempt in 1 2 3; do
-              timeout 280 $OEX -m gw/free-probe-a -s "$SID" "我让你记的数字是多少？只回复数字" > /tmp/multi2-out.txt 2>&1 && \
+              timeout 280 $OEX -s "$SID" "我让你记的数字是多少？只回复数字" > /tmp/multi2-out.txt 2>&1 && \
               grep -q "7421" /tmp/multi2-out.txt && { OK5=1; echo "OK: free multi-turn (attempt $attempt)"; break; }
               echo "--- free multi attempt $attempt:"; tail -5 /tmp/multi2-out.txt
             done
@@ -358,5 +370,14 @@ jobs:
             echo "--- multi turn1 output:"; tail -8 /tmp/multi1-out.txt
           fi
           [ -n "$OK5" ] || FAIL="$FAIL; 免费多轮未召回 7421"
+          # 5. 免费切模型（config 默认切 free-probe-b，serve 重启；跨模型路由）
+          start_gw b free-probe-b
+          OK4=""
+          for attempt in 1 2 3; do
+            timeout 280 $OEX "reply with exactly: SWITCH-CLIENT-OK" > /tmp/free2-out.txt 2>&1 && \
+            grep -q "SWITCH-CLIENT-OK" /tmp/free2-out.txt && { OK4=1; echo "OK: free switch (attempt $attempt)"; break; }
+            echo "--- free switch attempt $attempt:"; tail -5 /tmp/free2-out.txt
+          done
+          [ -n "$OK4" ] || FAIL="$FAIL; 免费切模型不通（free-probe-b）"
           docker rm -f oc-gwtest >/dev/null 2>&1 || true
           [ -z "$FAIL" ] && echo "OPENCODE-LOOP OK" || { echo "FAIL: $FAIL"; exit 1; }
