@@ -181,6 +181,8 @@ jobs:
           curl -s --max-time 10 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" | head -c 200; echo
 
       - name: Probes（模型表＋embedding＋黑名单＋401）
+        env:
+          GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
           python3 - <<'EOF'
           import json, sys, urllib.request, urllib.error
@@ -233,7 +235,29 @@ jobs:
           print(f"passthrough: {st} {txt}")
           if st != 200:
               failures.append(f"透传失败: {st}")
-          # 6. 真模型单聊（free 档 glm-5.3-flash；GO_BACKEND_KEY=org OPENCODE_API_KEY，CI 打码）
+          # 5b. 直调上游（隔离 key 与网关；状态码只打码，body 200 即 key 有效）
+          ust, ubody = (lambda: (0, {}))(), None
+          try:
+              import os
+              ukey = os.environ.get("GO_BACKEND_KEY", "")
+              ureq = urllib.request.Request(
+                  "https://opencode.ai/zen/go/v1/models",
+                  headers={"Authorization": f"Bearer {ukey}"})
+              with urllib.request.urlopen(ureq, timeout=30) as r:
+                  ust, ubody = r.status, json.loads(r.read().decode())
+              print(f"direct-upstream models: {ust} count={len(ubody.get('data', []))}")
+              if ust != 200:
+                  failures.append(f"直调上游非 200: {ust}（key 或上游 entitlement 问题，与网关无关）")
+          except urllib.error.HTTPError as e:
+              try:
+                  emsg = e.read().decode()[:300]
+              except Exception:
+                  emsg = ""
+              print(f"direct-upstream models: {e.code} {emsg}")
+              failures.append(f"直调上游 {e.code}（key 或上游 entitlement 问题，与网关无关）")
+          except Exception as e:
+              print(f"direct-upstream models: -1 {e}")
+              failures.append("直调上游异常（runner 出境或上游挂）")
           def chat(model, messages, marker, tries=2):
               for a in range(1, tries + 1):
                   st, body = gw("/v1/chat/completions", {"model": model, "messages": messages})
@@ -243,7 +267,9 @@ jobs:
                       txt = json.dumps(body)[:200]
                   print(f"upstream({model}) attempt{a}: {st} {txt[:80]}")
                   if st == 200 and marker in txt:
+                      print(f"  ok: {txt[:60]}")
                       return True
+              print(f"  FAIL-body: {txt[:800]}")
               return False
           if not chat("glm-5.3-flash", [{"role": "user", "content": "reply with exactly: FREE-OK"}], "FREE-OK"):
               failures.append("真模型单聊失败: glm-5.3-flash")
