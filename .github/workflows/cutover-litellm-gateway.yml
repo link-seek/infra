@@ -119,6 +119,7 @@ jobs:
           done
           echo "container: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
           [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未起"; docker logs litellm-guard --tail 80 || true; }
+          MK="${{ secrets.UNIFIED_API_KEY }}"
           # 5. verify（pass-through 模式：不检查 key 验证，检查透传是否生效）
           PASS=1
           [ -n "$READY" ] || PASS=0
@@ -138,14 +139,6 @@ jobs:
             else
               echo "DRAIN TEST WARN: opencode run 未返回预期结果（可能模型侧问题，不影响网关）"
               echo "output: $(echo "$DRAIN_OUT" | head -3)"
-            fi
-            # key 一致性：litellm master key == GO_BACKEND_KEY（透传前提）
-            LL_MK="$(docker exec litellm-guard printenv LITELLM_MASTER_KEY 2>/dev/null | md5sum | cut -d' ' -f1)"
-            LL_GO="$(docker exec litellm-guard printenv GO_BACKEND_KEY_1 2>/dev/null | md5sum | cut -d' ' -f1)"
-            if [ -n "$LL_MK" ] && [ "$LL_MK" = "$LL_GO" ]; then
-              echo "KEY CHECK OK: LITELLM_MASTER_KEY == GO_BACKEND_KEY_1（透传一致）"
-            else
-              echo "KEY CHECK WARN: master key != go backend key（非透传模式，session drain 可能 400）"
             fi
             echo "===== sync-back 用（模型名，不含 key；回仓对账用） ====="
             grep -E '^ *- model_name:' /root/stacks/litellm-gateway/config/litellm_config.yaml | head -50 || true
