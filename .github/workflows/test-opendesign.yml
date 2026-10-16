@@ -39,10 +39,10 @@ jobs:
               print("FAIL: watchtower label 未摘"); bad += 1
           else:
               print("OK: watchtower 已摘")
-          if "OD_API_TOKEN=" in comp or "LITELLM_API_KEY=" in comp:
+          if re.search(r"OD_API_TOKEN=(?!\$\{)", comp) or re.search(r"LITELLM_API_KEY=(?!\$\{)", comp):
               print("FAIL: compose 含明文 key 赋值"); bad += 1
           else:
-              print("OK: compose 无明文 key")
+              print("OK: compose 无明文 key（全 ${VAR} 引用）")
           env = open(f"{S}/.env.example").read()
           for k in ("OD_API_TOKEN=", "OD_ALLOWED_ORIGINS=", "OD_ALLOWED_INTERNAL_HOSTS=",
                     "LITELLM_BASE_URL=", "LITELLM_API_KEY="):
@@ -71,15 +71,21 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      packages: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: 拉 pin 镜像（SWR 匿名，与 test-memory 同模式）
+      - name: 拉 pin 镜像（GHCR＋GITHUB_TOKEN；SWR 匿名被拒，见 run 38830156947）
         run: |
           PIN="$(grep -oP '^\s*image:\s*\K\S+opendesign@\S+' stacks/opendesign/compose.yml | head -n1)"
           echo "opendesign pin: ${PIN:0:80}..."
-          docker pull -q "$PIN"
-          echo "OK: pin 可拉取（SWR 匿名）"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u xieyucheng123 --password-stdin
+          GHCR_PIN="$(echo "$PIN" | sed 's#swr.cn-north-9.myhuaweicloud.com/xieyucheng123#ghcr.io/link-seek#')"
+          echo "ghcr pin: ${GHCR_PIN:0:80}..."
+          docker pull -q "$GHCR_PIN"
+          docker tag "$GHCR_PIN" "$PIN"
+          echo "OK: pin 可拉取（GHCR 同构建双推，digest 一致）"
 
       - name: Boot（dummy 密钥，401 门即活）
         run: |
