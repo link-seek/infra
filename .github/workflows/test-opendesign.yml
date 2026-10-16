@@ -72,7 +72,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       packages: read
     steps:
@@ -200,7 +200,7 @@ jobs:
           }
           poll_run() {
             local _rid="$1" _st="?"
-            for i in $(seq 1 30); do
+            for i in $(seq 1 40); do
               sleep 10
               curl -s -m 15 -H "$AUTH" "$OD/api/runs/$_rid" > /tmp/odrun.json 2>/dev/null || continue
               _st="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('status','?'))" 2>/dev/null || echo ?)"
@@ -221,6 +221,24 @@ jobs:
               docker exec od-e2e sh -c "tail -c 1500 /app/.od/runs/$_rid/events.jsonl 2>/dev/null || echo '(无 events 文件)'" | redact | head -c 1500; echo
             fi
           }
+          restart_od() { # 全新 daemon（provider 疑似按 daemon 缓存首个模型，换模型前重启，见 run 38853756712）
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u xieyucheng123 --password-stdin 2>&1 | tail -1
+            IMG_OD="ghcr.io/link-seek/opendesign:0.24.1-oc2.0.6"
+            docker rm -f od-e2e >/dev/null 2>&1 || true
+            sleep 3
+            docker run -d --name od-e2e --network host \
+              -v /tmp/odtest-home:/home/open-design -v /tmp/odtest-od:/app/.od \
+              -e OD_API_TOKEN=dummy-token -e OD_ALLOWED_ORIGINS=https://example.invalid \
+              -e OD_ALLOWED_INTERNAL_HOSTS=127.0.0.1 \
+              -e LITELLM_BASE_URL=http://127.0.0.1:4000 -e LITELLM_API_KEY=dummy \
+              -e OD_BIND_HOST=0.0.0.0 -e OD_PORT=7457 \
+              "$IMG_OD"
+            for i in $(seq 1 24); do
+              curl -sf --max-time 5 http://127.0.0.1:7457/ >/dev/null 2>&1 && break
+              sleep 5
+            done
+            echo "od restarted"
+          }
           R1="$(do_run "$PID" test-chat "reply with exactly: OD-CONV-OK")"
           RID1="$(echo "$R1" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           echo "run1: ${RID1:0:12}..."
@@ -233,7 +251,8 @@ jobs:
               echo "FAIL: 单聊 status=$ST1"; dump_run 单聊; FAIL="$FAIL; OD 单聊失败($ST1)"
             fi
           fi
-          # 切模型用新 project（新默认 conversation；同会话换模型会被拒 no-route，见 run 38852669994）
+          # Phase B 切模型：全新 daemon＋新 project（provider 疑似按 daemon 缓存首个模型，见 run 38853756712）
+          restart_od
           PID2="$(mkproject switch)"
           echo "project2: $PID2"
           R2="$(do_run "$PID2" test-chat-b "reply with exactly: OD-SWITCH-OK")"
@@ -248,7 +267,10 @@ jobs:
               echo "FAIL: 切模型 status=$ST2"; dump_run 切模型; FAIL="$FAIL; OD 切模型失败($ST2)"
             fi
           fi
-          # 多轮：默认会话延续（两转都不传 conversationId，同进默认会话；显式传曾触发 BAD_REQUEST）
+          # Phase D 多轮：全新 daemon＋新 project，turn1 记数 turn2 同 project 召回
+          restart_od
+          PIDM="$(mkproject multi)"
+          echo "project-multi: $PIDM"
           R3="$(do_run "$PID" test-chat "记住这个数字：7421，收到只回复：记住了")"
           RID3="$(echo "$R3" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           ST3="skip"
