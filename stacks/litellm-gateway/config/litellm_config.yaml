@@ -1,11 +1,11 @@
 # litellm_config.yaml — pass-through 透明代理模式
-# litellm 不验证 key、不预置 key，opencode 给什么 key 就拿什么 key 调 opencode.ai/zen/go/v1
+# litellm 不验证 key（user_custom_auth 始终通过）、不预置 key
+# pass_through_endpoints forward_headers 透传 Authorization 给 opencode.ai/zen/go/v1
 # guardrails 保留（vault guard 检密钥泄露）
 general_settings:
   drop_params: true
   forward_client_headers_to_llm_api: true
-  enforce_user_api_key_auth: false
-  dangerously_permit_weak_or_unset_master_key: true
+  user_custom_auth: always_allow_auth.always_allow
   pass_through_endpoints:
     - path: /v1/chat/completions
       target: https://opencode.ai/zen/go/v1/chat/completions
