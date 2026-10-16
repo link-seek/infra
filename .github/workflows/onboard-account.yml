@@ -1,0 +1,116 @@
+name: onboard-account
+
+# 新号 onboarding：dispatch 填 login + 一次性 PAT，自动邀 collaborator、存 secret、写
+# AI 名单变量、指派验证，全程 Actions。
+#
+# 人闸：只认 xieyucheng123 dispatch（oh-xyc 是 god 权限，不设闸等于交总钥匙）。
+# PAT 会落 run 输入日志：setup_pat 必须用一次性短效 key（classic，repo + workflow），
+# 跑完即废并轮换长期版（见 Step Summary）。
+# 前提：org secret APP_PRIVATE_KEY（oh-xyc 全仓安装，administration/members/secrets
+# 均 write）可用；目标仓 opencode.yml 的 assignee 判据走 AI_ASSIGNEES 变量。
+
+on:
+  workflow_dispatch:
+    inputs:
+      login:
+        description: "新号 login"
+        required: true
+      repo:
+        description: "目标仓（不含 owner）"
+        default: "docker-images"
+        required: true
+      permission:
+        description: "collaborator 权限"
+        default: "write"
+        type: choice
+        options: [pull, triage, write, maintain]
+      setup_pat:
+        description: "新号一次性 PAT（classic，repo+workflow，最短有效期，跑完即废）"
+        required: true
+      secret_name:
+        description: "PAT 存进目标仓的 secret 名"
+        default: "AGENT_GITHUB_TOKEN"
+        required: true
+
+jobs:
+  onboard:
+    if: github.actor == 'xieyucheng123'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Generate admin token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: "4953817"
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Onboard
+        env:
+          ADMIN_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET: link-seek/${{ inputs.repo }}
+          LOGIN: ${{ inputs.login }}
+          PERMISSION: ${{ inputs.permission }}
+          SECRET_NAME: ${{ inputs.secret_name }}
+          SETUP_PAT: ${{ inputs.setup_pat }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SETUP_PAT"
+          T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          echo "== 1/5 邀 collaborator =="
+          gh api -X PUT "repos/$TARGET/collaborators/$LOGIN" \
+            -f permission="$PERMISSION" --jq '{invitee: .invitee.login, permissions}' \
+            --header "Authorization: Bearer $ADMIN_TOKEN"
+
+          echo "== 2/5 验 PAT（login + scope） =="
+          GOT=$(GH_TOKEN="$SETUP_PAT" gh api user --jq .login)
+          [ "$GOT" = "$LOGIN" ] || { echo "PAT login=$GOT, want $LOGIN"; exit 1; }
+          GH_TOKEN="$SETUP_PAT" gh api -i user \
+            | grep -i '^x-oauth-scopes:' || true
+
+          echo "== 3/5 存 secret =="
+          printf '%s' "$SETUP_PAT" | GH_TOKEN="$ADMIN_TOKEN" \
+            gh secret set "$SECRET_NAME" --repo "$TARGET"
+
+          echo "== 4/5 写 AI 名单变量 =="
+          OLD=$(GH_TOKEN="$ADMIN_TOKEN" gh variable get AI_ASSIGNEES \
+            --repo "$TARGET" 2>/dev/null || echo "")
+          case ",$OLD," in
+            *",$LOGIN,"*) NEW="$OLD" ;;
+            "") NEW="$LOGIN" ;;
+            *) NEW="$OLD,$LOGIN" ;;
+          esac
+          GH_TOKEN="$ADMIN_TOKEN" \
+            gh variable set AI_ASSIGNEES --repo "$TARGET" --body "$NEW"
+
+          echo "== 5/5 指派验证 =="
+          NUM=$(GH_TOKEN="$ADMIN_TOKEN" gh issue create --repo "$TARGET" \
+            --title "TEST: onboarding 指派验证 $LOGIN（勿动构建）" \
+            --body "onboard-account 自动验证：只改 README 注释一行，不要碰 workflow/Dockerfile，不要打镜像。合 PR 不要直推 main。" \
+            --jq .number)
+          GH_TOKEN="$ADMIN_TOKEN" gh issue edit "$NUM" --repo "$TARGET" \
+            --add-assignee "$LOGIN"
+          RUN_ID=""
+          for _ in $(seq 1 20); do
+            sleep 30
+            RUN_ID=$(GH_TOKEN="$ADMIN_TOKEN" gh run list --repo "$TARGET" \
+              --workflow opencode.yml --limit 10 \
+              --json databaseId,event,createdAt \
+              --jq "[.[] | select(.event==\"issues\" and .createdAt > \"$T0\")][0].databaseId // empty")
+            [ -n "$RUN_ID" ] && break
+          done
+          [ -n "$RUN_ID" ] || { echo "TIMEOUT: opencode 未起跑"; exit 1; }
+          GH_TOKEN="$ADMIN_TOKEN" gh run watch "$RUN_ID" --repo "$TARGET" \
+            --exit-status --interval 30 || true
+          GH_TOKEN="$ADMIN_TOKEN" gh issue close "$NUM" --repo "$TARGET" \
+            --comment "onboard-account 验证：run $RUN_ID，见上。"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "login=${{ inputs.login }} repo=${{ inputs.repo }} secret=${{ inputs.secret_name }}"
+            echo "收尾：废掉一次性 PAT，重建长期版自己存好；长期 PAT 到期日记台账。"
+          } >> "$GITHUB_STEP_SUMMARY"
