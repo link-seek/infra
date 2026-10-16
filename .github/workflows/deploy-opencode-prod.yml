@@ -56,6 +56,26 @@ jobs:
         RUN_BR="$(docker inspect opencode-browser --format '{{.Image}}')"
         if curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/ | grep -q 200 && [ "$RUN_TOOLS" = "$EXP_TOOLS" ] && [ "$RUN_BR" = "$EXP_BR" ]; then
           echo "VERIFY OK: 4097 通 + 双镜像 ID 相符"
+          # session drain 回归测试：opencode run 必须成功返回（验证 key 透传 litellm → opencode.ai）
+          echo "Testing session drain (opencode run)..."
+          DRAIN_OUT="$(docker exec opencode-prod opencode run "reply with exactly: DRAIN-OK" 2>&1)"
+          if echo "$DRAIN_OUT" | grep -q "DRAIN-OK"; then
+            echo "DRAIN TEST OK: session drain 正常，key 透传生效"
+          else
+            echo "DRAIN TEST FAIL: opencode run 未返回预期结果"
+            echo "output: $DRAIN_OUT"
+            # drain 失败不立即回滚（可能是模型侧问题），但标记警告
+            echo "WARN: session drain 异常，请检查 litellm key 一致性"
+          fi
+          # key 一致性检查：opencode LITELLM_API_KEY 必须与 litellm LITELLM_MASTER_KEY 一致
+          OC_KEY="$(docker exec opencode-prod printenv LITELLM_API_KEY 2>/dev/null | md5sum | cut -d' ' -f1)"
+          LL_KEY="$(docker exec litellm-guard printenv LITELLM_MASTER_KEY 2>/dev/null | md5sum | cut -d' ' -f1)"
+          if [ -n "$OC_KEY" ] && [ "$OC_KEY" = "$LL_KEY" ]; then
+            echo "KEY CHECK OK: opencode LITELLM_API_KEY == litellm LITELLM_MASTER_KEY"
+          else
+            echo "KEY CHECK FAIL: opencode key ($OC_KEY) != litellm key ($LL_KEY)"
+            echo "WARN: key 不一致可能导致 session drain 400"
+          fi
         else
           echo "VERIFY FAIL: 回滚到备份（备份由 reusable 在同步前生成）"
           PREV="$(ls -t compose.yml.prev-* | head -1)"
