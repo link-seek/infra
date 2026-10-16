@@ -125,14 +125,29 @@ jobs:
           pip install pyyaml -q 2>/dev/null || true
           python3 - <<'EOF'
           import yaml
-          d = {"general_settings": {"drop_params": True}, "model_list": [
+          # 注意：drop_params 必须放 litellm_settings（general_settings 下那份 responses 路径不认，
+          # OD 驱动的新版 opencode CLI 会发 store 参数，ollama 后端直接拒，见 run 38850031800）。
+          d = {"general_settings": {"drop_params": True},
+               "litellm_settings": {"drop_params": True, "request_timeout": 120, "num_retries": 2},
+               "model_list": [
               {"model_name": "test-chat",
                "litellm_params": {"model": "ollama/qwen3:0.6b",
                                   "api_base": "http://127.0.0.1:11434", "timeout": 180}},
               {"model_name": "test-chat-b",
                "litellm_params": {"model": "ollama/qwen3:0.6b",
                                   "api_base": "http://127.0.0.1:11434", "timeout": 180}},
+              # OD 会给部分 byok 模型加 open-design-byok/ 前缀（run 38850031800 实证），网关侧同上游双注册
+              {"model_name": "open-design-byok/test-chat",
+               "litellm_params": {"model": "ollama/qwen3:0.6b",
+                                  "api_base": "http://127.0.0.1:11434", "timeout": 180}},
+              {"model_name": "open-design-byok/test-chat-b",
+               "litellm_params": {"model": "ollama/qwen3:0.6b",
+                                  "api_base": "http://127.0.0.1:11434", "timeout": 180}},
               {"model_name": "free-probe-a",
+               "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
+                                  "api_base": "https://opencode.ai/inference/openai/v1",
+                                  "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}},
+              {"model_name": "open-design-byok/free-probe-a",
                "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
                                   "api_base": "https://opencode.ai/inference/openai/v1",
                                   "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}}]}
