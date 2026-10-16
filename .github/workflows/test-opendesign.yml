@@ -129,8 +129,12 @@ jobs:
           # OD 驱动的新版 opencode CLI 会发 store 参数，ollama 后端直接拒，见 run 38850031800）。
           # forward_client_headers 必开：免费档锁 OpenCode 客户端，头不到上游就 403（opencode-loop 全配置已证实放行）。
           # 后端模型用 qwen3:8b（test-memory 同款；0.6b 复读触顶 repeat-limit，见 run 38850850005）。
-          d = {"general_settings": {"drop_params": True, "forward_client_headers_to_llm_api": True},
-               "litellm_settings": {"drop_params": True, "request_timeout": 120, "num_retries": 2},
+          # 透明代理同构（生产 config 9eb0b07）：user_custom_auth 全放行＋passthrough callback 覆盖上游 key
+          d = {"general_settings": {"drop_params": True, "forward_client_headers_to_llm_api": True,
+                                    "dangerously_permit_weak_or_unset_master_key": True,
+                                    "user_custom_auth": "always_allow_auth.always_allow"},
+               "litellm_settings": {"drop_params": True, "request_timeout": 120, "num_retries": 2,
+                                    "callbacks": ["passthrough_key.passthrough_callback"]},
                "model_list": [
               {"model_name": "test-chat",
                "litellm_params": {"model": "ollama/qwen3:8b",
@@ -159,8 +163,14 @@ jobs:
           PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           docker run -d --name litellm-od --network host \
             -v /tmp/litellm-od.yaml:/app/config.yaml:ro \
+            -v $PWD/stacks/litellm-gateway/guard/always_allow_auth.py:/app/always_allow_auth.py:ro \
+            -v $PWD/stacks/litellm-gateway/guard/passthrough_key.py:/app/passthrough_key.py:ro \
+            -v $PWD/stacks/litellm-gateway/guard/vault_guard.py:/app/vault_guard.py:ro \
+            -v $PWD/stacks/litellm-gateway/guard/rules.json:/app/guard-rules.json:ro \
+            -v $PWD/stacks/litellm-gateway/guard/models-denied.json:/app/models-denied.json:ro \
             -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \
             -e LITELLM_MASTER_KEY=test-only -e DISABLE_ADMIN_UI=True \
+            -e RULES_FILE=/app/guard-rules.json \
             "$PIN" --config /app/config.yaml --port 4001
           for i in $(seq 1 24); do
             curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" >/dev/null 2>&1 && break
@@ -359,6 +369,19 @@ jobs:
           else
             echo "SKIP: OPENCODE_API_KEY 未配，免费档跳过"
           fi
+
+      - name: 网关透传验证（透明代理语义：无 key 200＋有效 key 200＋无效 key 上游 401）
+        env:
+          UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
+        run: |
+          PASS=1
+          C2="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4001/v1/models || echo 000)"
+          echo "gw-no-key: $C2 (expect 200)"; [ "$C2" = "200" ] || PASS=0
+          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $UNIFIED_API_KEY" -H 'Content-Type: application/json' -d '{"model":"test-chat","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4001/v1/chat/completions || echo 000)"
+          echo "gw-chat-valid: $CC (expect 200)"; [ "$CC" = "200" ] || PASS=0
+          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"test-chat","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4001/v1/chat/completions || echo 000)"
+          echo "gw-chat-invalid: $IC (expect 401 from upstream)"; [ "$IC" = "401" ] || PASS=0
+          [ "$PASS" = "1" ] && echo "GW-PASSTHROUGH OK" || { echo "FAIL: 网关透传语义不对"; exit 1; }
 
       - name: 清理（成功失败都删）
         if: always()
