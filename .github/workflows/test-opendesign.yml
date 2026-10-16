@@ -271,11 +271,11 @@ jobs:
           restart_od
           PIDM="$(mkproject multi)"
           echo "project-multi: $PIDM"
-          R3="$(do_run "$PID" test-chat "记住这个数字：7421，收到只回复：记住了")"
+          R3="$(do_run "$PIDM" test-chat "记住这个数字：7421，收到只回复：记住了")"
           RID3="$(echo "$R3" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           ST3="skip"
           [ -n "$RID3" ] && ST3="$(poll_run "$RID3")"
-          R4="$(do_run "$PID" test-chat "我让你记的数字是多少？只回复数字")"
+          R4="$(do_run "$PIDM" test-chat "我让你记的数字是多少？只回复数字")"
           RID4="$(echo "$R4" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
           ST4="skip"
           [ -n "$RID4" ] && ST4="$(poll_run "$RID4")"
