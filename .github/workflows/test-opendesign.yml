@@ -1,7 +1,7 @@
 name: test-opendesign
 
-# OD 收编栈的门：schema（秒级）+ boot e2e（分钟级，一次性容器，dummy 密钥）。
-# 全程在 runner，不碰生产。SWR 匿名拉（与 test-memory 同模式，无需登录）。
+# OD 收编栈的门：schema（秒级）+ boot e2e（分钟级）+ OD 对话三件套（建 project→run→轮询：单聊＋切模型＋多轮＋免费档）。
+# 全程在 runner（dummy 密钥＋org 真 key 仅免费档），不碰生产。Pin 精确字节由 deploy pull 锁定。
 on:
   pull_request:
     paths:
@@ -72,7 +72,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       packages: read
     steps:
@@ -103,10 +103,153 @@ jobs:
           echo "===== / 响应体采样（脱敏，供行为对账） ====="
           curl -s -m 8 http://127.0.0.1:7457/ | sed -E -e 's/(sk-[A-Za-z0-9\-_]{6})[A-Za-z0-9\-_]+/\1<redacted>/g' | head -c 400; echo
           docker logs od-e2e --tail 8 || true
-          # 容器必须还活着（非 crashloop）
+          # 容器必须还活着（非 crashloop）；不删，留给后面对话三件套用，最后统一清理
           docker ps --filter name=od-e2e --format '{{.Status}}' | grep -q "Up" && echo "OK: 容器存活" || { echo "FAIL: 容器已死"; PASS=""; }
-          docker rm -f od-e2e >/dev/null 2>&1 || true
           [ -n "$PASS" ] && echo "E2E OK: 应用应答＋存活（dummy key）" || { echo "FAIL: 3 分钟无 HTTP 应答或已死"; exit 1; }
+
+      - name: Start backend（ollama＋litellm，OD 的 byok 后端）
+        env:
+          GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          docker run -d --name ollama --network host \
+            -v ollama-data:/root/.ollama -e OLLAMA_HOST=0.0.0.0:11434 \
+            ollama/ollama:0.40.3
+          for i in $(seq 1 30); do
+            curl -sf --max-time 5 http://127.0.0.1:11434/ >/dev/null && break
+            sleep 5
+          done
+          docker exec ollama ollama pull qwen3:0.6b
+          pip install pyyaml -q 2>/dev/null || true
+          python3 - <<'EOF'
+          import yaml
+          d = {"general_settings": {"drop_params": True}, "model_list": [
+              {"model_name": "test-chat",
+               "litellm_params": {"model": "ollama/qwen3:0.6b",
+                                  "api_base": "http://127.0.0.1:11434", "timeout": 180}},
+              {"model_name": "test-chat-b",
+               "litellm_params": {"model": "ollama/qwen3:0.6b",
+                                  "api_base": "http://127.0.0.1:11434", "timeout": 180}},
+              {"model_name": "free-probe-a",
+               "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
+                                  "api_base": "https://opencode.ai/inference/openai/v1",
+                                  "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}}]}
+          open("/tmp/litellm-od.yaml", "w").write(yaml.safe_dump(d))
+          print("backend render OK")
+          EOF
+          PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
+          docker run -d --name litellm-od --network host \
+            -v /tmp/litellm-od.yaml:/app/config.yaml:ro \
+            -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \
+            -e LITELLM_MASTER_KEY=test-only -e DISABLE_ADMIN_UI=True \
+            "$PIN" --config /app/config.yaml --port 4001
+          for i in $(seq 1 24); do
+            curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" >/dev/null 2>&1 && break
+            sleep 5
+          done
+          echo "OK: backend 就绪（ollama＋litellm:4001）"
+
+      - name: OD 对话三件套（建 project→run→轮询→断言：单聊＋切模型＋多轮）
+        env:
+          GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          set -u
+          OD="http://127.0.0.1:7457"; AUTH="Authorization: Bearer dummy-token"
+          FAIL=""
+          PID="od-ci-$GITHUB_RUN_ID"
+          PC="$(curl -s -m 15 -o /dev/null -w '%{http_code}' -H "$AUTH" -H 'Content-Type: application/json' \
+            -d "{\"id\":\"$PID\",\"name\":\"CI conv $PID\"}" "$OD/api/projects" || echo 000)"
+          echo "project: $PC"
+          case "$PC" in 200|201|409) echo "OK: project 就绪";; *) FAIL="$FAIL; 建 project 失败($PC)";; esac
+          do_run() {
+            local _model="$1" _msg="$2" _extra="${3:-{}}"
+            local _rid="req-$(cat /proc/sys/kernel/random/uuid)"
+            curl -s -m 15 -H "$AUTH" -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg p "$PID" --arg r "$_rid" --arg m "$_msg" --arg mo "$_model" --argjson ex "$_extra" \
+                '{projectId:$p, clientRequestId:$r, message:$m, agentId:"byok-opencode", model:$mo,
+                  byokProvider:{protocol:"openai", apiKey:"test-only", baseUrl:"http://127.0.0.1:4001/v1", model:$mo}} * $ex')" \
+              "$OD/api/runs" || echo '{"error":"CURLFAIL"}'
+          }
+          poll_run() {
+            local _rid="$1" _st="?"
+            for i in $(seq 1 30); do
+              sleep 10
+              curl -s -m 15 -H "$AUTH" "$OD/api/runs/$_rid" > /tmp/odrun.json 2>/dev/null || continue
+              _st="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('status','?'))" 2>/dev/null || echo ?)"
+              echo "poll#$i -> $_st"
+              case "$_st" in succeeded|failed|canceled) break;; esac
+            done
+            echo "$_st"
+          }
+          redact() { sed -E -e 's/(sk-[A-Za-z0-9\-_]{6})[A-Za-z0-9\-_]+/\1<redacted>/g' -e 's/(Bearer )[A-Za-z0-9\-_\.]+/\1<redacted>/g'; }
+          R1="$(do_run test-chat "reply with exactly: OD-CONV-OK")"
+          RID1="$(echo "$R1" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
+          echo "run1: ${RID1:0:12}..."
+          [ -n "$RID1" ] || { echo "FAIL: run1 未返回 runId"; echo "$R1" | redact | head -c 500; FAIL="$FAIL; 单聊未受理"; }
+          if [ -n "$RID1" ]; then
+            ST1="$(poll_run "$RID1")"
+            if [ "$ST1" = "succeeded" ] && grep -q "OD-CONV-OK" /tmp/odrun.json; then
+              echo "OK: OD 单聊（test-chat，marker 回环）"
+            else
+              echo "FAIL: 单聊 status=$ST1"; grep -oE '"error":"[^"]{0,200}|"errorCode":"[^"]{0,60}' /tmp/odrun.json | redact | head -5; FAIL="$FAIL; OD 单聊失败($ST1)"
+            fi
+            CONV1="$(python3 -c "import json; print(json.load(open('/tmp/odrun.json')).get('conversationId',''))" 2>/dev/null)"
+          fi
+          R2="$(do_run test-chat-b "reply with exactly: OD-SWITCH-OK")"
+          RID2="$(echo "$R2" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
+          echo "run2: ${RID2:0:12}..."
+          [ -n "$RID2" ] || { echo "FAIL: run2 未返回 runId"; FAIL="$FAIL; 切模型未受理"; }
+          if [ -n "$RID2" ]; then
+            ST2="$(poll_run "$RID2")"
+            if [ "$ST2" = "succeeded" ] && grep -q "OD-SWITCH-OK" /tmp/odrun.json; then
+              echo "OK: OD 切模型（test-chat-b，marker 回环）"
+            else
+              echo "FAIL: 切模型 status=$ST2"; FAIL="$FAIL; OD 切模型失败($ST2)"
+            fi
+          fi
+          if [ -n "${CONV1:-}" ]; then
+            R3="$(do_run test-chat "记住这个数字：7421，收到只回复：记住了" "{\"conversationId\":\"$CONV1\"}")"
+            RID3="$(echo "$R3" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
+            ST3="$(poll_run "$RID3")"
+            R4="$(do_run test-chat "我让你记的数字是多少？只回复数字" "{\"conversationId\":\"$CONV1\"}")"
+            RID4="$(echo "$R4" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
+            ST4="$(poll_run "$RID4")"
+            if [ "$ST4" = "succeeded" ] && grep -q "7421" /tmp/odrun.json; then
+              echo "OK: OD 多轮（同 conversation，7421 召回）"
+            else
+              echo "FAIL: 多轮 status=$ST4"; FAIL="$FAIL; OD 多轮失败($ST4)"
+            fi
+          else
+            echo "FAIL: 无 conversationId，多轮跳过"; FAIL="$FAIL; 多轮无 conversationId"
+          fi
+          if [ -n "$GO_BACKEND_KEY" ]; then
+            RF="$(curl -s -m 15 -H "$AUTH" -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg p "$PID" --arg r "req-$(cat /proc/sys/kernel/random/uuid)" \
+                --arg k "$GO_BACKEND_KEY" \
+                '{projectId:$p, clientRequestId:$r, message:"reply with exactly: OD-FREE-OK",
+                  agentId:"byok-opencode", model:"free-probe-a",
+                  byokProvider:{protocol:"openai", apiKey:$k, baseUrl:"http://127.0.0.1:4001/v1", model:"free-probe-a"}}')" \
+              "$OD/api/runs" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
+            echo "run-free: ${RF:0:12}..."
+            if [ -n "$RF" ]; then
+              STF="$(poll_run "$RF")"
+              if [ "$STF" = "succeeded" ] && grep -q "OD-FREE-OK" /tmp/odrun.json; then
+                echo "OK: OD 免费档（free-probe-a，真 key）"
+              else
+                echo "FAIL: 免费档 status=$STF"; grep -oE '"error":"[^"]{0,200}' /tmp/odrun.json | redact | head -3; FAIL="$FAIL; OD 免费档失败($STF)"
+              fi
+            else
+              FAIL="$FAIL; 免费档未受理"
+            fi
+          else
+            echo "SKIP: OPENCODE_API_KEY 未配，免费档跳过"
+          fi
+          [ -z "$FAIL" ] && echo "OD-CONV OK" || { echo "FAIL: $FAIL"; exit 1; }
+
+      - name: 清理（成功失败都删）
+        if: always()
+        run: |
+          docker rm -f od-e2e litellm-od ollama >/dev/null 2>&1 || true
+          echo "cleanup done"
 
       - name: Pin 可拉取性（需 SWR 凭证；缺则跳过）
         env:
