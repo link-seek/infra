@@ -95,8 +95,8 @@ jobs:
           tar -czf "/root/backups/litellm-guard-precut-$TS.tar.gz" -C /root/stacks litellm-guard
           cp -a /root/litellm-guard "/root/backups/litellm-guard-files-precut-$TS"
           echo "backup-ok: /root/backups/litellm-guard-precut-$TS.tar.gz"
-          # 2. 按 live 原样生成 config＋.env（多 key 映射；密钥不打印、不进日志）
-          MK="$(cat /root/litellm-guard/.master 2>/dev/null || docker inspect litellm-guard --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^LITELLM_MASTER_KEY=' | cut -d= -f2-)"
+          # 2. 生成 config＋.env：key 统一用 GitHub secret（透传方案），不从 live 容器读
+          MK="${{ secrets.UNIFIED_API_KEY }}"
           RULES_URL_LIVE="$(docker inspect litellm-guard --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^RULES_URL=' | cut -d= -f2- || true)"
           python3 - "$MK" "$RULES_URL_LIVE" <<'PY2'
           import sys, yaml
@@ -114,7 +114,8 @@ jobs:
           live.setdefault('general_settings', {})['forward_client_headers_to_llm_api'] = True
           live.setdefault('litellm_settings', {})['drop_params'] = True
           yaml.safe_dump(live, open('/root/stacks/litellm-gateway/config/litellm_config.yaml', 'w'), allow_unicode=True)
-          lines = [f"{mapping[k]}={k}" for k in keys]
+          # 透传方案：所有 GO_BACKEND_KEY 和 LITELLM_MASTER_KEY 统一用同一个 key
+          lines = [f"{mapping[k]}={mk}" for k in keys]
           lines += [f"LITELLM_MASTER_KEY={mk}", "DISABLE_ADMIN_UI=True", "RULES_FILE=/app/guard-rules.json"]
           if rules_url:
               lines.append(f"RULES_URL={rules_url}")
