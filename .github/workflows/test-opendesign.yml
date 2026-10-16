@@ -76,26 +76,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 拉 pin 镜像（GHCR＋GITHUB_TOKEN；SWR 匿名被拒，见 run 38830156947）
+      - name: Boot 验证（GHCR 同版构建，dummy 密钥，401 门即活）
         run: |
-          PIN="$(grep -oP '^\s*image:\s*\K\S+opendesign@\S+' stacks/opendesign/compose.yml | head -n1)"
-          echo "opendesign pin: ${PIN:0:80}..."
+          # 同 tag 在 GHCR/SWR 是两次构建（digest 不同，run 38830435447 实证），线上跑的是 SWR 那份
+          #（生产本身即该字节的存活证明）；此处用 GHCR 版验证 compose/env/启动逻辑，精确字节由 deploy pull 锁定。
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u xieyucheng123 --password-stdin
-          GHCR_PIN="$(echo "$PIN" | sed 's#swr.cn-north-9.myhuaweicloud.com/xieyucheng123#ghcr.io/link-seek#')"
-          echo "ghcr pin: ${GHCR_PIN:0:80}..."
-          docker pull -q "$GHCR_PIN"
-          docker tag "$GHCR_PIN" "$PIN"
-          echo "OK: pin 可拉取（GHCR 同构建双推，digest 一致）"
-
-      - name: Boot（dummy 密钥，401 门即活）
-        run: |
-          PIN="$(grep -oP '^\s*image:\s*\K\S+opendesign@\S+' stacks/opendesign/compose.yml | head -n1)"
+          IMG="ghcr.io/link-seek/opendesign:0.24.1-oc2.0.6"
+          docker pull -q "$IMG"
           docker run -d --name od-e2e --network host \
             -e OD_API_TOKEN=dummy-token -e OD_ALLOWED_ORIGINS=https://example.invalid \
             -e OD_ALLOWED_INTERNAL_HOSTS=127.0.0.1 \
             -e LITELLM_BASE_URL=http://127.0.0.1:4000 -e LITELLM_API_KEY=dummy \
             -e OD_BIND_HOST=0.0.0.0 -e OD_PORT=7457 \
-            "$PIN"
+            "$IMG"
           PASS=0
           for i in $(seq 1 18); do
             CODE="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:7457/ || echo 000)"
@@ -106,3 +99,16 @@ jobs:
           docker logs od-e2e --tail 20 || true
           docker rm -f od-e2e >/dev/null 2>&1 || true
           [ "$PASS" = "1" ] && echo "E2E OK: 401 认证门（dummy key，应用活）" || { echo "FAIL: 3 分钟未见 401 门"; exit 1; }
+
+      - name: Pin 可拉取性（需 SWR 凭证；缺则跳过）
+        env:
+          SWR_U: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_P: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          if [ -z "$SWR_U" ] || [ -z "$SWR_P" ]; then
+            echo "SKIP: SWR 凭证未配（P1 欠账）；pin 精确字节生产正在跑（存活证明），deploy pull 失败即停（fail-fast 兜底）"
+            exit 0
+          fi
+          echo "$SWR_P" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_U" --password-stdin
+          PIN="$(grep -oP '^\s*image:\s*\K\S+opendesign@\S+' stacks/opendesign/compose.yml | head -n1)"
+          docker pull -q "$PIN" && echo "OK: pin 精确可拉取"

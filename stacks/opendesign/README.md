@@ -30,5 +30,6 @@
 
 ## 欠账（本次不动）
 
+* 同 tag 双仓 digest 不同：`0.24.1-oc2.0.6` 在 GHCR 与 SWR 是两次构建（run 38830435447 实证 `manifest unknown`）。正源以 SWR 为准（线上跑的就是），CI boot 用 GHCR 版验定义，精确字节由 deploy pull 锁定。SWR 凭证配好后 CI 自动加验 pin 可拉取。
 * ollama 真 digest：SWR 侧 `sha256:c401721b…`（取证到），`stacks/litellm-gateway` 里还是 docker hub 的 `adca95a…`，另起 PR 对账。
 * OD 镜像 `<none>` 悬空 ID `8c7e518448ac` 留在 HW21（疑似某次重建残留），观察期清理。
