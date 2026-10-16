@@ -89,10 +89,14 @@ jobs:
             gh variable set AI_ASSIGNEES --repo "$TARGET" --body "$NEW"
 
           echo "== 5/5 指派验证 =="
-          NUM=$(GH_TOKEN="$ADMIN_TOKEN" gh issue create --repo "$TARGET" \
+          # 新号必须先接受 collaborator 邀请，否则指派 404
+          PERM=$(GH_TOKEN="$ADMIN_TOKEN" gh api "repos/$TARGET/collaborators/$LOGIN/permission" \
+            --jq .permission)
+          [ "$PERM" != "none" ] || { echo "INVITE_PENDING: 请 $LOGIN 先接受 collaborator 邀请再重跑"; exit 1; }
+          URL=$(GH_TOKEN="$ADMIN_TOKEN" gh issue create --repo "$TARGET" \
             --title "TEST: onboarding 指派验证 $LOGIN（勿动构建）" \
-            --body "onboard-account 自动验证：只改 README 注释一行，不要碰 workflow/Dockerfile，不要打镜像。合 PR 不要直推 main。" \
-            --jq .number)
+            --body "onboard-account 自动验证：只改 README 注释一行，不要碰 workflow/Dockerfile，不要打镜像。合 PR 不要直推 main。")
+          NUM=${URL##*/}
           GH_TOKEN="$ADMIN_TOKEN" gh issue edit "$NUM" --repo "$TARGET" \
             --add-assignee "$LOGIN"
           RUN_ID=""
