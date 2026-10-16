@@ -45,6 +45,10 @@ jobs:
             ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "cat > /tmp/ci-cut-$(basename $f)" < "stacks/litellm-gateway/$f"
           done
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "md5sum /tmp/ci-cut-vault_guard.py /tmp/ci-cut-rules.json"
+          # 同步 compose.yml 和 guard 文件到目标机
+          tar -czf - -C stacks/litellm-gateway compose.yml guard/always_allow_auth.py guard/vault_guard.py guard/guard-rules.json guard/models-denied.json | \
+            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 \
+            "cd /root/stacks/litellm-gateway && tar -xzf - && echo files-synced"
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           mask() { sed -E -e 's/(sk-[A-Za-z0-9\-_]{6})[A-Za-z0-9\-_]+/\1<redacted>/g'; }
           echo "===== vault_guard diff（仓 vs live；空=无 hotfix） ====="
