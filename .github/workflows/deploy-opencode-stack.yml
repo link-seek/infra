@@ -41,6 +41,8 @@ on:
         required: true
       UNIFIED_API_KEY:
         required: false
+      DOTENV_B64:
+        required: false
 
 jobs:
   deploy:
@@ -80,6 +82,7 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           UNIFIED_KEY: ${{ secrets.UNIFIED_API_KEY }}
+          DOTENV_B64: ${{ secrets.DOTENV_B64 }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -90,6 +93,12 @@ jobs:
           # 先备份线上 compose（必须在同步之前，否则备的是新文件——生产灰度教训）
           ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
             "test -f ${{ inputs.remote_dir }}/compose.yml && cp ${{ inputs.remote_dir }}/compose.yml ${{ inputs.remote_dir }}/compose.yml.prev-$(date -u +%Y%m%dT%H%M%SZ) && echo backup-ok || { echo 'ABORT: 线上无 compose.yml'; exit 1; }"
+          # 从 secret 生成 .env（pipeline-managed，不再依赖目标机预置）
+          if [ -n "$DOTENV_B64" ]; then
+            printf '%s' "$DOTENV_B64" | base64 -d > /tmp/ci-dotenv
+            scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key /tmp/ci-dotenv root@$NODE:${{ inputs.remote_dir }}/.env
+            ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "chmod 600 ${{ inputs.remote_dir }}/.env && echo dotenv-written"
+          fi
           # tar+ssh 管道（目标机 .bashrc 回显杀死 scp，见试用演练）
           tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \

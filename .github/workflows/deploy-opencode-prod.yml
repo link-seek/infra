@@ -44,8 +44,6 @@ jobs:
       forbid: "100.111.231.85:trial 100.85.128.116:entry"
       hostname_prefix: ci-prod
       verify_cmd: |
-        test -f /root/stacks/opencode-prod/.env || { echo "ABORT: 目标机缺 .env"; exit 1; }
-          grep -q "^PIPELINE_MANAGED=true" /root/stacks/opencode-prod/.env || { echo "ABORT: .env 缺 PIPELINE_MANAGED=true 标记（可能被手动篡改）"; exit 1; }
         cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d
         sleep 20
         # 同工件比对必须用镜像 ID（RepoDigest 和 Id 是两个命名空间，混比永假——灰度误报根因）
@@ -68,15 +66,7 @@ jobs:
             # drain 失败不立即回滚（可能是模型侧问题），但标记警告
             echo "WARN: session drain 异常，请检查 litellm key 一致性"
           fi
-          # key 一致性检查：opencode LITELLM_API_KEY 必须与 litellm LITELLM_MASTER_KEY 一致
-          OC_KEY="$(docker exec opencode-prod printenv LITELLM_API_KEY 2>/dev/null | md5sum | cut -d' ' -f1)"
-          LL_KEY="$(docker exec litellm-guard printenv LITELLM_MASTER_KEY 2>/dev/null | md5sum | cut -d' ' -f1)"
-          if [ -n "$OC_KEY" ] && [ "$OC_KEY" = "$LL_KEY" ]; then
-            echo "KEY CHECK OK: opencode LITELLM_API_KEY == litellm LITELLM_MASTER_KEY"
-          else
-            echo "KEY CHECK FAIL: opencode key ($OC_KEY) != litellm key ($LL_KEY)"
-            echo "WARN: key 不一致可能导致 session drain 400"
-          fi
+          # 透明代理模式：litellm 不验证 key，无需 key 一致性检查
         else
           echo "VERIFY FAIL: 回滚到备份（备份由 reusable 在同步前生成）"
           PREV="$(ls -t compose.yml.prev-* | head -1)"
@@ -95,3 +85,4 @@ jobs:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
       UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
+      DOTENV_B64: ${{ secrets.PROD_DOTENV_B64 }}

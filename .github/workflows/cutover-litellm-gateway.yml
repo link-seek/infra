@@ -49,6 +49,10 @@ jobs:
           tar -czf - -C stacks/litellm-gateway compose.yml guard/always_allow_auth.py guard/passthrough_key.py guard/vault_guard.py guard/guard-rules.json guard/models-denied.json | \
             ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 \
             "cd /root/stacks/litellm-gateway && tar -xzf - && echo files-synced"
+          # 从 secret 生成 .env 并传到目标机（heredoc 不展开变量，必须在外面做）
+          printf '%s' "${{ secrets.LITELLM_DOTENV_B64 }}" | base64 -d > /tmp/ci-litellm-dotenv
+          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key /tmp/ci-litellm-dotenv root@100.91.222.51:/root/stacks/litellm-gateway/.env
+          rm -f /tmp/ci-litellm-dotenv
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           mask() { sed -E -e 's/(sk-[A-Za-z0-9\-_]{6})[A-Za-z0-9\-_]+/\1<redacted>/g'; }
           echo "===== vault_guard diff（仓 vs live；空=无 hotfix） ====="
@@ -99,10 +103,7 @@ jobs:
           tar -czf "/root/backups/litellm-guard-precut-$TS.tar.gz" -C /root/stacks litellm-guard
           cp -a /root/litellm-guard "/root/backups/litellm-guard-files-precut-$TS"
           echo "backup-ok: /root/backups/litellm-guard-precut-$TS.tar.gz"
-          # 2. pass-through 模式：.env 不需要 key，只留非密钥项
-          RULES_URL_LIVE="$(docker inspect litellm-guard --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^RULES_URL=' | cut -d= -f2- || true)"
-          printf 'DISABLE_ADMIN_UI=True\nRULES_FILE=/app/guard-rules.json\n' > /root/stacks/litellm-gateway/.env
-          [ -n "$RULES_URL_LIVE" ] && printf 'RULES_URL=%s\n' "$RULES_URL_LIVE" >> /root/stacks/litellm-gateway/.env
+          # 2. .env 已由 scp 传入，设权限
           chmod 600 /root/stacks/litellm-gateway/.env
           echo "env-ok: keys=$(grep -c '=' /root/stacks/litellm-gateway/.env) (值不打印)"
           # 3. 拉镜像（pin 已在仓里）
