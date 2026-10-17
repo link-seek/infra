@@ -28,10 +28,8 @@ jobs:
           bad = 0
           # 1. compose：两镜像必须 digest pin，禁 :latest
           comp = open(f"{S}/compose.yml").read()
-          for svc in ("litellm-guard", "ollama"):
-              m = re.search(rf"^\s*image:\s*(\S+)", comp, re.M | re.S)
           imgs = re.findall(r"^\s*image:\s*(\S+)", comp, re.M)
-          assert len(imgs) == 2, f"期望 2 个 image，实际 {imgs}"
+          assert len(imgs) == 1, f"期望 1 个 image（ollama 已退役），实际 {imgs}"
           for img in imgs:
               if "@sha256:" not in img:
                   print(f"FAIL: {img} 不是 digest pin"); bad += 1
@@ -49,7 +47,7 @@ jobs:
           else:
               print("OK: .env.example 键位齐且无真值")
           # 3. config：YAML 合法；无 <GO_BACKEND_KEY> 明文占位（必须走 os.environ）；
-          #    无 "*" 通配；guard vault default_on；embedding 条目在
+          #    无 "*" 通配；guard vault default_on（embedding 已退役走 ModelArts，无条目是预期）
           import yaml
           d = yaml.safe_load(open(f"{S}/config/litellm_config.yaml"))
           raw = open(f"{S}/config/litellm_config.yaml").read()
@@ -62,10 +60,10 @@ jobs:
               print("FAIL: config 含 * 通配"); bad += 1
           else:
               print(f"OK: models {len(names)} 条，无通配")
-          if "nomic-embed-text" not in names:
-              print("FAIL: 缺 embedding 条目"); bad += 1
+          if "nomic-embed-text" in names:
+              print("FAIL: embedding 条目应已退役"); bad += 1
           else:
-              print("OK: embedding 条目在")
+              print("OK: 无 embedding 条目（已退役）")
           g = d.get("guardrails", [])
           if not any(x.get("guardrail_name") == "vault" and True in (x["litellm_params"].get("default_on"),) for x in g):
               print("FAIL: vault guardrail 缺失/default_on 非 true"); bad += 1
@@ -137,8 +135,7 @@ jobs:
             curl -sf --max-time 5 http://127.0.0.1:11434/ >/dev/null && break
             sleep 5
           done
-          docker exec ollama ollama pull nomic-embed-text
-          docker exec ollama ollama pull qwen3:0.6b
+          docker exec ollama ollama pull qwen3:8b
 
       - name: Render test config（本栈 config＋dummy key，测 os.environ 机制本身）
         run: |
@@ -152,7 +149,7 @@ jobs:
           s = s.replace("http://host.docker.internal:11434", "http://127.0.0.1:11434")
           d = yaml.safe_load(s)
           d["model_list"].append({"model_name": "test-chat",
-              "litellm_params": {"model": "ollama/qwen3:0.6b",
+              "litellm_params": {"model": "ollama/qwen3:8b",
                                  "api_base": "http://127.0.0.1:11434", "timeout": 180}})
           # 免费档上游（e2e 专用，不进生产栈）：走 inference 端口（非 go 端口，免 Go 订阅）；
           # key 用 org OPENCODE_API_KEY（Console key）。prompt 只用合成词（部分免费档拿数据改进模型）。
@@ -225,12 +222,7 @@ jobs:
               failures.append("模型表空/失败")
           if any(i == "*" or len(ids) > 100 for i in ids):
               failures.append("模型表含通配展开噪音")
-          # 3. embedding 768 维
-          st, body = gw("/v1/embeddings", {"model": "nomic-embed-text", "input": "hello memory"})
-          dim = len(body.get("data", [{}])[0].get("embedding", [])) if st == 200 else -1
-          print(f"embedding: {st} dim={dim}")
-          if dim != 768:
-              failures.append(f"embedding 维度异常: {dim}")
+          # 3. test-chat 本地透传（ollama 8b；embedding 已退役走 ModelArts，此处只验网关转发出入口）
           # 4. 黑名单（models-denied.json 首条应 400）
           denied = json.load(open("stacks/litellm-gateway/guard/models-denied.json"))
           st, body = gw("/v1/chat/completions", {"model": denied[0], "messages": [{"role": "user", "content": "hi"}]})

@@ -332,16 +332,16 @@ jobs:
             echo "FAIL: 多轮 turn2 status=$ST4"; dump_run 多轮; FAIL="$FAIL; OD 多轮失败($ST4)"
           fi
           # Phase C 免费档（全新 daemon＋新 project；flash 模型要求 marker 精确命中）
+          # 免费档 byok 传网关 master key（test-only；真 GO key 只活网关 config，上游段，见 No connected db 教训）
           if [ -n "$GO_BACKEND_KEY" ]; then
             restart_od
             PIDF="$(mkproject free)"
             echo "project-free: $PIDF"
             RF="$(curl -s -m 15 -H "$AUTH" -H 'Content-Type: application/json' \
               -d "$(jq -n --arg p "$PIDF" --arg r "req-$(cat /proc/sys/kernel/random/uuid)" \
-                --arg k "$GO_BACKEND_KEY" \
                 '{projectId:$p, clientRequestId:$r, message:"reply with exactly: OD-FREE-OK",
                   agentId:"byok-opencode", model:"free-probe-a",
-                  byokProvider:{protocol:"openai", apiKey:$k, baseUrl:"http://127.0.0.1:4001/v1", model:"free-probe-a"}}')" \
+                  byokProvider:{protocol:"openai", apiKey:"test-only", baseUrl:"http://127.0.0.1:4001/v1", model:"free-probe-a"}}')" \
               "$OD/api/runs" | python3 -c "import json,sys; print(json.load(sys.stdin).get('runId',''))" 2>/dev/null)"
             echo "run-free: ${RF:0:12}..."
             if [ -n "$RF" ]; then

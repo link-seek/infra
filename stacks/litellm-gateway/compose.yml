@@ -37,23 +37,10 @@ services:
     networks:
       # 沿用现网网络名：live 容器在 litellm-guard_default 上，换网会让按容器名连它的服务断
       - gw-net
-  ollama:
-    # 本地 embedding（nomic-embed-text，768 维，供记忆/RAG 共用）。
-    # 2026-10-15：ollama/ollama 0.40.3 manifest digest；模型第一次 up 后另行 pull（见 README）。
-    image: ollama/ollama@sha256:adca95a12c2b386a8f9a995e7fa0600e187e3323b5e5522f5a6c3b1ec73eff99
-    pull_policy: always
-    container_name: ollama
-    # 只绑回环：宿主机用，容器网段经网桥网关 IP（见 docs 说明），不暴露 LAN。
-    ports:
-      - "127.0.0.1:11434:11434"
-    environment:
-      OLLAMA_HOST: 0.0.0.0:11434
-    volumes:
-      - ollama-data:/root/.ollama
-    restart: unless-stopped
-volumes:
-  ollama-data:
-  # 注意：模型可重拉，本卷不进备份（与 trial-* 数据卷不同，见 README）。
+  # ollama 已退役（2026-10-17：记忆走 ModelArts bge-m3 1024 维，本地 3 天 0 调用；5.57GB 镜像＋数据卷一并清）。
+  # 残留卷 infra_ollama-data 由 deploy workflow 显式删除（不用 down -v 避免误伤）。
+volumes: {}
+  #（占位：ollama-data 已随退役删除，见上）
 networks:
   gw-net:
     name: litellm-guard_default   # 与现网同网：容器名解析不变（按 litellm-guard 名可达）
