@@ -172,6 +172,9 @@ jobs:
             sleep 5
           done
           echo "OK: backend 就绪（ollama＋litellm:4001）"
+          echo "===== litellm-od 启动日志（看 callback/guard 有无 load 报错） ====="
+          docker logs litellm-od 2>&1 | grep -iE "callback|passthrough|always_allow|user_custom|guard|error|traceback|warning.*auth|module" | head -20 || echo "(无匹配行，见下全文尾)"
+          docker logs litellm-od 2>&1 | tail -15
 
       - name: OD 对话三件套（建 project→run→轮询→断言：单聊＋切模型＋多轮）
         env:
