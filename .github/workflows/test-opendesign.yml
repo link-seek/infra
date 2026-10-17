@@ -181,7 +181,10 @@ jobs:
               -e 's#container_name: litellm-guard#container_name: litellm-od#' \
               -e 's#name: litellm-gateway#name: litellm-odtest#' \
               -e 's#litellm-guard_default#litellm-odtest_default#' \
+              -e 's#- "172\.17\.0\.1:4000:4000"#- "127.0.0.1:4000:4000"#' \
+              -e 's#- "172\.19\.0\.1:4000:4000"##' \
               stacks/litellm-gateway/compose.yml > /tmp/odstack/compose.yml
+          # CI runner 无 HW21 的 docker 网桥 IP（172.17/19.0.1）：生產三绑改单绑 127.0.0.1，生产 compose 不动
           # ollama 服务 CI 另起，这里只留 litellm-guard
           python3 -c "import yaml; d=yaml.safe_load(open('/tmp/odstack/compose.yml')); d['services']={'litellm-guard':d['services']['litellm-guard']}; yaml.safe_dump(d, open('/tmp/odstack/compose.yml','w'))"
           cd /tmp/odstack && docker compose up -d
