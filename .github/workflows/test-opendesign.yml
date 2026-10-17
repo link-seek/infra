@@ -159,7 +159,7 @@ jobs:
           _txt = open("/tmp/litellm-od.yaml").read()
           _txt = _re.sub(r'(api_key:\s*)\S+', r'\\1<redacted>', _txt)
           print(_txt[:2500])
-          print("===== 渲染产物校验（形态门） ====="
+          print("===== 渲染产物校验（形态门） =====")
           assert "user_custom_auth" in _txt, "缺 user_custom_auth"
           assert "passthrough" in _txt, "缺 passthrough callback"
           print("config 形态 OK")
