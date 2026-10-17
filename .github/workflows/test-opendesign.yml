@@ -154,6 +154,15 @@ jobs:
           d["model_list"].extend([e for e in test_entries if e["model_name"] not in have])
           open("/tmp/litellm-od.yaml", "w").write(yaml.safe_dump(d))
           print(f"backend render OK: base={len(d['model_list'])-len(test_entries)} + test={len(test_entries)}")
+          print("===== 渲染产物核验（key 打码） =====")
+          import re as _re
+          _txt = open("/tmp/litellm-od.yaml").read()
+          _txt = _re.sub(r'(api_key:\s*)\S+', r'\\1<redacted>', _txt)
+          print(_txt[:2500])
+          print("===== 渲染产物校验（形态门） ====="
+          assert "user_custom_auth" in _txt, "缺 user_custom_auth"
+          assert "passthrough" in _txt, "缺 passthrough callback"
+          print("config 形态 OK")
           EOF
           PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           docker run -d --name litellm-od --network host \
