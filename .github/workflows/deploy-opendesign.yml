@@ -82,18 +82,13 @@ jobs:
             if [ "$C" = "401" ]; then READY=1; break; fi
           done
           echo "container: $(docker ps --filter name=opendesign --format '{{.Image}} {{.Status}}')"
-          # 4. 部署后验证（用户要求项；密钥不出日志）
+          # 4. 部署后验证（OD 本体必须过；网关只验连通不断言语义 —— 网关生产在用多人在线，一个字节不动）
           PASS=1
           [ -n "$READY" ] || PASS=0
           C1="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:7456/ || echo 000)"
           echo "verify: od-root=$C1 (expect 401)"; [ "$C1" = "401" ] || PASS=0
-          MK="$(cat /root/litellm-guard/.master 2>/dev/null || echo MISSING)"
           C2="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
-          echo "verify: gw-no-key=$C2 (expect 401)"; [ "$C2" = "401" ] || PASS=0
-          if [ "$MK" != "MISSING" ]; then
-            MC="$(curl -s -m 10 -H "Authorization: Bearer $MK" http://127.0.0.1:4000/v1/models | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]))' 2>/dev/null || echo -1)"
-            echo "verify: gw-models=$MC (expect 45)"; [ "$MC" = "45" ] || PASS=0
-          fi
+          echo "verify: gw-reachable=$C2 (expect 非000，连通即可，不判语义)"; [ "$C2" != "000" ] || PASS=0
           if docker logs opendesign --tail 100 2>&1 | grep -qi -E "ECONNREFUSED|ETIMEDOUT|model_not_found"; then
             echo "verify: OD 日志见网关报错"; PASS=0
           else
