@@ -128,6 +128,10 @@ jobs:
           python3 - <<'EOF'
           import yaml
           d = yaml.safe_load(open("stacks/litellm-gateway/config/litellm_config.yaml"))
+          gs = d.get("general_settings", {})
+          gs.pop("user_custom_auth", None)
+          gs.pop("dangerously_permit_weak_or_unset_master_key", None)
+          d.get("litellm_settings", {}).pop("callbacks", None)
           test_entries = [
               {"model_name": "test-chat",
                "litellm_params": {"model": "ollama/qwen3:8b",
