@@ -47,6 +47,7 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
           OD_PROD_ENV: ${{ secrets.OD_PROD_ENV }}
+          UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
