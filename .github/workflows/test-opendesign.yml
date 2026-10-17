@@ -123,19 +123,12 @@ jobs:
           done
           docker exec ollama ollama pull qwen3:8b
           pip install pyyaml -q 2>/dev/null || true
+          # CI 网关 = 生产 config 原样复用＋测试条目（口径唯一，不另起影子配置）
+          # 生产 6 条（透明代理）＋ test-chat/test-chat-b（ollama 本地零花钱）＋ free-probe-a（真 key 免费档）
           python3 - <<'EOF'
           import yaml
-          # 注意：drop_params 必须放 litellm_settings（general_settings 下那份 responses 路径不认，
-          # OD 驱动的新版 opencode CLI 会发 store 参数，ollama 后端直接拒，见 run 38850031800）。
-          # forward_client_headers 必开：免费档锁 OpenCode 客户端，头不到上游就 403（opencode-loop 全配置已证实放行）。
-          # 后端模型用 qwen3:8b（test-memory 同款；0.6b 复读触顶 repeat-limit，见 run 38850850005）。
-          # 透明代理同构（生产 config 9eb0b07）：user_custom_auth 全放行＋passthrough callback 覆盖上游 key
-          d = {"general_settings": {"drop_params": True, "forward_client_headers_to_llm_api": True,
-                                    "dangerously_permit_weak_or_unset_master_key": True,
-                                    "user_custom_auth": "always_allow_auth.always_allow"},
-               "litellm_settings": {"drop_params": True, "request_timeout": 120, "num_retries": 2,
-                                    "callbacks": ["passthrough_key.passthrough_callback"]},
-               "model_list": [
+          d = yaml.safe_load(open("stacks/litellm-gateway/config/litellm_config.yaml"))
+          test_entries = [
               {"model_name": "test-chat",
                "litellm_params": {"model": "ollama/qwen3:8b",
                                   "api_base": "http://127.0.0.1:11434", "timeout": 180}},
@@ -156,9 +149,11 @@ jobs:
               {"model_name": "open-design-byok/free-probe-a",
                "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
                                   "api_base": "https://opencode.ai/inference/openai/v1",
-                                  "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}}]}
+                                  "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}}]
+          have = {m["model_name"] for m in d["model_list"]}
+          d["model_list"].extend([e for e in test_entries if e["model_name"] not in have])
           open("/tmp/litellm-od.yaml", "w").write(yaml.safe_dump(d))
-          print("backend render OK")
+          print(f"backend render OK: base={len(d['model_list'])-len(test_entries)} + test={len(test_entries)}")
           EOF
           PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           docker run -d --name litellm-od --network host \
