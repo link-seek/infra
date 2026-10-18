@@ -162,10 +162,16 @@ jobs:
       - name: Start litellm（pin 镜像＋挂载 config，port 4001）
         env:
           GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          SWR_U: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_P: ${{ secrets.SWR_LOGIN_PASS }}
         run: |
           [ -n "$GO_BACKEND_KEY" ] || { echo "FAIL: OPENCODE_API_KEY 未配（org secret，free 档测试用）"; exit 1; }
           PIN="$(grep -oP '^\s*image:\s*\K\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           echo "gateway pin: $PIN"
+          if echo "$PIN" | grep -q "swr\."; then
+            [ -n "$SWR_U" ] || { echo "FAIL: SWR 凭证未配（org secret）"; exit 1; }
+            echo "$SWR_P" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_U" --password-stdin
+          fi
           # 拉 pin 镜像（行为=digest：测的就是将上线的字节）；config 挂载覆盖（镜像内 config 只读不动）
           docker run -d --name litellm-e2e --network host \
             -v /tmp/litellm-e2e.yaml:/app/config.yaml:ro \
