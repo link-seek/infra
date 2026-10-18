@@ -140,43 +140,35 @@ jobs:
           docker exec ollama ollama pull nomic-embed-text
           docker exec ollama ollama pull qwen3:0.6b
 
-      - name: Render test config（本栈 config＋dummy key，测 os.environ 机制本身）
+      - name: Render test config（生产 config 原样＋测试条目；单源头不手搓）
         run: |
           pip install pyyaml -q 2>/dev/null || true
           python3 - <<'EOF'
           import yaml
           S = "stacks/litellm-gateway"
-          s = open(f"{S}/config/litellm_config.yaml").read()
-          s = s.replace('model_name: "<MODEL_ID>"', 'model_name: "go-spark-dup"')
-          s = s.replace("openai/<MODEL_ID>", "openai/glm-5.1")
-          s = s.replace("http://host.docker.internal:11434", "http://127.0.0.1:11434")
-          d = yaml.safe_load(s)
-          d["model_list"].append({"model_name": "test-chat",
-              "litellm_params": {"model": "ollama/qwen3:0.6b",
-                                 "api_base": "http://127.0.0.1:11434", "timeout": 180}})
-          # 免费档上游（e2e 专用，不进生产栈）：走 inference 端口（非 go 端口，免 Go 订阅）；
-          # key 用 org OPENCODE_API_KEY（Console key）。prompt 只用合成词（部分免费档拿数据改进模型）。
-          for _name, _up in (("free-probe-a", "openai/deepseek-v4.1-flash-free"),
-                             ("free-probe-b", "openai/muse-spark-1.3-contributor-free")):
-              d["model_list"].append({"model_name": _name,
-                  "litellm_params": {"model": _up,
-                                     "api_base": "https://opencode.ai/inference/openai/v1",
-                                     "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}})
+          d = yaml.safe_load(open(f"{S}/config/litellm_config.yaml"))
+          base_n = len(d["model_list"])
+          # e2e 专用条目（不进生产 config）：本地 ollama 模型
+          for _name in ("test-chat", "test-chat-b",
+                        "open-design-byok/test-chat", "open-design-byok/test-chat-b"):
+              if _name not in [m["model_name"] for m in d["model_list"]]:
+                  d["model_list"].append({"model_name": _name,
+                      "litellm_params": {"model": "ollama/qwen3:8b",
+                                       "api_base": "http://127.0.0.1:11434", "timeout": 180}})
           open("/tmp/litellm-e2e.yaml", "w").write(yaml.safe_dump(d))
-          print("template render OK")
+          print(f"test config OK: base={base_n} + test={len(d['model_list'])-base_n}")
           EOF
-
-      - name: Start litellm（本栈 compose pin＋本栈 guard 文件，port 4001）
+      # guard/*.py 已 bake 进镜像不挂载；models-denied.json 挂载保留热更新能力
+      - name: Start litellm（pin 镜像＋挂载 config，port 4001）
         env:
           GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
           [ -n "$GO_BACKEND_KEY" ] || { echo "FAIL: OPENCODE_API_KEY 未配（org secret，free 档测试用）"; exit 1; }
-          PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
-          echo "litellm pin: $PIN"
+          PIN="$(grep -oP '^\s*image:\s*\K\S+' stacks/litellm-gateway/compose.yml | head -n1)"
+          echo "gateway pin: $PIN"
+          # 拉 pin 镜像（行为=digest：测的就是将上线的字节）；config 挂载覆盖（镜像内 config 只读不动）
           docker run -d --name litellm-e2e --network host \
             -v /tmp/litellm-e2e.yaml:/app/config.yaml:ro \
-            -v $PWD/stacks/litellm-gateway/guard/vault_guard.py:/app/vault_guard.py:ro \
-            -v $PWD/stacks/litellm-gateway/guard/rules.json:/app/guard-rules.json:ro \
             -v $PWD/stacks/litellm-gateway/guard/models-denied.json:/app/models-denied.json:ro \
             -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \
             -e LITELLM_MASTER_KEY=test-only -e DISABLE_ADMIN_UI=True \
