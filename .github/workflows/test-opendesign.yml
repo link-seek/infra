@@ -156,7 +156,7 @@ jobs:
           open("/tmp/litellm-od.yaml", "w").write(yaml.safe_dump(d))
           print("backend render OK")
           EOF
-          PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
+          PIN="$(grep -oP '^\s*image:\s*\K\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           docker run -d --name litellm-od --network host \
             -v /tmp/litellm-od.yaml:/app/config.yaml:ro \
             -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \

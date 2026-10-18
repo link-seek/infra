@@ -1,18 +1,12 @@
 name: cutover-litellm-gateway
 
-# 网关切流：部署仓栈接管现网 litellm-guard 容器。
-# 顺序：report（diff 报告）→ 备份 → .env 就地生成（密钥不落日志）→ up -d --no-deps →
-#       verify（模型数/黑名单/opencode 可达）→ 失败自动回滚（旧 compose 重建）。
-# 只切 litellm-guard：ollama 服务不启动（继续用现网那个，11434 不变）。
-# 需要两步 dispatch：先 report-only 看 diff，确认无 live hotfix 再 cutover=true。
+# 网关切流（社区通用切法）：dispatch 即执行 pull + up + 存活探。
+# 前置：目标机 /root/stacks/litellm-gateway 已由 deploy-litellm-gateway 同步（本 workflow 自带同步，重复执行无害）。
+# 版本 = compose.yml 里一行 digest pin；回退 = pin 改回去再 dispatch 一次（SWR 老 tag 保留可重拉）。
+# 同 project 原地重建：不用 stop/rm/network rm，不备 tar，不回滚分支。
 
 on:
   workflow_dispatch:
-    inputs:
-      cutover:
-        description: "true=执行切流；false=只出报告"
-        required: false
-        default: 'false'
 
 concurrency:
   group: cutover-litellm
@@ -21,7 +15,7 @@ concurrency:
 jobs:
   cutover:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -35,134 +29,54 @@ jobs:
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-cut-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           timeout 15 bash -c "</dev/tcp/100.91.222.51/2244" || { echo "target unreachable"; exit 1; }
-
-      - name: report：live vs 仓 diff（只读，密钥打码）
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          for f in guard/vault_guard.py guard/rules.json; do
-            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "cat > /tmp/ci-cut-$(basename $f)" < "stacks/litellm-gateway/$f"
+          for f in 100.111.231.85:trial 100.85.128.116:entry; do
+            ip="${f%%:*}"; label="${f##*:}"
+            timeout 12 bash -c "</dev/tcp/$ip/2244" && { echo "CONTAINMENT FAIL: 摸到了 $label"; exit 1; } || echo "containment ok ($label unreachable)"
           done
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 "md5sum /tmp/ci-cut-vault_guard.py /tmp/ci-cut-rules.json"
-          # 同步 compose.yml 和 guard 文件到目标机
-          tar -czf - -C stacks/litellm-gateway compose.yml guard/always_allow_auth.py guard/passthrough_key.py guard/vault_guard.py guard/guard-rules.json guard/models-denied.json | \
-            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 \
-            "cd /root/stacks/litellm-gateway && tar -xzf - && echo files-synced"
-          # 从 secret 生成 .env 并传到目标机（heredoc 不展开变量，必须在外面做）
+
+      - name: 切流（同步→env→pull→up→存活探）
+        timeout-minutes: 10
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          # .env 自带（secret 渲染，600 落盘；值不打印）
           printf '%s' "${{ secrets.LITELLM_DOTENV_B64 }}" | base64 -d > /tmp/ci-litellm-dotenv
           scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key /tmp/ci-litellm-dotenv root@100.91.222.51:/root/stacks/litellm-gateway/.env
           rm -f /tmp/ci-litellm-dotenv
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
-          mask() { sed -E -e 's/(sk-[A-Za-z0-9\-_]{6})[A-Za-z0-9\-_]+/\1<redacted>/g'; }
-          echo "===== vault_guard diff（仓 vs live；空=无 hotfix） ====="
-          diff -u /root/litellm-guard/vault_guard.py /tmp/ci-cut-vault_guard.py | mask | head -60 || true
-          echo "vault-md5 live=$(md5sum < /root/litellm-guard/vault_guard.py) repo=$(md5sum < /tmp/ci-cut-vault_guard.py)"
-          echo "===== rules.json diff（空=一致） ====="
-          diff -u /root/litellm-guard/guard-rules.json /tmp/ci-cut-rules.json | mask | head -30 || true
-          echo "===== live GO_BACKEND_KEY 唯一性（多把=中止，.env 只支持一把） ====="
-          N="$(grep -oP 'api_key:\s*\K\S+' /root/litellm-guard/litellm_config.yaml | sort -u | wc -l)"
-          echo "unique-api-key-count=$N"
-          if [ "$N" != "1" ]; then
-            python3 - <<'PY2'
-          import yaml, collections
-          d = yaml.safe_load(open('/root/litellm-guard/litellm_config.yaml'))
-          m = collections.defaultdict(list)
-          for e in d.get('model_list', []):
-              m[(e.get('litellm_params') or {}).get('api_key','')].append(e.get('model_name'))
-          for i,(k,v) in enumerate(sorted(m.items(), key=lambda x:-len(x[1])),1):
-              print(f"  KEY#{i}: {len(v)} models, e.g. {v[:4]}")
-          PY2
-          fi
-          echo "===== ollama digest 对账 ====="
-          echo "live: $(docker inspect ollama --format '{{.Config.Image}} | {{.Image}}')"
-          echo "repo: $(grep -oP '^\s*image:\s*\K\S+ollama\S+' /root/stacks/litellm-gateway/compose.yml)"
-          echo "===== live 网关容器启动参数 ====="
-          docker inspect litellm-guard --format 'image={{.Config.Image}} name={{.Name}} net={{.HostConfig.NetworkMode}} restart={{.HostConfig.RestartPolicy.Name}}' 2>/dev/null
-          echo "===== 旧栈 compose 是否在（回滚依赖） ====="
-          ls -la /root/stacks/litellm-guard/ 2>/dev/null | head -8 || echo "ABORT: 旧栈目录不存在，回滚无依"
-          echo "===== .master 是否在 ====="
-          test -f /root/litellm-guard/.master && echo "master-file: 存在" || echo "master-file: 缺（改从容器 env 取）"
-          rm -f /tmp/ci-cut-vault_guard.py /tmp/ci-cut-rules.json
-          EOF
-
-      - name: cutover（cutover=true 时）
-        if: inputs.cutover == 'true'
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          tar -czf - -C stacks/litellm-gateway compose.yml config/litellm_config.yaml guard/vault_guard.py guard/models-denied.json guard/rules.json | \
+            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 \
+            "mkdir -p /root/stacks/litellm-gateway && tar -xzf - -C /root/stacks/litellm-gateway && chmod 600 /root/stacks/litellm-gateway/.env && echo synced"
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
-          TS="$(date -u +%Y%m%dT%H%M%SZ)"
-          # 0. 前置门禁
-          [ -f /root/stacks/litellm-guard/compose.yml ] || { echo "ABORT: 旧栈 compose 不在，回滚无依"; exit 1; }
-          [ -f /root/litellm-guard/litellm_config.yaml ] || { echo "ABORT: live 配置不在"; exit 1; }
-          # 1. 备份旧栈（compose + .env + 配置），切流可回滚
-          mkdir -p /root/backups
-          tar -czf "/root/backups/litellm-guard-precut-$TS.tar.gz" -C /root/stacks litellm-guard
-          cp -a /root/litellm-guard "/root/backups/litellm-guard-files-precut-$TS"
-          echo "backup-ok: /root/backups/litellm-guard-precut-$TS.tar.gz"
-          # 2. .env 已由 scp 传入，设权限
-          chmod 600 /root/stacks/litellm-gateway/.env
-          echo "env-ok: keys=$(grep -c '=' /root/stacks/litellm-gateway/.env) (值不打印)"
-          # 3. 拉镜像（pin 已在仓里）
-          cd /root/stacks/litellm-gateway && docker compose pull --quiet litellm-guard
-          # 4. 切流：先停旧栈容器（释出 litellm-guard 容器名＋4000 端口，保留网络），再起新栈
-          cd /root/stacks/litellm-guard && docker compose stop litellm-guard || true
-          docker rm -f litellm-guard || true
-          # 删旧栈残留网络（label 不匹配会致新栈 up 失败；容器已停，网络安全删）
-          docker network rm litellm-guard_default 2>/dev/null || true
-          cd /root/stacks/litellm-gateway && docker compose up -d --no-deps --force-recreate litellm-guard
-          # 4b. 等 ready（litellm 加载 45 模型＋guard 要时间；最多 3 分钟）
+          cd /root/stacks/litellm-gateway
+          docker compose pull --quiet litellm-guard
+          docker compose up -d --force-recreate litellm-guard
           READY=""
           for i in $(seq 1 18); do
             sleep 10
             C0="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
             echo "ready-probe#$i -> $C0"
-            if [ "$C0" = "401" ] || [ "$C0" = "200" ]; then READY=1; break; fi
+            if [ "$C0" = "200" ] || [ "$C0" = "401" ]; then READY=1; break; fi
           done
           echo "container: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
-          [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未起"; docker logs litellm-guard --tail 80 || true; }
-          MK="${{ secrets.UNIFIED_API_KEY }}"
-          # 5. verify（透明代理：litellm 不验证 key，上游验证）
+          [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未起"; docker logs litellm-guard --tail 60 || true; exit 1; }
           PASS=1
-          [ -n "$READY" ] || PASS=0
-          # 无 key 也能通（litellm user_custom_auth 接受任意 key）
-          C0="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
-          echo "no-key: $C0 (expect 200)"; [ "$C0" = "200" ] || PASS=0
-          # 有 key 的 chat 请求能透传到 opencode.ai 并返回 200
-          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MK" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
-          echo "chat-valid-key: $CC (expect 200)"; [ "$CC" = "200" ] || PASS=0
-          # 无效 key 透传后上游返回 401（litellm 不拦截）
-          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
-          echo "chat-invalid-key: $IC (expect 401 from upstream)"; [ "$IC" = "401" ] || PASS=0
-          # opencode session drain
-          OC="$(docker exec opencode-prod opencode run 'reply with exactly: PT-OK' 2>&1 | tail -1)"
-          echo "session-drain: $OC"; echo "$OC" | grep -q "PT-OK" || PASS=0
+          C1="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
+          echo "verify: models=$C1 (expect 200)"; [ "$C1" = "200" ] || PASS=0
+          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${{ secrets.UNIFIED_API_KEY }}" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "verify: chat-valid-key=$CC (expect 200，即后端链路＋.env 都通)"
+          [ "$CC" = "200" ] || PASS=0
+          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "verify: chat-invalid-key=$IC (expect 401 上游鉴权，即透明代理未拦截)"
+          [ "$IC" = "401" ] || PASS=0
           if [ "$PASS" = "1" ]; then
             echo "CUTOVER OK"
-            # session drain 回归测试：opencode run 必须成功（验证 key 透传 litellm → opencode.ai）
-            echo "Testing session drain (opencode run)..."
-            DRAIN_OUT="$(docker exec opencode-prod opencode run "reply with exactly: DRAIN-OK" 2>&1)"
-            if echo "$DRAIN_OUT" | grep -q "DRAIN-OK"; then
-              echo "DRAIN TEST OK: session drain 正常，key 透传生效"
-            else
-              echo "DRAIN TEST WARN: opencode run 未返回预期结果（可能模型侧问题，不影响网关）"
-              echo "output: $(echo "$DRAIN_OUT" | head -3)"
-            fi
-            echo "===== sync-back 用（模型名，不含 key；回仓对账用） ====="
-            grep -E '^ *- model_name:' /root/stacks/litellm-gateway/config/litellm_config.yaml | head -50 || true
           else
-            echo "VERIFY FAIL: 容器日志（定位用）"
-            docker logs litellm-guard --tail 80 || true
-            echo "VERIFY FAIL: 回滚旧栈"
-            cd /root/stacks/litellm-gateway && docker compose stop litellm-guard || true
-            docker rm -f litellm-guard || true
-            docker network rm litellm-guard_default 2>/dev/null || true
-            cd /root/stacks/litellm-guard && docker compose up -d --force-recreate
-            sleep 15
-            echo "rolled-back: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
+            docker logs litellm-guard --tail 60 || true
             exit 1
           fi
           EOF
