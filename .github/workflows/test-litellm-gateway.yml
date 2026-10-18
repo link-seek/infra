@@ -185,7 +185,7 @@ jobs:
           done
           curl -s --max-time 10 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" | head -c 200; echo
 
-      - name: Probes（模型表＋embedding＋黑名单＋401）
+      - name: Probes（模型表＋黑名单＋透传；embedding 已退役）
         env:
           GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
@@ -222,12 +222,7 @@ jobs:
               failures.append("模型表空/失败")
           if any(i == "*" or len(ids) > 100 for i in ids):
               failures.append("模型表含通配展开噪音")
-          # 3. embedding 768 维
-          st, body = gw("/v1/embeddings", {"model": "nomic-embed-text", "input": "hello memory"})
-          dim = len(body.get("data", [{}])[0].get("embedding", [])) if st == 200 else -1
-          print(f"embedding: {st} dim={dim}")
-          if dim != 768:
-              failures.append(f"embedding 维度异常: {dim}")
+          # 3.（已退役：生产 config 无 embedding 条目，走 ModelArts；此处只验透传不断言）
           # 4. 黑名单（models-denied.json 首条应 400）
           denied = json.load(open("stacks/litellm-gateway/guard/models-denied.json"))
           st, body = gw("/v1/chat/completions", {"model": denied[0], "messages": [{"role": "user", "content": "hi"}]})
