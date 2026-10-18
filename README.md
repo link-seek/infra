@@ -33,3 +33,10 @@ stacks/<system>/          # 各系统 topology 级引用，不搬业务仓代码
 组织仓库偏多、边界靠人脑记的问题，跟踪见
 [Discussions：组织仓库规整](https://github.com/link-seek/infra/discussions)，
 清单模板见 `docs/repo-inventory.md`。
+
+## 铁律：打包仓 vs 部署仓分工（2026-10-18，与 docker-images 同源）
+
+- **打包仓（`link-seek/docker-images`）对运行结果负责**：业务逻辑（guard、passthrough、auth、重试、默认配置、插件 bake）全部进镜像，digest 即行为版本号。出问题换 digest行为跟着走可复现。
+- **部署仓（本仓）只对送达负责**：compose pin digest + env 引用 → `up` 即部署。部署脚本不写业务逻辑（无备份/无回滚/无 key 映射/无行为断言）；存活探针只判通断。
+- **测试对象是镜像**：CI 拉 digest pin 跑 e2e，测的是将要上线的字节。**回滚 = 换 digest 发 PR**，git 历史即备份线上不留回滚逻辑。
+- **密钥**：真值只活 GitHub Secrets + 目标机 `.env`（600）；机器随时可回收不留传承。
