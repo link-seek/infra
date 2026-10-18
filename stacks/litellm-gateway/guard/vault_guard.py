@@ -2,14 +2,19 @@
 
 pre_call:  replace secret-looking strings with SHAPE-PRESERVING FAKES
            (same length, same char classes, separators kept), so upstream
-           cannot tell redaction happened and will not punt to manual
-           operation. Same secret maps to the SAME fake while the salt
-           lives, so the model sees a stable token across calls/turns and
-           will not misread it as a rotating/single-use key; error
-           attribution (e.g. expired key vs broken endpoint) stays correct.
-           per-process vault maps fake -> original for restore.
+           cannot tell redaction happened. Mapping lives ONLY in the current
+           call (local dict, built fresh per request, discarded after response).
+           Same secret in the same request maps to the same fake
+           (intra-call dedup via local table), so history + new turn stay
+           consistent within one call. Next call re-masks from scratch:
+           模型看到不同假值也无妨（它本来就不知道真值；agent 侧存真值，
+           每次整包重 mask 全自洽，KV cache miss 只多花 token 不影响正确性）。
+           无 salt、无 vault、无 TTL、无轮换：turn 完即忘。
+pre_call key: VAULT_MASTER_KEY（即 LITELLM_MASTER_KEY，透明代理不鉴权，
+           entrypoint 缺失即随机生成）。AES-GCM 确定性加密（固定 nonce=tag），
+           同 key 同明文永远同密文；解密失败 = 不是我们发的 → 原样放过（fail-safe）。
 post_call: restore fakes (in texts AND tool_calls) before the client
-           sees the response, via multi-pattern match over known fakes.
+           sees the response, via multi-pattern match over this-call fakes.
 streaming: restore per chunk with a carryover buffer. tool_calls deltas
            in streams are left untouched (non-streaming restores fully).
 
@@ -24,15 +29,14 @@ for file edits only if mtime polling is on (FILE_POLL_SEC); URL polling
 every RULES_REFRESH_SEC. Failures keep the old rules (fail-safe).
 """
 import copy
-import hashlib
-import hmac
 import json
 import os
 import re
 import time
 import urllib.request
-import uuid
 from typing import Any, AsyncGenerator, Literal, Optional
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from litellm.integrations.custom_guardrail import CustomGuardrail
 
@@ -45,10 +49,7 @@ RULES_FILE = os.getenv("RULES_FILE", "/app/guard-rules.json")
 RULES_URL = os.getenv("RULES_URL", "")
 REFRESH_SEC = int(os.getenv("RULES_REFRESH_SEC", "60"))
 CARRY = 128
-MAX_ENTRIES = 20000
 RESTORE_RX_CAP = 2000
-TTL_SEC = 6 * 3600
-SALT_ROTATE_SEC = int(os.getenv("VAULT_SALT_ROTATE_SEC", "86400"))
 MODELS_DENIED_FILE = os.getenv("MODELS_DENIED_FILE", "/app/models-denied.json")
 DEFAULT_SESSION = os.getenv("GATEWAY_DEFAULT_SESSION", "gateway-default-v1")
 SESSION_HEADER = "x-opencode-session"
@@ -58,18 +59,23 @@ SAFELIST_SUBSTR = (
 )
 
 
+def _master_key() -> bytes:
+    """32-byte AES key from LITELLM_MASTER_KEY（entrypoint 缺失即随机生成，仅启动占位）.
+    确定性加密不带随机 nonce：同 key 同明文永远同密文（cache 友好）；容器重启换 key 即断关联。"""
+    import hashlib
+
+    raw = os.getenv("LITELLM_MASTER_KEY", "")
+    if not raw:
+        raise RuntimeError("LITELLM_MASTER_KEY 未设置（entrypoint 应已自动生成）")
+    return hashlib.sha256(raw.encode()).digest()
+
+
 class SecretVaultGuardrail(CustomGuardrail):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._rules = []          # list of (name, compiled_re, tag)
         self._file_mtime = 0
         self._last_fetch = 0.0
-        self._vault = {}          # fake -> (original, ts)
-        self._vault_ver = 0       # bumped on every store/prune
-        self._restore_rx = None
-        self._restore_rx_ver = -1
-        self._salt = uuid.uuid4().hex  # per-process salt: same secret ->
-        self._salt_ts = time.time()    # same fake while salt lives
         self._denied_mtime = 0
         self._denied = set()
         self._denied_ok = False   # fail-closed: unreadable denylist blocks ALL
@@ -212,14 +218,6 @@ class SecretVaultGuardrail(CustomGuardrail):
         self._load_file()
         self._fetch_url()
         self._load_denied()
-        now = time.time()
-        if now - self._salt_ts > SALT_ROTATE_SEC:
-            self._salt = uuid.uuid4().hex
-            self._salt_ts = now
-        # prune vault
-        if len(self._vault) > MAX_ENTRIES:
-            self._vault = {k: v for k, v in self._vault.items() if now - v[1] < TTL_SEC}
-            self._vault_ver += 1
 
     # ---------- core ----------
     def _safelisted(self, s):
@@ -227,42 +225,57 @@ class SecretVaultGuardrail(CustomGuardrail):
         return any(x in low for x in SAFELIST_SUBSTR)
 
     def _fake_for(self, tag, orig):
-        """Deterministic shape-preserving fake: family prefix (first 3
-        chars, e.g. `sk-`) kept so it reads as a normal credential of the
-        same family; the rest derived per char class (lower/upper/digit),
-        separators untouched. Irreversible without the per-process salt."""
-        raw = hmac.new(
-            self._salt.encode(),
-            ("%s:%s" % (tag, orig)).encode(),
-            hashlib.sha256,
-        ).digest()
+        """AES-GCM 确定性加密（固定 nonce=tag）：同 key 同明文永远同密文（cache 友好）；
+        截断拼成同形假值（保留 sk- 前缀＋字符类别＋长度）。无状态：不记 vault 不记盐，
+        turn 完即忘；容器重启换 key 即断关联。"""
+        import hashlib
+
+        raw = AESGCM(_master_key()).encrypt(
+            hashlib.sha256(tag.encode()).digest()[:12],
+            orig.encode(),
+            None,
+        )
         out = list(orig[:3])
         ri = 0
         for ch in orig[3:]:
+            b = raw[ri % len(raw)]
             if "a" <= ch <= "z":
-                out.append(chr(ord("a") + raw[ri % len(raw)] % 26))
+                out.append(chr(ord("a") + b % 26))
                 ri += 1
             elif "A" <= ch <= "Z":
-                out.append(chr(ord("A") + raw[ri % len(raw)] % 26))
+                out.append(chr(ord("A") + b % 26))
                 ri += 1
             elif "0" <= ch <= "9":
-                out.append(chr(ord("0") + raw[ri % len(raw)] % 10))
+                out.append(chr(ord("0") + b % 10))
                 ri += 1
             else:
                 out.append(ch)
         return "".join(out)
 
-    def _mask_text(self, text):
+    def _real_for(self, fake):
+        """逆操作：假值解回真值。解不开（模型自编/上轮容器/伪造）→ 返回 None，调用方原样放过。"""
+        return None  # 占位：真实现在 _restore_text 里按映射查；AES 版见下
+
+    def _mask_text(self, text, vault):
+        """单次调用内映射（vault: fake->orig 本调用局部 dict，调完即扔）。
+        同真值同包内映射到同一假值（整包历史自洽）；下次调用重新编号互不干扰。"""
         if not isinstance(text, str) or not text:
             return text
+        # 反向表：同包内同一真值只编一次号
+        rev = {v: k for k, v in vault.items()}
         for _name, rx, tag in self._rules:
             def _sub(m, _tag=tag):
                 orig = m.group(0)
                 if self._safelisted(orig):
                     return orig
+                if orig in rev:
+                    return rev[orig]
                 ph = self._fake_for(_tag, orig)
-                self._vault[ph] = (orig, time.time())
-                self._vault_ver += 1
+                # 碰撞几乎不可能（AES 输出），撞了就原样放过不掩盖
+                if ph in vault and vault[ph] != orig:
+                    return orig
+                vault[ph] = orig
+                rev[orig] = ph
                 return ph
             try:
                 text = rx.sub(_sub, text)
