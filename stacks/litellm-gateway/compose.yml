@@ -6,7 +6,9 @@ services:
   litellm-guard:
     # 版本 pin（digest）：升级 = 改这行发 PR，合后按 README 切流步骤执行。禁止改回 :latest。
     # 2026-10-15：沿用 guard-rules e2e 已验证的上游 digest；切流 PR 用线上 docker inspect 对账。
-    image: ghcr.io/berriai/litellm@sha256:3def0387871a732a6d18b009576c4bf4313c54d448fa938a58f51cf189d1fa33
+    # 2026-10-18：自建镜像（guard bake 进镜像，行为=digest）。来源：link-seek/docker-images docker-gateway.yml。
+    # 上游 GHCR 无版本 tag，必须 digest pin；升级 = 改这行发 PR。
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:61b9d25475f201995eb75dd0151a852fddc7949eb85bf714f3c52d1f8e7783ff
     pull_policy: always
     container_name: litellm-guard
     # PID 1 僵尸回收：与 opencode-prod 同一解法（旧栈 380+ 僵尸教训）。
@@ -25,13 +27,7 @@ services:
     environment:
       DISABLE_ADMIN_UI: "True"
       RULES_FILE: /app/guard-rules.json
-    volumes:
-      - ./config/litellm_config.yaml:/app/config.yaml:ro
-      - ./guard/vault_guard.py:/app/vault_guard.py:ro
-      - ./guard/always_allow_auth.py:/app/always_allow_auth.py:ro
-      - ./guard/passthrough_key.py:/app/passthrough_key.py:ro
-      - ./guard/guard-rules.json:/app/guard-rules.json:ro
-      - ./guard/models-denied.json:/app/models-denied.json:ro
+    # guard/config 全 bake 进镜像（行为=digest），不挂载防漂移。
     command: --config /app/config.yaml --port 4000 --host 0.0.0.0
     restart: unless-stopped
     networks:
