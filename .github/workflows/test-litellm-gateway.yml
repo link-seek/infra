@@ -137,8 +137,7 @@ jobs:
             curl -sf --max-time 5 http://127.0.0.1:11434/ >/dev/null && break
             sleep 5
           done
-          docker exec ollama ollama pull nomic-embed-text
-          docker exec ollama ollama pull qwen3:0.6b
+          docker exec ollama ollama pull qwen3:8b
 
       - name: Render test config（生产 config 原样＋测试条目；单源头不手搓）
         run: |
