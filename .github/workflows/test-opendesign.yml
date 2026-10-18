@@ -113,6 +113,8 @@ jobs:
       - name: Start backend（ollama＋litellm，OD 的 byok 后端）
         env:
           GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          SWR_U: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_P: ${{ secrets.SWR_LOGIN_PASS }}
         run: |
           docker run -d --name ollama --network host \
             -v ollama-data:/root/.ollama -e OLLAMA_HOST=0.0.0.0:11434 \
@@ -156,7 +158,12 @@ jobs:
           open("/tmp/litellm-od.yaml", "w").write(yaml.safe_dump(d))
           print("backend render OK")
           EOF
-          PIN="$(grep -oP '^\s*image:\s*\K\S+litellm@\S+' stacks/litellm-gateway/compose.yml | head -n1)"
+          PIN="$(grep -oP '^\s*image:\s*\K\S+' stacks/litellm-gateway/compose.yml | head -n1)"
+          echo "gateway pin: $PIN"
+          if echo "$PIN" | grep -q "swr\."; then
+            [ -n "$SWR_U" ] || { echo "FAIL: SWR 凭证未配（org secret）"; exit 1; }
+            echo "$SWR_P" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_U" --password-stdin
+          fi
           docker run -d --name litellm-od --network host \
             -v /tmp/litellm-od.yaml:/app/config.yaml:ro \
             -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \

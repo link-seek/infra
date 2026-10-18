@@ -26,12 +26,10 @@ jobs:
           import json, re, sys
           S = "stacks/litellm-gateway"
           bad = 0
-          # 1. compose：两镜像必须 digest pin，禁 :latest
+          # 1. compose：单镜像必须 digest pin，禁 :latest（ollama 已退役）
           comp = open(f"{S}/compose.yml").read()
-          for svc in ("litellm-guard", "ollama"):
-              m = re.search(rf"^\s*image:\s*(\S+)", comp, re.M | re.S)
           imgs = re.findall(r"^\s*image:\s*(\S+)", comp, re.M)
-          assert len(imgs) == 2, f"期望 2 个 image，实际 {imgs}"
+          assert len(imgs) == 1, f"期望 1 个 image，实际 {imgs}"
           for img in imgs:
               if "@sha256:" not in img:
                   print(f"FAIL: {img} 不是 digest pin"); bad += 1
