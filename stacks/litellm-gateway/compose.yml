@@ -6,7 +6,7 @@ services:
     # 2026-10-15：沿用 guard-rules e2e 已验证的上游 digest；切流 PR 用线上 docker inspect 对账。
     # 2026-10-18：自建镜像（guard bake 进镜像，行为=digest）。来源：link-seek/docker-images docker-gateway.yml。
     # 上游 GHCR 无版本 tag，必须 digest pin；升级 = 改这行发 PR。
-    image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:c63c5c59a3fccd14e80422c19f38a8fa457d3369309e84d15a74c60bbacd3275
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:fd69f3bc284cfdcaef3ec0b81c4d1b04eef8669ea2eb8a38340f86d73ef11a35
     pull_policy: always
     container_name: litellm-guard
     # PID 1 僵尸回收：与 opencode-prod 同一解法（旧栈 380+ 僵尸教训）。
