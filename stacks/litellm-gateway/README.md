@@ -14,7 +14,6 @@
 | 模型表 | ✅ 45 条全量已收（线上 46 行含 1 条注释掉的 `go-spark-b`，未收；`space-bunny-free` 上游已死，原样保留，删不删切流定） |
 | `vault_guard.py` | ⚠️ 仓新（27965B）线旧（27296B，9-28），切流=升级；线上 hotfix 有无必须 diff（持钥人本地做，不进 CI 日志） |
 | `guard-rules.json` | ⚠️ 内容不一（线上 1136B vs 仓 `rules.json` 1652B；线上另配 `RULES_URL` 走 R2），切流对账 |
-| ollama 镜像 | ⚠️ 来源不同（线上 SWR tag vs 栈内 docker hub digest），切流时 `RepoDigests` 对账 |
 | DNS | ⚠️ `opendesign.xieyucheng.top` 在隧道里但不在 `dns/records.yaml`（漂移，另起） |
 
 ## 来源
@@ -37,10 +36,8 @@
 * 切流缺口（切流 PR 补，全部在窗口做）：
   1. `vault_guard.py` diff（仓新线旧，持钥人本地 diff 定线上无未进仓 hotfix）
   2. `guard-rules.json` 内容对账（线上 1136B vs 仓 1652B＋`RULES_URL` R2 模式）
-  3. ollama `RepoDigests` 对账（SWR tag vs docker hub digest 是否同一构建）
-  4. 线上 `/root/stacks/litellm-guard/compose.yml` 内容对读（`restart-guard.sh` 指向它）
-  5. ollama 数据卷是空的：切流 `up` 后另行 `ollama pull nomic-embed-text`（274MB）
-  6. 本栈 `.env` 按 sops 落盘 600（`GO_BACKEND_KEY` 从线上渲染转入，非手写）
+  3. 线上 `/root/stacks/litellm-guard/compose.yml` 内容对读（`restart-guard.sh` 指向它）
+  4. 本栈 `.env` 按 sops 落盘 600（`GO_BACKEND_KEY` 从线上渲染转入，非手写）
 
 ## 日常（切流后生效，切流前仅供评审）
 

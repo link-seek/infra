@@ -3,7 +3,7 @@ services:
   opencode-prod:
     # 版本 pin（digest）：升级 = 改这行发 PR，合后自动灰度。禁止改回 :latest。
     # 2026-10-15：glibc 线 2.0.29（与 1.41 试用同一 digest）；线上旧 Alpine 借首次灰度退役。
-    image: swr.cn-north-9.myhuaweicloud.com/xieyucheng123/opencode-tools@sha256:0961bee013b5443da271195ca0deba85a7adac19dc1eee65f9fbbcd4da62f7d5
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:b253cba546a0d0e1040c976824c2d58d21458f641e2462ba63502d1ef7f91db1
     pull_policy: always
     container_name: opencode-prod
     # PID 1 僵尸回收：opencode serve 自身是 PID 1（entrypoint 末尾 exec），不收 git/gh/sleep 孤儿；
