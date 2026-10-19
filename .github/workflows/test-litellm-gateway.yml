@@ -198,9 +198,9 @@ jobs:
           print(f"denied({denied[0]}): {st}")
           if st != 400:
               failures.append(f"黑名单未拦: {denied[0]} -> {st}")
-          # 5. 透传（glm-5.2 付费＋真 key==master：admin 直通，上游真 200；
-          #    与生产逐字节一致，1 token；免费档锁客户端由 OD CI 真客户端覆盖）
-          st, body = gw("/v1/chat/completions", {"model": "glm-5.2", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}], "max_tokens": 5})
+          # 5. 透传（glm-5.2 付费＋GO key：非 sk- 格式不过 DB，直达上游；
+          #    UNIFIED key 疑似 sk- 格式会触发无 DB 报错，见 run 39204552770）
+          st, body = gw("/v1/chat/completions", {"model": "glm-5.2", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}], "max_tokens": 5}, key=os.environ.get("GO_BACKEND_KEY", KEY))
           txt = json.dumps(body)[:120]
           print(f"passthrough-paid: {st} {txt}")
           if st != 200:
