@@ -47,7 +47,7 @@ jobs:
           else:
               print("OK: .env.example 键位齐且无真值")
           # 3. config：YAML 合法；无 <GO_BACKEND_KEY> 明文占位（必须走 os.environ）；
-          #    无 "*" 通配；guard vault default_on；embedding 条目在
+          #    无 "*" 通配；guard vault default_on；embedding 已退役（CF 直连，不经网关）
           import yaml
           d = yaml.safe_load(open(f"{S}/config/litellm_config.yaml"))
           raw = open(f"{S}/config/litellm_config.yaml").read()
@@ -60,10 +60,10 @@ jobs:
               print("FAIL: config 含 * 通配"); bad += 1
           else:
               print(f"OK: models {len(names)} 条，无通配")
-          if "nomic-embed-text" not in names:
-              print("FAIL: 缺 embedding 条目"); bad += 1
+          if "nomic-embed-text" in names:
+              print("FAIL: ollama embedding 条目未退役"); bad += 1
           else:
-              print("OK: embedding 条目在")
+              print("OK: embedding 已退役（CF 直连，不经网关）")
           g = d.get("guardrails", [])
           if not any(x.get("guardrail_name") == "vault" and True in (x["litellm_params"].get("default_on"),) for x in g):
               print("FAIL: vault guardrail 缺失/default_on 非 true"); bad += 1
@@ -125,18 +125,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start ollama (CPU)
-        run: |
-          docker run -d --name ollama --network host \
-            -v ollama-data:/root/.ollama \
-            -e OLLAMA_HOST=0.0.0.0:11434 \
-            ollama/ollama:0.40.3
-          for i in $(seq 1 30); do
-            curl -sf --max-time 5 http://127.0.0.1:11434/ >/dev/null && break
-            sleep 5
-          done
-          docker exec ollama ollama pull qwen3:8b
-
       - name: Render test config（生产 config 原样＋测试条目；单源头不手搓）
         run: |
           pip install pyyaml -q 2>/dev/null || true
@@ -145,13 +133,14 @@ jobs:
           S = "stacks/litellm-gateway"
           d = yaml.safe_load(open(f"{S}/config/litellm_config.yaml"))
           base_n = len(d["model_list"])
-          # e2e 专用条目（不进生产 config）：本地 ollama 模型
+          # e2e 专用条目（不进生产 config）：免费档（零本地计算，ollama 已退役）
           for _name in ("test-chat", "test-chat-b",
                         "open-design-byok/test-chat", "open-design-byok/test-chat-b"):
               if _name not in [m["model_name"] for m in d["model_list"]]:
                   d["model_list"].append({"model_name": _name,
-                      "litellm_params": {"model": "ollama/qwen3:8b",
-                                       "api_base": "http://127.0.0.1:11434", "timeout": 180}})
+                      "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
+                                       "api_base": "https://opencode.ai/inference/openai/v1",
+                                       "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}})
           open("/tmp/litellm-e2e.yaml", "w").write(yaml.safe_dump(d))
           print(f"test config OK: base={base_n} + test={len(d['model_list'])-base_n}")
           EOF
@@ -220,20 +209,22 @@ jobs:
               failures.append("模型表空/失败")
           if any(i == "*" or len(ids) > 100 for i in ids):
               failures.append("模型表含通配展开噪音")
-          # 3.（已退役：生产 config 无 embedding 条目，走 ModelArts；此处只验透传不断言）
+          # 3.（已退役：生产 config 无 embedding 条目，记忆走 CF 直连；此处只验透传不断言）
           # 4. 黑名单（models-denied.json 首条应 400）
           denied = json.load(open("stacks/litellm-gateway/guard/models-denied.json"))
           st, body = gw("/v1/chat/completions", {"model": denied[0], "messages": [{"role": "user", "content": "hi"}]})
           print(f"denied({denied[0]}): {st}")
           if st != 400:
               failures.append(f"黑名单未拦: {denied[0]} -> {st}")
-          # 5. 透传（test-chat 小模型，仅验证通路）
-          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}]})
+          # 5. 透传（test-chat 免费档；curl 非 OpenCode 客户端，上游必 403——
+          #    这个 403 必须原样透回来（与直调一致），即证明网关→上游全链路通且 verdict 未被篡改；
+          #    真 200 通路由 OD CI 真客户端＋cutover 线上验证覆盖）
+          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
           txt = json.dumps(body)[:120]
-          print(f"passthrough: {st} {txt}")
-          if st != 200:
-              failures.append(f"透传失败: {st}")
-          # 5b. 直调上游（隔离用；免费档锁 OpenCode 客户端，直调必 403，仅记录不判失败）
+          print(f"passthrough-free: {st} {txt}")
+          if st != 403:
+              failures.append(f"透传异常: {st} (expect 403 上游 verdict)")
+          # 6. 直调上游（隔离用；免费档锁 OpenCode 客户端，直调必 403，仅记录不判失败）
           try:
               import os
               ukey = os.environ.get("GO_BACKEND_KEY", "")

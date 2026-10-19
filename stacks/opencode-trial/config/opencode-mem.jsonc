@@ -1,9 +1,9 @@
 {
  "storagePath": "/root/.local/share/opencode/opencode-mem",
- "embeddingModel": "nomic-embed-text",
- "embeddingApiUrl": "http://100.91.222.51:4000/v1",
- "embeddingApiKey": "env://LITELLM_API_KEY",
- "embeddingDimensions": 768,
+ "embeddingModel": "@cf/baai/bge-m3",
+ "embeddingApiUrl": "https://api.cloudflare.com/client/v4/accounts/47ce24ced58f17c9fb15351adcbe67d4/ai/v1",
+ "embeddingApiKey": "env://CF_AI_TOKEN",
+ "embeddingDimensions": 1024,
  "webServerEnabled": true,
  "webServerPort": 4747,
  "webServerHost": "0.0.0.0",
