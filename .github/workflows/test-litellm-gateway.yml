@@ -171,8 +171,10 @@ jobs:
           printf 'GO_BACKEND_KEY=%s\nLITELLM_MASTER_KEY=test-only\nDISABLE_ADMIN_UI=True\nRULES_FILE=/app/guard-rules.json\n' "$GO_BACKEND_KEY" > stacks/litellm-gateway/.env
           chmod 600 stacks/litellm-gateway/.env
           # 与 cutover 同命令：pull + up（行为=digest：测的就是将上线的字节）
-          cd stacks/litellm-gateway && docker compose -f compose.yml -f /tmp/gw-e2e-override.yml pull --quiet litellm-guard
-          cd stacks/litellm-gateway && docker compose -f compose.yml -f /tmp/gw-e2e-override.yml up -d --force-recreate litellm-guard
+          cd stacks/litellm-gateway
+          docker compose -f compose.yml -f /tmp/gw-e2e-override.yml pull --quiet litellm-guard
+          docker compose -f compose.yml -f /tmp/gw-e2e-override.yml up -d --force-recreate litellm-guard
+          cd - >/dev/null
           for i in $(seq 1 24); do
             curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" >/dev/null 2>&1 && break
             sleep 5
