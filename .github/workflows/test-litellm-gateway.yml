@@ -125,73 +125,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Render test config（生产 config 原样＋测试条目；单源头不手搓）
-        run: |
-          pip install pyyaml -q 2>/dev/null || true
-          python3 - <<'EOF'
-          import yaml
-          S = "stacks/litellm-gateway"
-          d = yaml.safe_load(open(f"{S}/config/litellm_config.yaml"))
-          base_n = len(d["model_list"])
-          # e2e 专用条目（不进生产 config）：免费档（零本地计算，ollama 已退役）
-          for _name in ("test-chat", "test-chat-b",
-                        "open-design-byok/test-chat", "open-design-byok/test-chat-b"):
-              if _name not in [m["model_name"] for m in d["model_list"]]:
-                  d["model_list"].append({"model_name": _name,
-                      "litellm_params": {"model": "openai/deepseek-v4.1-flash-free",
-                                       "api_base": "https://opencode.ai/inference/openai/v1",
-                                       "api_key": "os.environ/GO_BACKEND_KEY", "timeout": 120}})
-          open("/tmp/litellm-e2e.yaml", "w").write(yaml.safe_dump(d))
-          print(f"test config OK: base={base_n} + test={len(d['model_list'])-base_n}")
-          EOF
-      # guard/*.py 已 bake 进镜像不挂载；models-denied.json 挂载保留热更新能力
-      # 起服与线上同一条路：compose 本体 up（非手拼 docker run），测的就是部署跑的
-      - name: Start litellm（compose 本体＋测试覆盖，port 4001）
+      # 起服与线上同一条路：compose 本体零修改 up；测的就是部署跑的（1:1 复刻生产）
+      - name: Start litellm（compose 本体，4000，master=真 key）
         env:
           GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
           SWR_U: ${{ secrets.SWR_LOGIN_USER }}
           SWR_P: ${{ secrets.SWR_LOGIN_PASS }}
         run: |
-          [ -n "$GO_BACKEND_KEY" ] || { echo "FAIL: OPENCODE_API_KEY 未配（org secret，free 档测试用）"; exit 1; }
+          [ -n "$GO_BACKEND_KEY" ] || { echo "FAIL: OPENCODE_API_KEY 未配（org secret，config 引用）"; exit 1; }
+          [ -n "$UNIFIED_API_KEY" ] || { echo "FAIL: UNIFIED_API_KEY 未配（org secret，master 与付费透传用）"; exit 1; }
           echo "gateway pin: $(grep -oP '^\s*image:\s*\K\S+' stacks/litellm-gateway/compose.yml | head -n1)"
           if grep -q "swr\." stacks/litellm-gateway/compose.yml; then
             [ -n "$SWR_U" ] || { echo "FAIL: SWR 凭证未配（org secret）"; exit 1; }
             echo "$SWR_P" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_U" --password-stdin
           fi
-          # 测试覆盖（生产文件不动）：端口改 4001＋config 挂载测试版；.env 按生产机制落盘（runner 即焚）
-          cat > /tmp/gw-e2e-override.yml <<'EOF'
-          services:
-            litellm-guard:
-              ports:
-                - "127.0.0.1:4001:4000"
-              volumes:
-                - /tmp/litellm-e2e.yaml:/app/config.yaml:ro
-                - ./guard/models-denied.json:/app/models-denied.json:ro
-          EOF
-          printf 'GO_BACKEND_KEY=%s\nLITELLM_MASTER_KEY=test-only\nDISABLE_ADMIN_UI=True\nRULES_FILE=/app/guard-rules.json\n' "$GO_BACKEND_KEY" > stacks/litellm-gateway/.env
+          # runner 补齐生产网桥 IP（172.17.0.1 是 docker0 自带；127 本来就有）；
+          # compose 文件逐字节不动，.env 按生产机制落盘（runner 即焚）
+          sudo ip addr add 172.19.0.1/24 dev lo 2>/dev/null || true
+          printf 'GO_BACKEND_KEY=%s\nLITELLM_MASTER_KEY=%s\nDISABLE_ADMIN_UI=True\nRULES_FILE=/app/guard-rules.json\n' "$GO_BACKEND_KEY" "$UNIFIED_API_KEY" > stacks/litellm-gateway/.env
           chmod 600 stacks/litellm-gateway/.env
           # 与 cutover 同命令：pull + up（行为=digest：测的就是将上线的字节）
-          cd stacks/litellm-gateway
-          docker compose -f compose.yml -f /tmp/gw-e2e-override.yml pull --quiet litellm-guard
-          docker compose -f compose.yml -f /tmp/gw-e2e-override.yml up -d --force-recreate litellm-guard
-          cd - >/dev/null
+          cd stacks/litellm-gateway && docker compose pull --quiet litellm-guard && docker compose up -d --force-recreate litellm-guard
           for i in $(seq 1 24); do
-            curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" >/dev/null 2>&1 && break
+            curl -sf --max-time 5 http://127.0.0.1:4000/v1/models -H "Authorization: Bearer $UNIFIED_API_KEY" >/dev/null 2>&1 && break
             sleep 5
           done
-          curl -s --max-time 10 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" | head -c 200; echo
+          curl -s --max-time 10 http://127.0.0.1:4000/v1/models -H "Authorization: Bearer $UNIFIED_API_KEY" | head -c 200; echo
 
-      - name: Probes（模型表＋黑名单＋透传；embedding 已退役）
+      - name: Probes（模型表＋黑名单＋透传；与生产逐字节一致）
         env:
           GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
         run: |
           python3 - <<'EOF'
-          import json, sys, urllib.request, urllib.error
-          KEY = "test-only"
+          import json, os, sys, urllib.request, urllib.error
+          KEY = os.environ.get("UNIFIED_API_KEY", "")
           failures = []
           def gw(path, payload=None, key=KEY):
               req = urllib.request.Request(
-                  "http://127.0.0.1:4001" + path,
+                  "http://127.0.0.1:4000" + path,
                   data=json.dumps(payload).encode() if payload is not None else None,
                   headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                   method="POST" if payload is not None else "GET")
@@ -225,14 +198,13 @@ jobs:
           print(f"denied({denied[0]}): {st}")
           if st != 400:
               failures.append(f"黑名单未拦: {denied[0]} -> {st}")
-          # 5. 透传（test-chat 免费档；curl 非 OpenCode 客户端，上游必 403——
-          #    这个 403 必须原样透回来（与直调一致），即证明网关→上游全链路通且 verdict 未被篡改；
-          #    真 200 通路由 OD CI 真客户端＋cutover 线上验证覆盖）
-          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
+          # 5. 透传（glm-5.2 付费＋真 key==master：admin 直通，上游真 200；
+          #    与生产逐字节一致，1 token；免费档锁客户端由 OD CI 真客户端覆盖）
+          st, body = gw("/v1/chat/completions", {"model": "glm-5.2", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}], "max_tokens": 5})
           txt = json.dumps(body)[:120]
-          print(f"passthrough-free: {st} {txt}")
-          if st != 403:
-              failures.append(f"透传异常: {st} (expect 403 上游 verdict)")
+          print(f"passthrough-paid: {st} {txt}")
+          if st != 200:
+              failures.append(f"透传失败: {st}")
           # 6. 直调上游（隔离用；免费档锁 OpenCode 客户端，直调必 403，仅记录不判失败）
           try:
               import os
@@ -249,17 +221,18 @@ jobs:
                   emsg = e.read().decode()[:200]
               except Exception:
                   emsg = ""
-              print(f"direct-upstream models: {e.code} {emsg} (直调预期行为：免费档锁客户端，见 opencode-loop 真客户端测试)")
+              print(f"direct-upstream models: {e.code} {emsg} (直调预期行为：免费档锁客户端，见 OD CI 真客户端)")
           except Exception as e:
               print(f"direct-upstream models: -1 {e}")
-          # 6-8.（直调 API 测免费档已证伪，删除）上游免费档锁 OpenCode 客户端，直调/curl 必 403
-          # （"free tier can only be used from within OpenCode"）。免费三件套改走真客户端，见 opencode-loop。
+          # 6-8. 免费三件套改走 OD CI 真客户端（test-opendesign 全绿），此处只记录直调对照。
           if failures:
               print("FAILURES:"); [print(f" - {f}") for f in failures]; sys.exit(1)
           print("ALL PROBES OK")
           EOF
 
-      - name: opencode-loop（成品镜像调网关＋mask/restore 断言）
+      - name: opencode-loop（成品镜像真客户端＋mask/restore 断言）
+        env:
+          UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
         run: |
           # pin 取自生产栈 compose（部署仓消费打包仓工件，单源头；镜像换 pin 即换被测物）
           PIN="$(grep -oP '^\s*image:\s*\K\S+opencode-tools@\S+' stacks/opencode-prod/compose.yml | head -n1)"
@@ -269,11 +242,12 @@ jobs:
           cat > /tmp/oc-cfg-gw/opencode.jsonc <<'EOF'
           {"$schema": "https://opencode.ai/config.json",
            "permission": "allow",
-           "model": "gw/test-chat",
+           "model": "gw/glm-5.2",
            "provider": {"gw": {"options": {
-             "baseURL": "http://127.0.0.1:4001/v1",
-             "apiKey": "test-only"}}}}
+             "baseURL": "http://127.0.0.1:4000/v1",
+             "apiKey": "__UNIFIED_KEY__"}}}}
           EOF
+          sed -i "s|__UNIFIED_KEY__|$UNIFIED_API_KEY|" /tmp/oc-cfg-gw/opencode.jsonc
           docker run -d --name oc-gwtest --network host \
             -v /tmp/oc-cfg-gw/opencode.jsonc:/root/.config/opencode/opencode.jsonc:ro \
             -e OPENCODE_SERVER_PASSWORD=test-srv-pw \
@@ -284,7 +258,8 @@ jobs:
           done
           OEX="docker exec -e OPENCODE_PASSWORD=test-srv-pw oc-gwtest opencode run --server http://127.0.0.1:4096"
           FAIL=""
-          # 1. 连通门（3 轮，小模型偶发慢） — 区分网关故障与模型抖动
+          # 1. 连通门（3 轮，小模型偶发慢） — 区分网关故障与模型抖动；
+          #    真客户端＋真 key==master，直通上游真 200（免费档锁 curl，由 OD CI 真客户端覆盖）
           OK1=""
           for attempt in 1 2 3; do
             timeout 280 $OEX "reply with exactly: GW-OK" > /tmp/gw-out.txt 2>&1 && \
@@ -302,72 +277,5 @@ jobs:
             echo "--- mask attempt $attempt:"; tail -8 /tmp/mask-out.txt
           done
           [ -n "$OK2" ] || FAIL="$FAIL; mask/restore 回包非原文"
-          # 3. 免费档真客户端三件套（上游免费档锁 OpenCode 客户端，直调 403，只有真客户端能过；
-          #    经网关 free-probe-a/b 条目→inference 端口。marker/数字全合成，无敏感）。
-          #    注意：-m 传自定义模型会被客户端拒（provider.no-route，只认 models.dev），故按模型分
-          #    config 文件、serve 重启切换（config 默认模型直通网关，已由 GW-OK 证实）。
-          start_gw() { # $1 = a|b（config 后缀），$2 = 模型名
-            mkdir -p "/tmp/oc-cfg-gw-$1"
-            sed "s#gw/test-chat#gw/$2#" /tmp/oc-cfg-gw/opencode.jsonc > "/tmp/oc-cfg-gw-$1/opencode.jsonc"
-            docker rm -f oc-gwtest >/dev/null 2>&1 || true
-            sleep 3
-            docker run -d --name oc-gwtest --network host \
-              -v "/tmp/oc-cfg-gw-$1/opencode.jsonc:/root/.config/opencode/opencode.jsonc:ro" \
-              -e OPENCODE_SERVER_PASSWORD=test-srv-pw \
-              "$PIN" serve --port 4096 --hostname 127.0.0.1
-            for i in $(seq 1 24); do
-              curl -sf --max-time 5 http://127.0.0.1:4096/ >/dev/null 2>&1 && break
-              sleep 5
-            done
-            curl -sf --max-time 10 http://127.0.0.1:4096/ >/dev/null || { echo "FAIL: serve ($2) 未起"; exit 1; }
-            echo "serve ok: $2"
-          }
-          start_gw a free-probe-a
-          OK3=""
-          for attempt in 1 2 3; do
-            timeout 280 $OEX "reply with exactly: FREE-CLIENT-OK" > /tmp/free1-out.txt 2>&1 && \
-            grep -q "FREE-CLIENT-OK" /tmp/free1-out.txt && { OK3=1; echo "OK: free single (attempt $attempt)"; break; }
-            echo "--- free single attempt $attempt:"; tail -5 /tmp/free1-out.txt
-          done
-          [ -n "$OK3" ] || FAIL="$FAIL; 免费单聊不通（free-probe-a）"
-          # 4. 免费多轮（同 server 同 session：先记数，取 session id，再续问；--session/-s 见 CLI 文档）
-          SID=""
-          timeout 280 $OEX --format json "记住这个数字：7421，收到只回复：记住了" > /tmp/multi1-out.txt 2>&1 || true
-          SID="$(python3 -c "
-          import re
-          t = open('/tmp/multi1-out.txt', errors='replace').read()
-          m = re.findall(r'\"session[Ii][Dd]\"\s*:\s*\"([^\"]+)\"', t)
-          print(m[0] if m else '')" 2>/dev/null)"
-          if [ -z "$SID" ]; then
-            SID="$(docker exec -e OPENCODE_PASSWORD=test-srv-pw oc-gwtest opencode session list --format json 2>/dev/null | python3 -c "
-          import json,sys
-          try:
-              d = json.load(sys.stdin)
-              items = d if isinstance(d, list) else d.get('sessions', d.get('data', []))
-              print(items[0].get('id', items[0].get('sessionID', '')) if items else '')
-          except Exception:
-              print('')" 2>/dev/null)"
-          fi
-          echo "multi session: ${SID:0:12}..."
-          OK5=""
-          if [ -n "$SID" ] && grep -q "记住了" /tmp/multi1-out.txt; then
-            for attempt in 1 2 3; do
-              timeout 280 $OEX -s "$SID" "我让你记的数字是多少？只回复数字" > /tmp/multi2-out.txt 2>&1 && \
-              grep -q "7421" /tmp/multi2-out.txt && { OK5=1; echo "OK: free multi-turn (attempt $attempt)"; break; }
-              echo "--- free multi attempt $attempt:"; tail -5 /tmp/multi2-out.txt
-            done
-          else
-            echo "--- multi turn1 output:"; tail -8 /tmp/multi1-out.txt
-          fi
-          [ -n "$OK5" ] || FAIL="$FAIL; 免费多轮未召回 7421"
-          # 5. 免费切模型（config 默认切 free-probe-b，serve 重启；跨模型路由）
-          start_gw b free-probe-b
-          OK4=""
-          for attempt in 1 2 3; do
-            timeout 280 $OEX "reply with exactly: SWITCH-CLIENT-OK" > /tmp/free2-out.txt 2>&1 && \
-            grep -q "SWITCH-CLIENT-OK" /tmp/free2-out.txt && { OK4=1; echo "OK: free switch (attempt $attempt)"; break; }
-            echo "--- free switch attempt $attempt:"; tail -5 /tmp/free2-out.txt
-          done
-          [ -n "$OK4" ] || FAIL="$FAIL; 免费切模型不通（free-probe-b）"
           docker rm -f oc-gwtest >/dev/null 2>&1 || true
           [ -z "$FAIL" ] && echo "OPENCODE-LOOP OK" || { echo "FAIL: $FAIL"; exit 1; }
