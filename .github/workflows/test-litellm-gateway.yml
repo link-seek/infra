@@ -217,12 +217,17 @@ jobs:
           print(f"denied({denied[0]}): {st}")
           if st != 400:
               failures.append(f"黑名单未拦: {denied[0]} -> {st}")
-          # 5. 透传（test-chat 免费档；免费档锁客户端/真 key，dummy key 必 403，故用真 key；免费不消耗额度）
-          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}]}, key=REAL_KEY)
+          # 5. 透传（glm-5.2 付费档＋真 key：curl 非客户端，免费档必被锁，只有付费档能证明 200 通路；花 1 token）
+          st, body = gw("/v1/chat/completions", {"model": "glm-5.2", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}], "max_tokens": 5}, key=REAL_KEY)
           txt = json.dumps(body)[:120]
-          print(f"passthrough: {st} {txt}")
+          print(f"passthrough-paid: {st} {txt}")
           if st != 200:
               failures.append(f"透传失败: {st}")
+          # 5b. 免费档锁客户端（curl 直调必 403，与上游直调行为一致；真 200 通路由 OD CI 的真客户端覆盖）
+          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
+          print(f"passthrough-free-lock: {st} (expect 403)")
+          if st != 403:
+              failures.append(f"免费锁异常: {st} (expect 403)")
           # 5b. 直调上游（隔离用；免费档锁 OpenCode 客户端，直调必 403，仅记录不判失败）
           try:
               import os
