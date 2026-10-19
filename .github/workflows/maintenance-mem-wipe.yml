@@ -53,12 +53,23 @@ jobs:
           VOL="$(docker volume ls -q | grep -E 'prod-data$' | head -n1)"
           [ -n "$VOL" ] || { echo "FAIL: 找不到 prod-data 卷"; exit 1; }
           echo "volume: $VOL"
-          ls "/var/lib/docker/volumes/$VOL/_data/root/.local/share/opencode/opencode-mem/" 2>/dev/null | head -n 10 || true
+          # 先探明布局（卷内路径因人而异，猜错就停，不准静默跳过）
+          MEMDIR="$(docker run --rm -v "$VOL:/data" alpine sh -c 'find /data -type d -name opencode-mem 2>/dev/null | head -n1')"
+          [ -n "$MEMDIR" ] || { echo "FAIL: 卷内无 opencode-mem 目录"; docker run --rm -v "$VOL:/data" alpine sh -c 'ls -R /data 2>/dev/null | head -n 30'; exit 1; }
+          echo "memdir: $MEMDIR"
+          CNT="$(docker run --rm -v "$VOL:/data" alpine sh -c "find '$MEMDIR' -name '*.db' 2>/dev/null | wc -l")"
+          echo "db files: $CNT"
+          [ "$CNT" -gt 0 ] || { echo "FAIL: 无 db 文件可备（$MEMDIR 为空？），拒绝空跑"; exit 1; }
           mkdir -p /root/backups
           TS="$(date -u +%Y%m%dT%H%M%SZ)"
-          docker run --rm -v "$VOL:/data" -v /root/backups:/b alpine tar -czf "/b/mem-pre-wipe-$TS.tar.gz" -C /data/root/.local/share/opencode opencode-mem && echo "backup-ok: /root/backups/mem-pre-wipe-$TS.tar.gz"
+          docker run --rm -v "$VOL:/data" -v /root/backups:/b alpine tar -czf "/b/mem-pre-wipe-$TS.tar.gz" -C /data "${MEMDIR#/data/}" || { echo "FAIL: 备份失败"; exit 1; }
+          test -s "/root/backups/mem-pre-wipe-$TS.tar.gz" || { echo "FAIL: 备份包为空"; exit 1; }
+          echo "backup-ok: /root/backups/mem-pre-wipe-$TS.tar.gz"
           cd /root/stacks/opencode-prod && docker compose stop opencode-prod
-          docker run --rm -v "$VOL:/data" alpine sh -c 'find /data/root/.local/share/opencode/opencode-mem -maxdepth 2 \( -name "*.db*" -o -name "*.lock" \) -delete; echo wiped'
+          docker run --rm -v "$VOL:/data" alpine sh -c "find '$MEMDIR' -maxdepth 2 \( -name '*.db*' -o -name '*.lock' \) -delete; echo wiped"
+          LEFT="$(docker run --rm -v "$VOL:/data" alpine sh -c "find '$MEMDIR' -maxdepth 2 -name '*.db' 2>/dev/null | wc -l")"
+          [ "$LEFT" -eq 0 ] || { echo "FAIL: 清理后仍残留 $LEFT 个 db"; exit 1; }
+          echo "verify-wipe-ok: 0 db left"
           docker compose up -d opencode-prod
           READY=""
           for i in $(seq 1 18); do
