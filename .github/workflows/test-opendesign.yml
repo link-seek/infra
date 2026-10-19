@@ -206,9 +206,9 @@ jobs:
             local _pj="$1" _model="$2" _msg="$3"
             local _rid="req-$(cat /proc/sys/kernel/random/uuid)"
             curl -s -m 15 -H "$AUTH" -H 'Content-Type: application/json' \
-              -d "$(jq -n --arg p "$_pj" --arg r "$_rid" --arg m "$_msg" --arg mo "$_model" \
+              -d "$(jq -n --arg p "$_pj" --arg r "$_rid" --arg m "$_msg" --arg mo "$_model" --arg k "$GO_BACKEND_KEY" \
                 '{projectId:$p, clientRequestId:$r, message:$m, agentId:"byok-opencode", model:$mo,
-                  byokProvider:{protocol:"openai", apiKey:"test-only", baseUrl:"http://127.0.0.1:4001/v1", model:$mo}}')" \
+                  byokProvider:{protocol:"openai", apiKey:$k, baseUrl:"http://127.0.0.1:4001/v1", model:$mo}}')" \
               "$OD/api/runs" || echo '{"error":"CURLFAIL"}'
           }
           poll_run() {

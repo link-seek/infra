@@ -177,8 +177,9 @@ jobs:
           GO_BACKEND_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
           python3 - <<'EOF'
-          import json, sys, urllib.request, urllib.error
+          import json, os, sys, urllib.request, urllib.error
           KEY = "test-only"
+          REAL_KEY = os.environ.get("GO_BACKEND_KEY", "") or KEY
           failures = []
           def gw(path, payload=None, key=KEY):
               req = urllib.request.Request(
@@ -209,15 +210,15 @@ jobs:
               failures.append("模型表空/失败")
           if any(i == "*" or len(ids) > 100 for i in ids):
               failures.append("模型表含通配展开噪音")
-          # 3.（已退役：生产 config 无 embedding 条目，走 ModelArts；此处只验透传不断言）
+          # 3.（已退役：生产 config 无 embedding 条目，记忆走 CF 直连；此处只验透传不断言）
           # 4. 黑名单（models-denied.json 首条应 400）
           denied = json.load(open("stacks/litellm-gateway/guard/models-denied.json"))
           st, body = gw("/v1/chat/completions", {"model": denied[0], "messages": [{"role": "user", "content": "hi"}]})
           print(f"denied({denied[0]}): {st}")
           if st != 400:
               failures.append(f"黑名单未拦: {denied[0]} -> {st}")
-          # 5. 透传（test-chat 小模型，仅验证通路）
-          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}]})
+          # 5. 透传（test-chat 免费档；免费档锁客户端/真 key，dummy key 必 403，故用真 key；免费不消耗额度）
+          st, body = gw("/v1/chat/completions", {"model": "test-chat", "messages": [{"role": "user", "content": "reply with exactly: GW-OK"}]}, key=REAL_KEY)
           txt = json.dumps(body)[:120]
           print(f"passthrough: {st} {txt}")
           if st != 200:
