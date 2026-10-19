@@ -1,0 +1,38 @@
+name: render-check
+
+# dotenv 现场 render 的门：map 键集合必须 == .env.example 键集合，
+# map 里每个 secret: 后缀必须在对应 workflow 有 S_ 导出。只核键名，不碰值。
+# 加 key 三处同改：env-sources.conf → workflow S_ 导出块 → caller secrets 透传。
+
+on:
+  pull_request:
+    paths: ['stacks/**', 'scripts/render-dotenv.sh', '.github/workflows/deploy-opencode-*.yml', '.github/workflows/cutover-*.yml', '.github/workflows/render-check.yml']
+  push:
+    branches: [main]
+    paths: ['stacks/**', 'scripts/render-dotenv.sh', '.github/workflows/deploy-opencode-*.yml', '.github/workflows/cutover-*.yml']
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 键集合对齐（prod）
+        run: bash scripts/render-dotenv.sh --map stacks/opencode-prod/env-sources.conf --example stacks/opencode-prod/.env.example --check-only
+
+      - name: 键集合对齐（gateway）
+        run: bash scripts/render-dotenv.sh --map stacks/litellm-gateway/env-sources.conf --example stacks/litellm-gateway/.env.example --check-only
+
+      - name: map secret 后缀 ↔ workflow S_ 导出对齐
+        run: |
+          set -euo pipefail
+          fail=0
+          for pair in "stacks/opencode-prod/env-sources.conf:.github/workflows/deploy-opencode-stack.yml" "stacks/litellm-gateway/env-sources.conf:.github/workflows/cutover-litellm-gateway.yml"; do
+            map="${pair%%:*}"; wf="${pair##*:}"
+            suffixes="$(grep -oP '^[^#\s=]+=secret:\K[A-Z_0-9]+' "$map" | sort -u)"
+            for s in $suffixes; do
+              grep -q "S_$s:" "$wf" || { echo "EXPORT_MISSING: $wf 缺 S_$s:（map $map 要它）"; fail=1; }
+            done
+          done
+          [ "$fail" = 0 ] && echo "EXPORT OK" || exit 1

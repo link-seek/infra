@@ -38,13 +38,15 @@ jobs:
         timeout-minutes: 10
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          S_OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          S_LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          # .env 自带（secret 渲染，600 落盘；值不打印）
-          printf '%s' "${{ secrets.LITELLM_DOTENV_B64 }}" | base64 -d > /tmp/ci-litellm-dotenv
+          # .env 现场 render（终态：包只活内存；存量 LITELLM_DOTENV_B64 待绿切流后删除）
+          bash scripts/render-dotenv.sh --map stacks/litellm-gateway/env-sources.conf --example stacks/litellm-gateway/.env.example --out /tmp/ci-litellm-dotenv
           scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key /tmp/ci-litellm-dotenv root@100.91.222.51:/root/stacks/litellm-gateway/.env
           rm -f /tmp/ci-litellm-dotenv
           tar -czf - -C stacks/litellm-gateway compose.yml config/litellm_config.yaml guard/vault_guard.py guard/models-denied.json guard/rules.json | \
