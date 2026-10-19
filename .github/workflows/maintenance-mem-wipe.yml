@@ -1,0 +1,74 @@
+name: maintenance-mem-wipe
+
+# 一次性维护：清生产记忆库（768→1024 换 bge-m3，用户确认旧数据可删）。
+# 顺序：备份卷内 mem 目录 → 停服 → 删 *.db*＋残留锁 → 起服 → 存活探。
+# 不碰：网关、OD、其他卷、HW41。画像同库一起清（auto-learning 会重建）。
+# 用完即走 dispatch，平时不触发；改动需 PR（密钥只活 secrets）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "输入 WIPE-MEMORY 才执行"
+        required: false
+        default: "NO"
+
+concurrency:
+  group: maintenance-mem-wipe
+  cancel-in-progress: false
+
+jobs:
+  wipe:
+    if: inputs.confirm == 'WIPE-MEMORY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 加入 tailnet（一次性节点，用完即焚）
+        timeout-minutes: 6
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-wipe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          timeout 15 bash -c "</dev/tcp/100.91.222.51/2244" || { echo "target unreachable"; exit 1; }
+          echo "target reachable"
+
+      - name: 备份→停服→清库→起服→验证
+        timeout-minutes: 12
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          NODE="100.91.222.51"; PORT="2244"
+          ssh-keyscan -p "$PORT" -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s <<'EOF'
+          set -euo pipefail
+          VOL="$(docker volume ls -q | grep -E 'prod-data$' | head -n1)"
+          [ -n "$VOL" ] || { echo "FAIL: 找不到 prod-data 卷"; exit 1; }
+          echo "volume: $VOL"
+          ls "/var/lib/docker/volumes/$VOL/_data/root/.local/share/opencode/opencode-mem/" 2>/dev/null | head -n 10 || true
+          mkdir -p /root/backups
+          TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          docker run --rm -v "$VOL:/data" -v /root/backups:/b alpine tar -czf "/b/mem-pre-wipe-$TS.tar.gz" -C /data/root/.local/share/opencode opencode-mem && echo "backup-ok: /root/backups/mem-pre-wipe-$TS.tar.gz"
+          cd /root/stacks/opencode-prod && docker compose stop opencode-prod
+          docker run --rm -v "$VOL:/data" alpine sh -c 'find /data/root/.local/share/opencode/opencode-mem -maxdepth 2 \( -name "*.db*" -o -name "*.lock" \) -delete; echo wiped'
+          docker compose up -d opencode-prod
+          READY=""
+          for i in $(seq 1 18); do
+            sleep 10
+            C="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:4097/ || echo 000)"
+            echo "ready-probe#$i -> $C"
+            if [ "$C" = "200" ]; then READY=1; break; fi
+          done
+          echo "container: $(docker ps --filter name=opencode-prod --format '{{.Image}} {{.Status}}')"
+          [ -n "$READY" ] || { echo "FAIL: serve 3 分钟未起"; docker logs opencode-prod --tail 40 || true; exit 1; }
+          curl -s -m 10 http://127.0.0.1:4747/api/health >/dev/null && echo "plugin: reachable" || echo "plugin: idle（首会话激活前属预期）"
+          echo "WIPE DONE"
+          EOF
