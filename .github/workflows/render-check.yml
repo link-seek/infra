@@ -30,7 +30,7 @@ jobs:
           fail=0
           for pair in "stacks/opencode-prod/env-sources.conf:.github/workflows/deploy-opencode-stack.yml" "stacks/litellm-gateway/env-sources.conf:.github/workflows/cutover-litellm-gateway.yml"; do
             map="${pair%%:*}"; wf="${pair##*:}"
-            suffixes="$(grep -oP '^[^#\s=]+=secret:\K[A-Z_0-9]+' "$map" | sort -u)"
+            suffixes="$(grep -oP '^[^#\s=]+=secret:\K[A-Z_0-9]+' "$map" | sort -u || true)"
             for s in $suffixes; do
               grep -q "S_$s:" "$wf" || { echo "EXPORT_MISSING: $wf 缺 S_$s:（map $map 要它）"; fail=1; }
             done

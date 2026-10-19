@@ -86,7 +86,6 @@ jobs:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
       UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
-      CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
       # 终态：单 key 透传，stack 内现场 render；存量 PROD_DOTENV_B64 待绿部署后删除
       ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
       ENV_LITELLM_API_KEY: ${{ secrets.PROD_LITELLM_API_KEY }}
@@ -95,5 +94,5 @@ jobs:
       ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
       ENV_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
       ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.PROD_SSH_PRIVATE_KEY_B64 }}
-      ENV_SSH_TARGETS: ${{ secrets.SSH_TARGETS }}
       ENV_SMTP_PASS: ${{ secrets.PROD_SMTP_PASS }}
+      ENV_CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}

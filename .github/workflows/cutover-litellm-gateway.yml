@@ -38,8 +38,6 @@ jobs:
         timeout-minutes: 10
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
-          S_OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          S_LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh

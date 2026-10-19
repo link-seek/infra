@@ -41,8 +41,6 @@ on:
         required: true
       UNIFIED_API_KEY:
         required: false
-      CF_AI_TOKEN:
-        required: false
       # 终态 dotenv 现场 render：调用方按 env-sources.conf 把单 key 透传进来，
       # S_ 导出块见下 render 步骤；加 key 三处同改（map/env块/caller），render-check 强制对齐。
       # 存量 DOTENV_B64 已退役（删 org secret 前先等一次绿部署验证）。
@@ -60,9 +58,9 @@ on:
         required: false
       ENV_SSH_PRIVATE_KEY_B64:
         required: false
-      ENV_SSH_TARGETS:
-        required: false
       ENV_SMTP_PASS:
+        required: false
+      ENV_CF_AI_TOKEN:
         required: false
 
 jobs:
@@ -107,8 +105,8 @@ jobs:
           S_ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
           S_ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
           S_ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
-          S_ENV_SSH_TARGETS: ${{ secrets.ENV_SSH_TARGETS }}
           S_ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
+          S_ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
         run: |
           set -euo pipefail
           # 日志只列键名（脚本保证不打值）；键集合与 .env.example 对不上直接失败
@@ -119,7 +117,6 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           UNIFIED_KEY: ${{ secrets.UNIFIED_API_KEY }}
-          CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -133,11 +130,6 @@ jobs:
           # 现场 render 的 .env 下发（600 落盘；值不打印，键名见上一 render 步骤）
           scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key /tmp/ci-dotenv root@$NODE:${{ inputs.remote_dir }}/.env
           ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "chmod 600 ${{ inputs.remote_dir }}/.env && echo dotenv-written"
-          # CF_AI_TOKEN 补齐（org secret 直供，不再人肉改目标机 .env；幂等：有则替换，无则追加）
-          # 经 stdin 传值（scp 会被目标机 .bashrc 回显杀死；stdin 不进日志，无泄漏）
-          if [ -n "${CF_AI_TOKEN:-}" ]; then
-            printf '%s' "$CF_AI_TOKEN" | ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "CFV=\$(cat); D=${{ inputs.remote_dir }}/.env; touch \$D; chmod 600 \$D; if grep -q '^CF_AI_TOKEN=' \$D; then sed -i \"s|^CF_AI_TOKEN=.*|CF_AI_TOKEN=\$CFV|\" \$D; else echo \"CF_AI_TOKEN=\$CFV\" >> \$D; fi; echo cf-key-ensured"
-          fi
           # tar+ssh 管道（目标机 .bashrc 回显杀死 scp，见试用演练）
           tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
