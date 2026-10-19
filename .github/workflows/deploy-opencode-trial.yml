@@ -28,3 +28,4 @@ jobs:
     secrets:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_TRIAL }}
       SSH_KEY: ${{ secrets.TRIAL_SSH_KEY }}
+      CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}

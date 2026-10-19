@@ -87,3 +87,4 @@ jobs:
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
       UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
       DOTENV_B64: ${{ secrets.PROD_DOTENV_B64 }}
+      CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
