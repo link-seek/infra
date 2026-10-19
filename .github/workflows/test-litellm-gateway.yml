@@ -163,14 +163,14 @@ jobs:
             -v /tmp/litellm-e2e.yaml:/app/config.yaml:ro \
             -v $PWD/stacks/litellm-gateway/guard/models-denied.json:/app/models-denied.json:ro \
             -e GO_BACKEND_KEY="$GO_BACKEND_KEY" \
-            -e LITELLM_MASTER_KEY=test-only -e DISABLE_ADMIN_UI=True \
+            -e LITELLM_MASTER_KEY="$GO_BACKEND_KEY" -e DISABLE_ADMIN_UI=True \
             -e RULES_FILE=/app/guard-rules.json \
             "$PIN" --config /app/config.yaml --port 4001
           for i in $(seq 1 24); do
-            curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" >/dev/null 2>&1 && break
+            curl -sf --max-time 5 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer $GO_BACKEND_KEY" >/dev/null 2>&1 && break
             sleep 5
           done
-          curl -s --max-time 10 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer test-only" | head -c 200; echo
+          curl -s --max-time 10 http://127.0.0.1:4001/v1/models -H "Authorization: Bearer $GO_BACKEND_KEY" | head -c 200; echo
 
       - name: Probes（模型表＋黑名单＋透传；embedding 已退役）
         env:
@@ -202,8 +202,8 @@ jobs:
           print(f"no-auth models: {st}")
           if st == 200:
               failures.append("无 key 竟能拉模型表")
-          # 2. 模型表非空、无 * 展开噪音
-          st, body = gw("/v1/models")
+          # 2. 模型表非空、无 * 展开噪音（真 key == master，直通）
+          st, body = gw("/v1/models", key=REAL_KEY)
           ids = [m["id"] for m in body.get("data", [])]
           print(f"models: {st} count={len(ids)} sample={ids[:5]}")
           if st != 200 or not ids:
@@ -211,9 +211,9 @@ jobs:
           if any(i == "*" or len(ids) > 100 for i in ids):
               failures.append("模型表含通配展开噪音")
           # 3.（已退役：生产 config 无 embedding 条目，记忆走 CF 直连；此处只验透传不断言）
-          # 4. 黑名单（models-denied.json 首条应 400）
+          # 4. 黑名单（models-denied.json 首条应 400；真 key 过鉴权，400 只能来自 guard 拦截）
           denied = json.load(open("stacks/litellm-gateway/guard/models-denied.json"))
-          st, body = gw("/v1/chat/completions", {"model": denied[0], "messages": [{"role": "user", "content": "hi"}]})
+          st, body = gw("/v1/chat/completions", {"model": denied[0], "messages": [{"role": "user", "content": "hi"}]}, key=REAL_KEY)
           print(f"denied({denied[0]}): {st}")
           if st != 400:
               failures.append(f"黑名单未拦: {denied[0]} -> {st}")
