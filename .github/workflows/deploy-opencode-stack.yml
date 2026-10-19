@@ -43,6 +43,8 @@ on:
         required: false
       DOTENV_B64:
         required: false
+      CF_AI_TOKEN:
+        required: false
 
 jobs:
   deploy:
@@ -83,6 +85,7 @@ jobs:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           UNIFIED_KEY: ${{ secrets.UNIFIED_API_KEY }}
           DOTENV_B64: ${{ secrets.DOTENV_B64 }}
+          CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -98,6 +101,13 @@ jobs:
             printf '%s' "$DOTENV_B64" | base64 -d > /tmp/ci-dotenv
             scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key /tmp/ci-dotenv root@$NODE:${{ inputs.remote_dir }}/.env
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "chmod 600 ${{ inputs.remote_dir }}/.env && echo dotenv-written"
+          fi
+          # CF_AI_TOKEN 补齐（org secret 直供，不再人肉改目标机 .env；幂等：有则替换，无则追加）
+          if [ -n "${CF_AI_TOKEN:-}" ]; then
+            printf '%s' "$CF_AI_TOKEN" | base64 -w0 > /tmp/cf_ai.b64
+            scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key /tmp/cf_ai.b64 root@$NODE:/tmp/cf_ai.b64
+            ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "CFV=\$(base64 -d /tmp/cf_ai.b64); rm -f /tmp/cf_ai.b64; D=${{ inputs.remote_dir }}/.env; touch \$D; chmod 600 \$D; if grep -q '^CF_AI_TOKEN=' \$D; then sed -i \"s|^CF_AI_TOKEN=.*|CF_AI_TOKEN=\$CFV|\" \$D; else echo \"CF_AI_TOKEN=\$CFV\" >> \$D; fi; echo cf-key-ensured"
+            rm -f /tmp/cf_ai.b64
           fi
           # tar+ssh 管道（目标机 .bashrc 回显杀死 scp，见试用演练）
           tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
