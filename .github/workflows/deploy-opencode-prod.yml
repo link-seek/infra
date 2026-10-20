@@ -85,7 +85,7 @@ jobs:
     secrets:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
-      UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
+      CLIENT_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       # 终态：单 key 透传，stack 内现场 render；存量 PROD_DOTENV_B64 待绿部署后删除
       ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
       ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}  # 网关client key正主：Go key（UNIFIED/PROD_LITELLM退役，见master#65）

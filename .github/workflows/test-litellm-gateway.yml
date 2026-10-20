@@ -233,7 +233,7 @@ jobs:
 
       - name: opencode-loop（成品镜像真客户端＋mask/restore 断言）
         env:
-          UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
+          CLIENT_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
           # pin 取自生产栈 compose（部署仓消费打包仓工件，单源头；镜像换 pin 即换被测物）
           PIN="$(grep -oP '^\s*image:\s*\K\S+opencode-tools@\S+' stacks/opencode-prod/compose.yml | head -n1)"
@@ -246,9 +246,9 @@ jobs:
            "model": "gw/glm-5.2",
            "provider": {"gw": {"options": {
              "baseURL": "http://127.0.0.1:4000/v1",
-             "apiKey": "__UNIFIED_KEY__"}}}}
+             "apiKey": "__CLIENT_KEY__"}}}}
           EOF
-          sed -i "s|__UNIFIED_KEY__|$UNIFIED_API_KEY|" /tmp/oc-cfg-gw/opencode.jsonc
+          sed -i "s|__CLIENT_KEY__|$CLIENT_API_KEY|" /tmp/oc-cfg-gw/opencode.jsonc
           docker run -d --name oc-gwtest --network host \
             -v /tmp/oc-cfg-gw/opencode.jsonc:/root/.config/opencode/opencode.jsonc:ro \
             -e OPENCODE_SERVER_PASSWORD=test-srv-pw \

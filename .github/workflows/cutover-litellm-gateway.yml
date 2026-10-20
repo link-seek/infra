@@ -67,7 +67,7 @@ jobs:
           PASS=1
           C1="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
           echo "verify: models=$C1 (expect 200)"; [ "$C1" = "200" ] || PASS=0
-          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${{ secrets.UNIFIED_API_KEY }}" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${{ secrets.OPENCODE_API_KEY }}" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
           echo "verify: chat-valid-key=$CC (expect 200，即后端链路＋.env 都通)"
           [ "$CC" = "200" ] || PASS=0
           IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
