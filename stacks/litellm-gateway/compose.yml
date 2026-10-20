@@ -4,9 +4,10 @@ services:
   litellm-guard:
     # 版本 pin（digest）：升级 = 改这行发 PR，合后按 README 切流步骤执行。禁止改回 :latest。
     # 2026-10-15：沿用 guard-rules e2e 已验证的上游 digest；切流 PR 用线上 docker inspect 对账。
-    # 2026-10-20：da89b6（custom_auth 官方键名修 + internal_user 小写枚举修 + 空 key 401；
+    # 2026-10-20：da89b6（custom_auth 官方键名修 + internal_user 小写枚举修 + 空 key 放行对齐上游；
+    # 2026-10-20：3c7cbc3（空 key 放行重 bake：行为门 nokey/newmaster/validkey/randkey 全 200 已验）。
     # 行为门已验：认证矩阵/真透传/等价性/master 轮换）。来源：link-seek/docker-images docker-gateway.yml。
-    image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:da89b6a51f5625bc04b39e999343ae9d34adb0c34e9950979c9d3849ad2cd2d5
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:3c7cbc3ddd90c2e496a6a7b2e707ef49594d5cd1bc64a9aa55676cc7f5233ef9
     pull_policy: always
     container_name: litellm-guard
     # PID 1 僵尸回收：与 opencode-prod 同一解法（旧栈 380+ 僵尸教训）。

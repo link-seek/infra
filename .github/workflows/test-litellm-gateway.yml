@@ -200,13 +200,13 @@ jobs:
                   return -1
           def no_db(body):
               return "no connected db" in json.dumps(body).lower().replace("_", " ")
-          # 1. 认证矩阵（hook 在位的证明）：无头 401；任意 key（含杂 key）models 200；master 200
+          # 1. 认证矩阵（hook 在位的证明）：无头 200（对齐上游 models 无 key 可读；坏镜像回 401）；任意 key models 200；master 200
           s_no = gw_noheader("/v1/models")
           _, b_rand = gw("/v1/models", key="sk-rand-invalid-0000")
           s_rand = 200 if b_rand.get("data") is not None else -2
           print(f"auth-matrix: noheader={s_no} randkey-models={'200' if s_rand == 200 else b_rand}")
-          if s_no != 401:
-              failures.append(f"无 key 应 401，实得 {s_no}（hook 未加载或网关未起）")
+          if s_no != 200:
+              failures.append(f"无 key 应 200（对齐上游），实得 {s_no}（hook 未加载或网关未起）")
           if s_rand != 200:
               failures.append(f"随机 key models 应 200（只过网关这门不碰上游），实得 {b_rand}")
           if no_db(b_rand):

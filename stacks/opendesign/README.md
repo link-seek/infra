@@ -24,7 +24,7 @@
 
 1. `127.0.0.1:7456/` → 401（应用活＋认证门生效）
 2. `https://opendesign.xieyucheng.top/` → 401（隧道＋TLS＋应用全通；页面无 mixed-content）
-3. 网关：无 key 401、有 key 200 且模型数 45（OD 后端依赖）
+3. 网关：无 key 200（对齐上游 models 无 key 可读）、有 key 200 且模型数正常（OD 后端依赖）
 4. OD 日志 200 行内无 `litellm/gateway/ECONNREFUSED/model_not_found`（脱敏 grep，不打密钥）
 5. 登录态（浏览器进模型列表）CI 无 token 做不了，由用户在浏览器确认
 
