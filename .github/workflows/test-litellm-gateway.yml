@@ -43,9 +43,12 @@ jobs:
               if re.search(pat, env):
                   print(f"FAIL: .env.example 命中真值模式 {pat}"); bad += 1
           if "GO_BACKEND_KEY=" not in env or "LITELLM_MASTER_KEY=" not in env:
-              print("FAIL: .env.example 缺键位"); bad += 1
-          else:
-              print("OK: .env.example 键位齐且无真值")
+              print("NOTE: 旧网关 key 位已退役（实测目标机 .env 无此二键，compose/guard 亦无引用）")
+          for k in ("DISABLE_ADMIN_UI=", "PIPELINE_MANAGED=", "RULES_FILE=", "RULES_URL="):
+              if k not in env:
+                  print(f"FAIL: .env.example 缺键位 {k}"); bad += 1
+              else:
+                  print(f"OK: {k} 在位")
           # 3. config：YAML 合法；无 <GO_BACKEND_KEY> 明文占位（必须走 os.environ）；
           #    无 "*" 通配；guard vault default_on；embedding 已退役（CF 直连，不经网关）
           import yaml

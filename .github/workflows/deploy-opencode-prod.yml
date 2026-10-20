@@ -88,7 +88,7 @@ jobs:
       UNIFIED_API_KEY: ${{ secrets.UNIFIED_API_KEY }}
       # 终态：单 key 透传，stack 内现场 render；存量 PROD_DOTENV_B64 待绿部署后删除
       ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
-      ENV_LITELLM_API_KEY: ${{ secrets.UNIFIED_API_KEY }}  # 网关client key唯一源（透明代理不鉴权，旧PROD_LITELLM_API_KEY退役）
+      ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}  # 网关client key正主：Go key（UNIFIED/PROD_LITELLM退役，见master#65）
       ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
       ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
       ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
