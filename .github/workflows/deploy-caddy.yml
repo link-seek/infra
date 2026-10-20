@@ -22,7 +22,7 @@ jobs:
 
       - name: secret 预检（只验长度+前缀，不打值）
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
           SSHKEY: ${{ secrets.CADDY_SSH_KEY }}
           CFTOK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -45,7 +45,7 @@ jobs:
         # OAuth 迁移（MIGRATE-TS-OAUTH）仍有效，待 Tailscale 侧建 OAuth client 后切回 action。
         timeout-minutes: 6
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh

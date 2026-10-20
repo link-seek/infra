@@ -41,9 +41,26 @@ on:
         required: true
       UNIFIED_API_KEY:
         required: false
-      DOTENV_B64:
+      # 终态 dotenv 现场 render：调用方按 env-sources.conf 把单 key 透传进来，
+      # S_ 导出块见下 render 步骤；加 key 三处同改（map/env块/caller），render-check 强制对齐。
+      # 存量 DOTENV_B64 已退役（删 org secret 前先等一次绿部署验证）。
+      ENV_GH_TOKEN:
         required: false
-      CF_AI_TOKEN:
+      ENV_LITELLM_API_KEY:
+        required: false
+      ENV_OPENCODE_SERVER_PASSWORD:
+        required: false
+      ENV_CLOUDFLARE_API_TOKEN:
+        required: false
+      ENV_HCLOUD_AK:
+        required: false
+      ENV_HCLOUD_SK:
+        required: false
+      ENV_SSH_PRIVATE_KEY_B64:
+        required: false
+      ENV_SMTP_PASS:
+        required: false
+      ENV_CF_AI_TOKEN:
         required: false
 
 jobs:
@@ -79,13 +96,27 @@ jobs:
             timeout 12 bash -c "</dev/tcp/$ip/${{ inputs.ssh_port }}" && { echo "CONTAINMENT FAIL: 摸到了 $label"; exit 1; } || echo "containment ok ($label unreachable)"
           done
 
+      - name: 现场 render .env（终态：包只活内存）
+        env:
+          S_ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
+          S_ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
+          S_ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
+          S_ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
+          S_ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
+          S_ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
+          S_ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
+          S_ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
+          S_ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 日志只列键名（脚本保证不打值）；键集合与 .env.example 对不上直接失败
+          bash scripts/render-dotenv.sh --map "${{ inputs.stack_dir }}/env-sources.conf" --example "${{ inputs.stack_dir }}/.env.example" --out /tmp/ci-dotenv
+
       - name: 下发 + verify（经 tailnet，不走公网）
         timeout-minutes: 12
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           UNIFIED_KEY: ${{ secrets.UNIFIED_API_KEY }}
-          DOTENV_B64: ${{ secrets.DOTENV_B64 }}
-          CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -96,17 +127,9 @@ jobs:
           # 先备份线上 compose（必须在同步之前，否则备的是新文件——生产灰度教训）
           ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
             "test -f ${{ inputs.remote_dir }}/compose.yml && cp ${{ inputs.remote_dir }}/compose.yml ${{ inputs.remote_dir }}/compose.yml.prev-$(date -u +%Y%m%dT%H%M%SZ) && echo backup-ok || { echo 'ABORT: 线上无 compose.yml'; exit 1; }"
-          # 从 secret 生成 .env（pipeline-managed，不再依赖目标机预置）
-          if [ -n "$DOTENV_B64" ]; then
-            printf '%s' "$DOTENV_B64" | base64 -d > /tmp/ci-dotenv
-            scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key /tmp/ci-dotenv root@$NODE:${{ inputs.remote_dir }}/.env
-            ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "chmod 600 ${{ inputs.remote_dir }}/.env && echo dotenv-written"
-          fi
-          # CF_AI_TOKEN 补齐（org secret 直供，不再人肉改目标机 .env；幂等：有则替换，无则追加）
-          # 经 stdin 传值（scp 会被目标机 .bashrc 回显杀死；stdin 不进日志，无泄漏）
-          if [ -n "${CF_AI_TOKEN:-}" ]; then
-            printf '%s' "$CF_AI_TOKEN" | ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "CFV=\$(cat); D=${{ inputs.remote_dir }}/.env; touch \$D; chmod 600 \$D; if grep -q '^CF_AI_TOKEN=' \$D; then sed -i \"s|^CF_AI_TOKEN=.*|CF_AI_TOKEN=\$CFV|\" \$D; else echo \"CF_AI_TOKEN=\$CFV\" >> \$D; fi; echo cf-key-ensured"
-          fi
+          # 现场 render 的 .env 下发（600 落盘；值不打印，键名见上一 render 步骤）
+          scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key /tmp/ci-dotenv root@$NODE:${{ inputs.remote_dir }}/.env
+          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "chmod 600 ${{ inputs.remote_dir }}/.env && echo dotenv-written"
           # tar+ssh 管道（目标机 .bashrc 回显杀死 scp，见试用演练）
           tar -czf - -C "${{ inputs.stack_dir }}" ${{ inputs.tar_files }} | \
             ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
@@ -119,4 +142,4 @@ jobs:
             sed -i "s|__UNIFIED_KEY__|$UNIFIED_KEY|g" /tmp/verify_cmd.sh
           fi
           ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s < /tmp/verify_cmd.sh
-          rm -f /tmp/verify_cmd.sh
+          rm -f /tmp/verify_cmd.sh /tmp/ci-dotenv
