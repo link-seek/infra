@@ -53,31 +53,45 @@ jobs:
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
           cd /root/stacks/litellm-gateway
+          cp compose.yml /tmp/compose.keep-$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null || true
+          KEEP="$(ls -t /tmp/compose.keep-* 2>/dev/null | head -n1 || true)"
+          PREV_IMG="$(docker inspect litellm-guard --format '{{.Image}}' 2>/dev/null || true)"
+          echo "prev-image: ${PREV_IMG:-none} keep: ${KEEP:-none}"
           export LITELLM_MASTER_KEY="sk-$(openssl rand -hex 32)"
           docker compose pull --quiet litellm-guard
           docker compose up -d --force-recreate litellm-guard
+          # READY：master models 200 且无头 401 同时成立（只 401 不算就绪：那是认证断裂的征象）
           READY=""
           for i in $(seq 1 18); do
             sleep 10
+            CM="$(curl -s -m 8 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $LITELLM_MASTER_KEY" http://127.0.0.1:4000/v1/models || echo 000)"
             C0="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
-            echo "ready-probe#$i -> $C0"
-            if [ "$C0" = "200" ] || [ "$C0" = "401" ]; then READY=1; break; fi
+            echo "ready-probe#$i -> master=$CM noheader=$C0"
+            if [ "$CM" = "200" ] && [ "$C0" = "401" ]; then READY=1; break; fi
           done
           echo "container: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
-          [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未起"; docker logs litellm-guard --tail 60 || true; exit 1; }
+          rollback() {
+            echo "ROLLBACK: verify 失败，恢复上一版 compose 并重起"
+            if [ -n "${KEEP:-}" ] && [ -f "$KEEP" ]; then cp "$KEEP" compose.yml; echo "compose 已回滚"; else echo "WARN: 无 keep 备份，跳过 compose 回滚"; fi
+            docker compose up -d --force-recreate litellm-guard || true
+            sleep 15
+            docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}' || true
+          }
+          [ -n "$READY" ] || { echo "FAIL: 网关 3 分钟未就绪（master 200 + 无头 401 缺一）"; docker logs litellm-guard --tail 60 || true; rollback; exit 1; }
           PASS=1
           C1="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
-          echo "verify: models=$C1 (expect 200)"; [ "$C1" = "200" ] || PASS=0
-          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${{ secrets.OPENCODE_API_KEY }}" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
-          echo "verify: chat-valid-key=$CC (expect 200，即后端链路＋.env 都通)"
+          echo "verify: models-noheader=$C1 (expect 401，即 hook 在位）"; [ "$C1" = "401" ] || PASS=0
+          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${{ secrets.OPENCODE_API_KEY }}" -H 'Content-Type: application/json' -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "verify: chat-valid-opencode-key=$CC (expect 200，即透传＋后端链路都通)"
           [ "$CC" = "200" ] || PASS=0
-          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
-          echo "verify: chat-invalid-key=$IC (expect 401 上游鉴权，即透明代理未拦截)"
-          [ "$IC" = "401" ] || PASS=0
+          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "verify: chat-invalid-key=$IC (expect 上游原话 401/403，绝不能是网关 400 No connected db)"
+          [ "$IC" = "401" ] || [ "$IC" = "403" ] || PASS=0
           if [ "$PASS" = "1" ]; then
             echo "CUTOVER OK"
           else
             docker logs litellm-guard --tail 60 || true
+            rollback
             exit 1
           fi
           EOF
