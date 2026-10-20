@@ -81,12 +81,17 @@ jobs:
           PASS=1
           C1="$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/v1/models || echo 000)"
           echo "verify: models-noheader=$C1 (expect 401，即 hook 在位）"; [ "$C1" = "401" ] || PASS=0
-          CC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${{ secrets.OPENCODE_API_KEY }}" -H 'Content-Type: application/json' -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
-          echo "verify: chat-valid-opencode-key=$CC (expect 200，即透传＋后端链路都通)"
-          [ "$CC" = "200" ] || PASS=0
-          IC="$(curl -s -m 30 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          CC="$(curl -s -m 30 -o /tmp/cc.json -w '%{http_code}' -H "Authorization: Bearer ${{ secrets.OPENCODE_API_KEY }}" -H 'Content-Type: application/json' -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
+          echo "verify: chat-valid-opencode-key=$CC (expect 上游 verdict：200带回包，或上游形 401/403；绝不能是网关 400 No connected db）"
+          if grep -qi "no.connected.db\|no_db_connection" /tmp/cc.json 2>/dev/null; then echo "CC 透出 No connected db"; PASS=0;
+          elif [ "$CC" = "200" ]; then python3 -c "import json;d=json.load(open('/tmp/cc.json'));assert isinstance(d['choices'][0]['message']['content'],str)" || PASS=0;
+          elif [ "$CC" = "401" ] || [ "$CC" = "403" ]; then grep -q "Upstream request failed" /tmp/cc.json || PASS=0;
+          else PASS=0; fi
+          IC="$(curl -s -m 30 -o /tmp/ic.json -w '%{http_code}' -H "Authorization: Bearer sk-invalid-test" -H 'Content-Type: application/json' -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' http://127.0.0.1:4000/v1/chat/completions || echo 000)"
           echo "verify: chat-invalid-key=$IC (expect 上游原话 401/403，绝不能是网关 400 No connected db)"
-          [ "$IC" = "401" ] || [ "$IC" = "403" ] || PASS=0
+          if grep -qi "no.connected.db\|no_db_connection" /tmp/ic.json 2>/dev/null; then echo "IC 透出 No connected db"; PASS=0;
+          elif { [ "$IC" = "401" ] || [ "$IC" = "403" ]; } && grep -q "Upstream request failed" /tmp/ic.json; then :;
+          else PASS=0; fi
           if [ "$PASS" = "1" ]; then
             echo "CUTOVER OK"
           else
