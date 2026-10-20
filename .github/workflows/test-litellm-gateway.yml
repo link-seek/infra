@@ -50,7 +50,7 @@ jobs:
               else:
                   print(f"OK: {k} 在位")
           # 3. config：YAML 合法；无 <GO_BACKEND_KEY> 明文占位（必须走 os.environ）；
-          #    无 "*" 通配；guard vault default_on；embedding 已退役（CF 直连，不经网关）
+          #    必须含 "*" 通配（模型名称透传，不再枚举）；guard vault default_on；embedding 已退役
           import yaml
           d = yaml.safe_load(open(f"{S}/config/litellm_config.yaml"))
           raw = open(f"{S}/config/litellm_config.yaml").read()
@@ -59,10 +59,10 @@ jobs:
           else:
               print("OK: config 无明文 key 占位")
           names = [m["model_name"] for m in d["model_list"]]
-          if "*" in names:
-              print("FAIL: config 含 * 通配"); bad += 1
+          if "*" not in names:
+              print("FAIL: config 缺 * 通配条目（模型名称透传模式）"); bad += 1
           else:
-              print(f"OK: models {len(names)} 条，无通配")
+              print(f"OK: 含 * 通配条目（模型名称透传）")
           if "nomic-embed-text" in names:
               print("FAIL: ollama embedding 条目未退役"); bad += 1
           else:
@@ -211,14 +211,19 @@ jobs:
               failures.append(f"随机 key models 应 200（只过网关这门不碰上游），实得 {b_rand}")
           if no_db(b_rand):
               failures.append("随机 key 透出 No connected db（hook 未加载）")
-          # 2. 模型表非空、无 * 展开噪音
+          # 2. 通配模式：/v1/models 可能为空（通配不展开），改为直接测 chat 路由
           st, body = gw("/v1/models")
           ids = [m["id"] for m in body.get("data", [])]
           print(f"models: {st} count={len(ids)} sample={ids[:5]}")
-          if st != 200 or not ids:
-              failures.append("模型表空/失败")
-          if any(i == "*" or len(ids) > 100 for i in ids):
-              failures.append("模型表含通配展开噪音")
+          if st != 200:
+              failures.append(f"models 端点应 200，实得 {st}")
+          # 2b. 通配路由：model list 里没有的模型应透传到上游（dummy key → 上游 401，不是网关 400 Invalid model name）
+          st, body = gw("/v1/chat/completions", {"model": "gpt-6-luna", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}, key="sk-dummy-wildcard-test")
+          print(f"wildcard(gpt-6-luna): {st} {json.dumps(body)[:120]}")
+          if st == 400 and "Invalid model name" in json.dumps(body):
+              failures.append("通配未生效：gpt-6-luna 被网关拒为 Invalid model name（应透传到上游）")
+          if no_db(body):
+              failures.append("通传透出 No connected db")
           # 3.（已退役：生产 config 无 embedding 条目，记忆走 CF 直连；此处只验透传不断言）
           # 4. 黑名单（models-denied.json 首条应 400）
           denied = json.load(open("stacks/litellm-gateway/guard/models-denied.json"))
@@ -229,7 +234,7 @@ jobs:
           # 5. 上游可达 verdict（master test-only 是网关本地钥匙，转给上游必拒：401/403 都是上游原话；
           #    只要不是 400/500/000，就证明网关→上游全链路通＋verdict 原样透回；
           #    真 200 通路由 opencode-loop 真客户端＋等价性断言）
-          st, body = gw("/v1/chat/completions", {"model": "glm-5.2", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
+          st, body = gw("/v1/chat/completions", {"model": "glm-5.3-flash", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
           txt = json.dumps(body)[:120]
           print(f"passthrough-upstream: {st} {txt}")
           if no_db(body):
