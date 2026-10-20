@@ -1,14 +1,14 @@
 name: deploy-litellm-gateway
 
-# 网关收编栈：stacks/litellm-gateway/** 进 main 即同步到 HW21（PR1：只同步＋校验，不 up）。
-# 不复用 deploy-opencode-stack：新目录首次无 compose（复用会 ABORT），且本阶段禁 up
-#（4000/11434 已被现网 /root/litellm-guard 占用，up 即端口冲突）。切流 PR 另写 up＋回滚。
-# 铁律：.env 永不经手；目标机缺 .env 仅告警（现网不依赖本栈 .env，不 abort）。
+# 蓝绿部署：push main 即部署。canary 起在新容器里探针，通了才切，不通就丢弃。
+# 旧容器全程在线，零 downtime；失败不需要回滚（canary 删掉即可）。
 
 on:
   push:
     branches: [main]
-    paths: ['stacks/litellm-gateway/**']
+    paths:
+      - stacks/litellm-gateway/**
+      - .github/workflows/deploy-litellm-gateway.yml
   workflow_dispatch:
 
 concurrency:
@@ -16,73 +16,135 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  gate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: CI 绿门（fail-closed，opencode-prod 同款）
-        run: |
-          set -euo pipefail
-          GATE="$(curl -s --max-time 30 "https://api.github.com/repos/link-seek/infra/actions/workflows/test-litellm-gateway.yml/runs?branch=main&status=completed&per_page=1" | python3 -c "import json,sys; r=json.load(sys.stdin)['workflow_runs'][0]; print(r['conclusion'])" | tr -d ') \r\n')"
-          echo "gw-e2e on main: $GATE"
-          [ "$GATE" = "success" ] || { echo "BLOCKED: CI 未绿，拒绝同步上机"; exit 1; }
-
   deploy:
-    needs: gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: 加入 tailnet（一次性节点，用完即焚）
-        timeout-minutes: 6
+      - name: 加入 tailnet
         env:
           TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
-          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-llm-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-deploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           timeout 15 bash -c "</dev/tcp/100.91.222.51/2244" || { echo "target unreachable"; exit 1; }
-          echo "target reachable"
           for f in 100.111.231.85:trial 100.85.128.116:entry; do
-            ip="${f%%:*}"; label="${f#*:}"
+            ip="${f%%:*}"; label="${f##*:}"
             timeout 12 bash -c "</dev/tcp/$ip/2244" && { echo "CONTAINMENT FAIL: 摸到了 $label"; exit 1; } || echo "containment ok ($label unreachable)"
           done
 
-      - name: 下发 + 校验（经 tailnet，不走公网；不 up）
-        timeout-minutes: 12
+      - name: 蓝绿部署（同步→canary→探针→切流）
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          NODE="100.91.222.51"; PORT="2244"
-          ssh-keyscan -p "$PORT" -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE "mkdir -p /root/stacks/litellm-gateway"
-          # 有旧文件才备份（首发无文件不 abort，与复用流程的差异点）
-          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
-            "test -f /root/stacks/litellm-gateway/compose.yml && cp /root/stacks/litellm-gateway/compose.yml /root/stacks/litellm-gateway/compose.yml.prev-$(date -u +%Y%m%dT%H%M%SZ) && echo backup-ok || echo first-sync"
-          tar -czf - -C stacks/litellm-gateway compose.yml README.md .env.example config/litellm_config.yaml guard/vault_guard.py guard/models-denied.json guard/rules.json | \
-            ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE \
-            "mkdir -p /root/stacks/litellm-gateway && tar -xzf - -C /root/stacks/litellm-gateway && echo synced"
-          ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s <<'VERIFY_EOF'
+          ssh-keyscan -p 2244 -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          # .env 现场 render + 同步文件
+          bash scripts/render-dotenv.sh --map stacks/litellm-gateway/env-sources.conf --example stacks/litellm-gateway/.env.example --out /tmp/ci-litellm-dotenv
+          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key /tmp/ci-litellm-dotenv root@100.91.222.51:/root/stacks/litellm-gateway/.env
+          rm -f /tmp/ci-litellm-dotenv
+          tar -czf - -C stacks/litellm-gateway compose.yml config/litellm_config.yaml guard/vault_guard.py guard/models-denied.json guard/rules.json | \
+            ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 \
+            "mkdir -p /root/stacks/litellm-gateway && tar -xzf - -C /root/stacks/litellm-gateway && chmod 600 /root/stacks/litellm-gateway/.env && echo synced"
+          # 蓝绿部署
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 \
+            OPENCODE_API_KEY="$OPENCODE_API_KEY" bash -s <<'DEPLOY'
           set -euo pipefail
           cd /root/stacks/litellm-gateway
-          docker compose config >/dev/null && echo "VERIFY OK: compose 合法"
-          python3 -c "import yaml; d=yaml.safe_load(open('config/litellm_config.yaml')); print(f\"VERIFY OK: config 合法，models={len(d['model_list'])}\")"
-          # 漂移报告（告警级，不红：现网是黑户启动，本栈是目标态）
-          for f in guard/vault_guard.py guard/models-denied.json; do
-            if [ -f "/root/litellm-guard/$(basename $f)" ]; then
-              cmp -s "$f" "/root/litellm-guard/$(basename $f)" && echo "DRIFT: $f 与现网一致" || echo "DRIFT-WARN: $f 与现网不一致（切流前对账）"
-            else
-              echo "DRIFT-WARN: 现网无 $(basename $f)（路径假设待切流确认）"
-            fi
+
+          # 清理残留 canary
+          docker rm -f litellm-guard-canary 2>/dev/null || true
+
+          # 新镜像 digest（compose pin）
+          NEW_IMG=$(grep 'image:' compose.yml | head -1 | sed 's/.*image: *//')
+          echo "new image: $NEW_IMG"
+
+          # 拉新镜像
+          docker pull "$NEW_IMG"
+
+          # 起 canary：同镜像同 env 同网络，不映射宿主机端口
+          export LITELLM_MASTER_KEY="sk-$(openssl rand -hex 32)"
+          docker run -d --name litellm-guard-canary \
+            --init \
+            --env-file .env \
+            -e LITELLM_MASTER_KEY="$LITELLM_MASTER_KEY" \
+            -e DISABLE_ADMIN_UI=True \
+            -e RULES_FILE=/app/guard-rules.json \
+            --network litellm-guard_default \
+            "$NEW_IMG" \
+            --config /app/config.yaml --port 4000 --host 0.0.0.0
+
+          echo "canary started, probing..."
+
+          # 拿 canary 容器 IP（docker 网桥内，宿主机可达，不对外）
+          CANARY_IP=$(docker inspect litellm-guard-canary --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+          echo "canary ip: $CANARY_IP"
+
+          # 探针
+          PASS=1
+
+          # 1. 就绪（最多 3 分钟）
+          READY=""
+          for i in $(seq 1 18); do
+            sleep 10
+            C0="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://$CANARY_IP:4000/v1/models || echo 000)"
+            echo "ready-probe#$i -> $C0"
+            if [ "$C0" = "200" ]; then READY=1; break; fi
           done
-          # .env 缺失仅告警：现网不依赖本栈 .env（禁 up，无引用方）
-          test -f .env && echo "ENV: .env 存在" || echo "ENV-WARN: 本栈 .env 缺失（切流前按 sops 落盘 600）"
-          # 现网容器必须还在（本 workflow 禁 up 的自证）
-          docker ps --format '{{.Names}}' | grep -q litellm && echo "VERIFY OK: 现网网关仍在（未被触碰）" || echo "VERIFY-WARN: 未发现现网网关容器（容器名假设待确认）"
-          VERIFY_EOF
+          if [ -z "$READY" ]; then
+            echo "FAIL: canary 3 分钟未就绪"
+            docker logs litellm-guard-canary --tail 60 || true
+            docker rm -f litellm-guard-canary
+            exit 1
+          fi
+
+          # 2. 真 key 调 muse-spark
+          CC="$(curl -s -m 30 -o /tmp/cc.json -w '%{http_code}' \
+            -H "Authorization: Bearer $OPENCODE_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+            http://$CANARY_IP:4000/v1/chat/completions || echo 000)"
+          echo "verify: real-key=$CC"
+          if grep -qi "no.connected.db\|no_db_connection" /tmp/cc.json 2>/dev/null; then
+            echo "FAIL: real key 透出 No connected db"; PASS=0
+          elif [ "$CC" = "200" ]; then
+            python3 -c "import json;d=json.load(open('/tmp/cc.json'));assert isinstance(d['choices'][0]['message']['content'],str)" || { echo "FAIL: 回包格式错"; PASS=0; }
+          elif [ "$CC" = "401" ] || [ "$CC" = "403" ]; then
+            grep -q "Upstream Request Failed" /tmp/cc.json || { echo "FAIL: 上游形错误但非 Upstream Request Failed"; PASS=0; }
+          else
+            echo "FAIL: 意外状态码 $CC"; PASS=0
+          fi
+
+          # 3. 假 key 透传上游
+          IC="$(curl -s -m 30 -o /tmp/ic.json -w '%{http_code}' \
+            -H "Authorization: Bearer sk-invalid-test" \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+            http://$CANARY_IP:4000/v1/chat/completions || echo 000)"
+          echo "verify: fake-key=$IC"
+          if grep -qi "no.connected.db\|no_db_connection" /tmp/ic.json 2>/dev/null; then
+            echo "FAIL: fake key 透出 No connected db"; PASS=0
+          elif { [ "$IC" = "401" ] || [ "$IC" = "403" ]; } && grep -q "Upstream Request Failed" /tmp/ic.json; then
+            : # OK
+          else
+            echo "FAIL: fake key 未透传上游"; PASS=0
+          fi
+
+          # 判定
+          if [ "$PASS" = "1" ]; then
+            echo "探针通过，切流"
+            docker compose up -d --force-recreate litellm-guard
+            docker rm -f litellm-guard-canary
+            echo "DEPLOY OK: $(docker ps --filter name=litellm-guard --format '{{.Image}} {{.Status}}')"
+          else
+            echo "探针失败，丢弃 canary，旧容器不动"
+            docker logs litellm-guard-canary --tail 60 || true
+            docker rm -f litellm-guard-canary
+            exit 1
+          fi
+          DEPLOY

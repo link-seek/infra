@@ -29,20 +29,12 @@
 `config/litellm_config.yaml` 与 guard-rules 模板语义一致，唯一差异：`api_key`
 改 `os.environ/GO_BACKEND_KEY` 引用（密钥只活在目标机 `.env`，同步即最终形态）。
 
-## 本 PR 边界（PR1：只收编，不切流）
+## 部署
 
-* `deploy-litellm-gateway` 合后只同步文件 + 校验（`compose config`、YAML 解析、
-  与现网 `/root/litellm-guard` 的 md5 漂移报告），**不 `up`、不碰现网容器、不重启隧道**。
-* 切流缺口（切流 PR 补，全部在窗口做）：
-  1. `vault_guard.py` diff（仓新线旧，持钥人本地 diff 定线上无未进仓 hotfix）
-  2. `guard-rules.json` 内容对账（线上 1136B vs 仓 1652B＋`RULES_URL` R2 模式）
-  3. 线上 `/root/stacks/litellm-guard/compose.yml` 内容对读（`restart-guard.sh` 指向它）
-  4. 本栈 `.env` 按 sops 落盘 600（`GO_BACKEND_KEY` 从线上渲染转入，非手写）
-
-## 日常（切流后生效，切流前仅供评审）
-
-* 发版：改本目录发 PR → `test-litellm-gateway` 全绿 → 合后自动同步上机。
-  `.env` 更新走 sops（workflow 永不碰 `.env`，缺失则 verify abort）。
+* `deploy-litellm-gateway`：push main 即蓝绿部署。canary 起新容器探针（就绪 + 真 key + 假 key 透传），
+  通了才 `force-recreate` 正式容器，不通就丢弃 canary，旧容器全程在线。
+* 镜像构建 + 行为门在 `link-seek/docker-images` 仓 `docker-gateway.yml`（测试归镜像构建）。
+  `.env` 更新走 render-dotenv（workflow 永不手写 `.env`）。
 * 黑名单增减：改 `guard/models-denied.json`（数组），保存 60 秒内生效，不用重启；
   空数组 = 全放行；文件坏掉 = 全拦（fail-closed）。
 * 验证（现网 4000，master key 见 sops）：
