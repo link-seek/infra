@@ -48,3 +48,8 @@ model_list:
       model: openai/deepseek-v4.1-flash
       api_base: https://opencode.ai/zen/go/v1
       api_key: sk-dummy-overridden-by-callback
+  - model_name: "*"
+    litellm_params:
+      model: openai/*
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: sk-dummy-overridden-by-callback
