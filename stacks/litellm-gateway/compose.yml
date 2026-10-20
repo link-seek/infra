@@ -20,6 +20,9 @@ services:
     env_file:
       - .env
     environment:
+      # LITELLM_MASTER_KEY 只走进程环境：cutover 启动时现场随机（sk-），不进仓不进包。
+      # 缺失则 compose 直接报错，拒绝以无 master 状态启动。
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY required}
       DISABLE_ADMIN_UI: "True"
       RULES_FILE: /app/guard-rules.json
     # guard/config 全 bake 进镜像（行为=digest），不挂载防漂移。
