@@ -103,33 +103,35 @@ jobs:
             exit 1
           fi
 
-          # 2. 真 key 调 muse-spark
+          # 2. 真 key 调 muse-spark（200 回包 / 401,403 上游拒 key / 400 不支持此协议 = 都是上游形，网关路由通了）
           CC="$(curl -s -m 30 -o /tmp/cc.json -w '%{http_code}' \
             -H "Authorization: Bearer $OPENCODE_API_KEY" \
             -H 'Content-Type: application/json' \
             -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
             http://$CANARY_IP:4000/v1/chat/completions || echo 000)"
-          echo "verify: real-key=$CC"
+          echo "verify: real-key=$CC $(head -c 120 /tmp/cc.json)"
           if grep -qi "no.connected.db\|no_db_connection" /tmp/cc.json 2>/dev/null; then
             echo "FAIL: real key 透出 No connected db"; PASS=0
           elif [ "$CC" = "200" ]; then
             python3 -c "import json;d=json.load(open('/tmp/cc.json'));assert isinstance(d['choices'][0]['message']['content'],str)" || { echo "FAIL: 回包格式错"; PASS=0; }
-          elif [ "$CC" = "401" ] || [ "$CC" = "403" ]; then
-            grep -q "Upstream Request Failed" /tmp/cc.json || { echo "FAIL: 上游形错误但非 Upstream Request Failed"; PASS=0; }
+          elif [ "$CC" = "400" ] && grep -qi "does not support this protocol" /tmp/cc.json; then
+            : # 上游形：模型只支持 responses API，网关路由通了
+          elif { [ "$CC" = "401" ] || [ "$CC" = "403" ]; } && grep -qi "upstream request failed" /tmp/cc.json; then
+            : # 上游形：key 被上游拒
           else
             echo "FAIL: 意外状态码 $CC"; PASS=0
           fi
 
-          # 3. 假 key 透传上游
+          # 3. 假 key 透传上游（应 401/403 + Upstream request failed）
           IC="$(curl -s -m 30 -o /tmp/ic.json -w '%{http_code}' \
             -H "Authorization: Bearer sk-invalid-test" \
             -H 'Content-Type: application/json' \
             -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
             http://$CANARY_IP:4000/v1/chat/completions || echo 000)"
-          echo "verify: fake-key=$IC"
+          echo "verify: fake-key=$IC $(head -c 120 /tmp/ic.json)"
           if grep -qi "no.connected.db\|no_db_connection" /tmp/ic.json 2>/dev/null; then
             echo "FAIL: fake key 透出 No connected db"; PASS=0
-          elif { [ "$IC" = "401" ] || [ "$IC" = "403" ]; } && grep -q "Upstream Request Failed" /tmp/ic.json; then
+          elif { [ "$IC" = "401" ] || [ "$IC" = "403" ]; } && grep -qi "upstream request failed" /tmp/ic.json; then
             : # OK
           else
             echo "FAIL: fake key 未透传上游"; PASS=0
