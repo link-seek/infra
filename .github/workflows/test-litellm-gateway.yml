@@ -218,10 +218,10 @@ jobs:
           if st != 200:
               failures.append(f"models 端点应 200，实得 {st}")
           # 2b. 通配路由：model list 里没有的模型应透传到上游（dummy key → 上游 401，不是网关 400 Invalid model name）
-          st, body = gw("/v1/chat/completions", {"model": "gpt-6-luna", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}, key="sk-dummy-wildcard-test")
-          print(f"wildcard(gpt-6-luna): {st} {json.dumps(body)[:120]}")
+          st, body = gw("/v1/chat/completions", {"model": "glm-5.3-flash", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}, key="sk-dummy-wildcard-test")
+          print(f"wildcard(glm-5.3-flash): {st} {json.dumps(body)[:120]}")
           if st == 400 and "Invalid model name" in json.dumps(body):
-              failures.append("通配未生效：gpt-6-luna 被网关拒为 Invalid model name（应透传到上游）")
+              failures.append("通配未生效：glm-5.3-flash 被网关拒为 Invalid model name（应透传到上游）")
           if no_db(body):
               failures.append("通传透出 No connected db")
           # 3.（已退役：生产 config 无 embedding 条目，记忆走 CF 直连；此处只验透传不断言）
