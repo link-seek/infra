@@ -53,6 +53,7 @@ jobs:
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
           cd /root/stacks/litellm-gateway
+          export LITELLM_MASTER_KEY="sk-$(openssl rand -hex 32)"
           docker compose pull --quiet litellm-guard
           docker compose up -d --force-recreate litellm-guard
           READY=""
