@@ -19,6 +19,7 @@ if [ "$ACTION_MODE" = "down" ]; then
 fi
 
 if [ -n "${CANDIDATE_DIGEST:-}" ]; then
+  case "$CANDIDATE_DIGEST" in sha256:*) :;; *) echo "FAIL: CANDIDATE_DIGEST 必须是冻结 digest，收到 $CANDIDATE_DIGEST（tag 请先过 freeze-digest.sh）" >&2; exit 1;; esac
   cp "$STACK_DIR/compose.yml" /tmp/compose.deploy.yml
   for repo in $PIN_REPOS; do
     # shellcheck disable=SC2016

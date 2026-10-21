@@ -100,20 +100,7 @@ jobs:
           SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
         run: |
           set -euo pipefail
-          source "${{ inputs.stack_dir }}/deploy.manifest"
-          [ -n "${PIN_REPOS:-}" ] || { echo "manifest 缺 PIN_REPOS"; exit 1; }
-          REPO="${PIN_REPOS%% *}"
-          WANT="${{ inputs.digest_or_tag }}"
-          if [[ "$WANT" == sha256:* ]]; then
-            DIGEST="$WANT"
-          else
-            echo "resolving tag $WANT on $REPO"
-            if [ -n "${SWR_USER:-}" ]; then
-              echo "$SWR_PASS" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_USER" --password-stdin >/dev/null 2>&1 || true
-            fi
-            DIGEST="$(docker buildx imagetools inspect "$REPO:$WANT" --format '{{json .Manifest}}' 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('digest',''))" || true)"
-            [ -n "$DIGEST" ] || { echo "FAIL: tag $WANT 在 $REPO 不存在（匿名+凭证都试过）"; exit 1; }
-          fi
+          DIGEST="$(STACK_DIR="${{ inputs.stack_dir }}" SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" bash scripts/freeze-digest.sh "${{ inputs.digest_or_tag }}")"
           echo "frozen digest: $DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
