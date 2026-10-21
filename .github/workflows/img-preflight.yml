@@ -70,6 +70,7 @@ jobs:
           TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
+          trap 'echo "FAILED-CMD: $BASH_COMMAND"' ERR
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
@@ -77,15 +78,22 @@ jobs:
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.img_tag }}" --accept-routes=false --accept-dns=false
           sudo apt-get install -y -q openssh-server
           sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
+          rm -f /tmp/img_key /tmp/img_key.pub
           ssh-keygen -t ed25519 -N "" -f /tmp/img_key -q
           sudo tee /root/.ssh/authorized_keys < /tmp/img_key.pub >/dev/null
           sudo chmod 600 /root/.ssh/authorized_keys
           sudo sed -i -E 's/^#?Port .*/Port 2222/; s/^#?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-          echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config >/dev/null
-          sudo service ssh restart
+          grep -q '^Port 2222$' /etc/ssh/sshd_config || echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config >/dev/null
+          sudo sshd -t || { echo "sshd_config 非法"; exit 1; }
+          sudo service ssh restart || sudo service ssh start
+          for i in $(seq 1 15); do (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null && break || sleep 1; done
+          (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null || { echo "2222 未监听"; sudo service ssh status || true; exit 1; }
           mkdir -p ~/.ssh && cp /tmp/img_key ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -p 2222 -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o BatchMode=yes -p 2222 -i ~/.ssh/ci_key root@127.0.0.1 "echo SELF-SSH-OK"
+          for i in $(seq 1 10); do
+            ssh -o BatchMode=yes -o ConnectTimeout=5 -p 2222 -i ~/.ssh/ci_key root@127.0.0.1 "echo SELF-SSH-OK" && break || sleep 2
+            [ "$i" = 10 ] && { echo "自连失败"; exit 1; }
+          done
 
       - name: 预检（部署给自己，只到探针）
         env:
