@@ -31,7 +31,7 @@ on:
         required: true
         type: string
     secrets:
-      TS_AUTHKEY:
+      TAILSCALE_AUTH_KEY_PROD:
         required: true
       OPENCODE_API_KEY:
         required: false
@@ -76,19 +76,22 @@ jobs:
           [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
           # 注：不 advertise-tags（authkey 无该 tag 授权；预检本就只部署给 127.0.0.1，加网仅作在网审计）
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.img_tag }}" --accept-routes=false --accept-dns=false
+          set -x  # tailscale 安装脚本尾部自带 set +x，重新打开，否则后面全程静默
           sudo apt-get install -y -q openssh-server
           sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
           rm -f /tmp/img_key /tmp/img_key.pub
           ssh-keygen -t ed25519 -N "" -f /tmp/img_key -q
           sudo tee /root/.ssh/authorized_keys < /tmp/img_key.pub >/dev/null
           sudo chmod 600 /root/.ssh/authorized_keys
-          sudo sed -i -E 's/^#?Port .*/Port 2222/; s/^#?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-          grep -q '^Port 2222$' /etc/ssh/sshd_config || echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config >/dev/null
+          # 独立 sshd（最小自带配置，不碰系统 sshd/systemd/socket 激活，避免配置被覆盖或端口抢占）
           sudo mkdir -p /run/sshd
-          sudo sshd -t || { echo "sshd_config 非法"; exit 1; }
-          sudo service ssh restart || sudo service ssh start
+          printf '%s\n' "Port 2222" "ListenAddress 127.0.0.1" "PermitRootLogin prohibit-password" \
+            "PasswordAuthentication no" "PubkeyAuthentication yes" "PidFile /tmp/img_sshd.pid" \
+            "AuthorizedKeysFile /root/.ssh/authorized_keys" | sudo tee /tmp/img_sshd_config >/dev/null
+          sudo sshd -t -f /tmp/img_sshd_config || { echo "sshd_config 非法"; exit 1; }
+          sudo /usr/sbin/sshd -f /tmp/img_sshd_config -E /tmp/img_sshd.log
           for i in $(seq 1 15); do (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null && break || sleep 1; done
-          (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null || { echo "2222 未监听"; sudo service ssh status || true; exit 1; }
+          (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null || { echo "2222 未监听"; sudo cat /tmp/img_sshd.log || true; ps aux | grep -a '[s]shd' || true; exit 1; }
           mkdir -p ~/.ssh && cp /tmp/img_key ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -p 2222 -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
           for i in $(seq 1 10); do
