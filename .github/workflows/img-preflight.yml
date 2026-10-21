@@ -87,7 +87,10 @@ jobs:
           sudo mkdir -p /run/sshd
           printf '%s\n' "Port 2222" "ListenAddress 127.0.0.1" "PermitRootLogin prohibit-password" \
             "PasswordAuthentication no" "PubkeyAuthentication yes" "PidFile /tmp/img_sshd.pid" \
-            "AuthorizedKeysFile /root/.ssh/authorized_keys" | sudo tee /tmp/img_sshd_config >/dev/null
+            "AuthorizedKeysFile /root/.ssh/authorized_keys" \
+            "Subsystem sftp /usr/lib/openssh/sftp-server" | sudo tee /tmp/img_sshd_config >/dev/null
+          # sftp subsystem 是 scp 的必备件（当代 scp 默认走 sftp 通道；没有它就是 subsystem request failed）
+          ls /usr/lib/openssh/sftp-server || { echo "缺 sftp-server"; exit 1; }
           sudo sshd -t -f /tmp/img_sshd_config || { echo "sshd_config 非法"; exit 1; }
           sudo /usr/sbin/sshd -f /tmp/img_sshd_config -E /tmp/img_sshd.log
           for i in $(seq 1 15); do (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null && break || sleep 1; done
