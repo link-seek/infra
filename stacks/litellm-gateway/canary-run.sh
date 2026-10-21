@@ -5,6 +5,8 @@
 set -euo pipefail
 cd "$REMOTE_DIR"
 docker rm -f litellm-guard-canary 2>/dev/null || true
+# 干净机（如 img 预检 runner）上 compose 栈从未 up 过，该网络不存在 → 建一个（已存在则忽略）
+docker network create litellm-guard_default 2>/dev/null || true
 NEW_IMG="$(grep 'image:' compose.yml | head -1 | sed 's/.*image: *//')"
 echo "canary image: $NEW_IMG (want $CANDIDATE_DIGEST)"
 # 干净机（如 img 预检 runner）无 registry 凭证时先登录；有则复用宿主已有凭证
