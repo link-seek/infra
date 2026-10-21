@@ -69,14 +69,11 @@ jobs:
         id: verify
         run: |
           set -euo pipefail
-          GOT="$(docker buildx imagetools inspect --raw "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" | sha256sum | awk '{print $1}')"
-          echo "tag manifest sha256:$GOT"
-          # 取 tag 的 config digest 与目标 digest 比对：imagetools inspect 看 RepoDigests 指向
-          docker pull "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" >/dev/null
-          PULLED="$(docker inspect "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" --format '{{index .RepoDigests 0}}')"
-          echo "pulled: $PULLED"
-          echo "$PULLED" | grep -q "${{ inputs.digest }}" || { echo "FAIL: tag 未指向目标 digest"; exit 1; }
-          echo "tag 复核通过"
+          # tag 可能是单 manifest，也可能是 manifest list（index）：只要目标 digest 出现在
+          # tag 的解析树里（顶层或某平台条目），即视为指向同一内容。比较 pulled RepoDigest 会误杀 index。
+          docker buildx imagetools inspect "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" > /tmp/insp.json
+          grep -q "${{ inputs.digest }}" /tmp/insp.json || { echo "FAIL: tag 解析树里没有目标 digest"; exit 1; }
+          echo "tag 复核通过（目标 digest 在 tag 解析树内）"
 
       - name: 改 compose pin 并提交
         run: |
