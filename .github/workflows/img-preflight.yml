@@ -73,7 +73,8 @@ jobs:
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.img_tag }}" --advertise-tags="tag:${{ inputs.img_tag }}" --accept-routes=false --accept-dns=false
+          # 注：不 advertise-tags（authkey 无该 tag 授权；预检本就只部署给 127.0.0.1，加网仅作在网审计）
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.img_tag }}" --accept-routes=false --accept-dns=false
           sudo apt-get install -y -q openssh-server
           sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
           ssh-keygen -t ed25519 -N "" -f /tmp/img_key -q
