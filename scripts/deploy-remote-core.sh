@@ -33,6 +33,7 @@ for v in ENV_GH_TOKEN ENV_LITELLM_API_KEY ENV_OPENCODE_SERVER_PASSWORD ENV_CLOUD
   export "$v"="${!v:-}"
 done
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
+$SSH "mkdir -p $REMOTE_DIR" # 干净机（如 img 预检）上目录尚不存在，先建
 scp -o BatchMode=yes -P "$SSH_PORT" -i "$SSH_KEY_FILE" /tmp/ci-dotenv "root@$TARGET_IP:$REMOTE_DIR/.env"
 rm -f /tmp/ci-dotenv
 cp /tmp/compose.deploy.yml /tmp/sync-compose.yml
