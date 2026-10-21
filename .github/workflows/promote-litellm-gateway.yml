@@ -1,0 +1,92 @@
+name: promote-litellm-gateway
+
+# 晋升线：把一个已测 digest 打不可变 tag（默认 stable）+ 改 compose pin。
+# 只办手续不复核内容：输入 digest 必须已在 registry 存在；retag 不 rebuild（测即所得）。
+# 责任链：打包保内容 → promote 保手续 → 部署保目标机实测。本线不管镜像内容，不管目标机。
+# pin 提交回 main 会触发 deploy（蓝绿 canary→切流）；同 digest 重部署无害。
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "已测 digest（sha256:64位hex）"
+        required: true
+      tag:
+        description: "要打的 tag（只建不覆盖已存在的同名 tag）"
+        required: false
+        default: "stable"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-litellm-gateway
+  cancel-in-progress: false
+
+env:
+  SWR_REGISTRY: swr.cn-north-9.myhuaweicloud.com
+  SWR_IMAGE: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验输入
+        run: |
+          set -euo pipefail
+          echo "${{ inputs.digest }}" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "digest 格式错"; exit 1; }
+          echo "${{ inputs.tag }}" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$' || { echo "tag 格式错"; exit 1; }
+          echo "digest=${{ inputs.digest }} tag=${{ inputs.tag }}"
+
+      - name: Login to SWR
+        run: echo "${{ secrets.SWR_LOGIN_PASS }}" | docker login ${{ env.SWR_REGISTRY }} -u "${{ secrets.SWR_LOGIN_USER }}" --password-stdin
+
+      - name: 同名 tag 存在性检查（只建不覆盖）
+        id: tagcheck
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "tag 已存在，复核它是否已指向目标 digest"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "tag 不存在，可以建"
+          fi
+
+      - name: retag（registry 侧建 tag，不 rebuild）
+        if: steps.tagcheck.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" \
+            "${{ env.SWR_IMAGE }}@${{ inputs.digest }}"
+          echo "retag done"
+
+      - name: 复核 tag 指向（手续即正义）
+        id: verify
+        run: |
+          set -euo pipefail
+          GOT="$(docker buildx imagetools inspect --raw "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" | sha256sum | awk '{print $1}')"
+          echo "tag manifest sha256:$GOT"
+          # 取 tag 的 config digest 与目标 digest 比对：imagetools inspect 看 RepoDigests 指向
+          docker pull "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" >/dev/null
+          PULLED="$(docker inspect "${{ env.SWR_IMAGE }}:${{ inputs.tag }}" --format '{{index .RepoDigests 0}}')"
+          echo "pulled: $PULLED"
+          echo "$PULLED" | grep -q "${{ inputs.digest }}" || { echo "FAIL: tag 未指向目标 digest"; exit 1; }
+          echo "tag 复核通过"
+
+      - name: 改 compose pin 并提交
+        run: |
+          set -euo pipefail
+          F=stacks/litellm-gateway/compose.yml
+          sed -i "s|image: ${{ env.SWR_IMAGE }}@sha256:[0-9a-f]*|image: ${{ env.SWR_IMAGE }}@${{ inputs.digest }}|" "$F"
+          grep -q "${{ inputs.digest }}" "$F" || { echo "FAIL: pin 未写入"; exit 1; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --quiet && { echo "pin 无变化，无需提交"; exit 0; }
+          git add "$F"
+          git commit -m "promote(gateway): ${{ inputs.tag }} -> ${{ inputs.digest }}（retag 不 rebuild；触发 deploy 蓝绿切流）"
+          git push
