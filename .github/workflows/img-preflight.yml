@@ -67,11 +67,12 @@ jobs:
 
       - name: 本机加网 + 自建 SSH
         env:
-          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.img_tag }}" --advertise-tags="tag:${{ inputs.img_tag }}" --accept-routes=false --accept-dns=false
           sudo apt-get install -y -q openssh-server
           sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh

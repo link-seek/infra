@@ -120,11 +120,12 @@ jobs:
       - name: 加网 + 解析节点（TS-only）
         id: target
         env:
-          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-deploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           TAG="${{ inputs.node_tag }}"
           if [[ "$TAG" == host:* ]]; then
@@ -160,6 +161,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           if [ -n "$SSH_KEY_B64" ]; then printf '%s' "$SSH_KEY_B64" | base64 -d > ~/.ssh/ci_key;
           else printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key; fi
+          [ -s ~/.ssh/ci_key ] || { echo "SSH key missing (SSH_KEY secret 与 ssh_key_b64 输入都空)"; exit 1; }
           chmod 600 ~/.ssh/ci_key
           ssh-keyscan -p 2244 -H "${{ steps.target.outputs.ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="${{ steps.target.outputs.ip }}" \
