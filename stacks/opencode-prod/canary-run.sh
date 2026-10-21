@@ -1,0 +1,24 @@
+#!/bin/bash
+# canary-run.sh — 独立 compose project 起 canary（同镜像同 env 内容，同类网络，换端口防冲突）。
+# 输入 env：REMOTE_DIR、CANDIDATE_DIGEST、CANARY_PORT（manifest 同名变量由复用线 export）。
+set -euo pipefail
+cd "$REMOTE_DIR"
+CANARY_PORT="${CANARY_PORT:-14097}"
+docker compose -p opencode-prod-canary down 2>/dev/null || true
+NEW_IMG="$(grep 'image:' compose.yml | grep opencode-tools | head -1 | sed 's/.*image: *//')"
+echo "canary image: $NEW_IMG (want $CANDIDATE_DIGEST)"
+docker pull "$NEW_IMG"
+# 端口/container_name 覆盖（源 compose 写死 4097 与固定容器名，canary 必须错开）
+cat > /tmp/canary-override.yml <<EOF
+services:
+  opencode-prod:
+    container_name: opencode-prod-canary
+    ports:
+      - "$CANARY_PORT:4097"
+  browser:
+    container_name: opencode-browser-canary
+    ports:
+      - "127.0.0.1:19228:9222"
+EOF
+docker compose -p opencode-prod-canary -f compose.yml -f /tmp/canary-override.yml up -d opencode-prod opencode-browser
+echo "canary started on :$CANARY_PORT"

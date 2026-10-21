@@ -1,0 +1,9 @@
+# stacks/litellm-gateway/deploy.manifest — 部署形状声明（deploy-stack.yml 复用线读取）
+REMOTE_DIR=/root/stacks/litellm-gateway
+ENV_CONF=env-sources.conf
+# pin 冻结：compose 里这些 repo 的 @sha256 会被候选 digest 替换
+PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway"
+# 同步到目标机的文件（相对栈目录；.env 另走 render+scp，不在此列）
+SYNC_FILES="compose.yml config/litellm_config.yaml guard/vault_guard.py guard/models-denied.json guard/rules.json"
+# 切流时重建的服务（canary 已验过，留下同样内容）
+CUTOVER_SERVICES="litellm-guard"

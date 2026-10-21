@@ -1,0 +1,106 @@
+name: img-preflight
+
+# img 预检线：被镜像线跨仓触发（gh workflow run + 轮询），在 infra 侧本机完成
+# 「部署给自己 + e2e」——与生产部署共用 deploy-remote-core.sh 同一真相。
+# 本机先加网（标签 img-<run号>），再对自己做 TS+SSH 部署（preflight 模式：只到探针，停 canary）。
+on:
+  workflow_dispatch:
+    inputs:
+      digest_or_tag:
+        description: "temp tag 的 digest（sha256:…），img 入参"
+        required: true
+      stack_dir:
+        description: "栈目录"
+        required: true
+        type: choice
+        options:
+          - stacks/litellm-gateway
+          - stacks/opencode-prod
+      img_tag:
+        description: "本机 TS 标签（镜像线生成，img-<run号>），防并发"
+        required: true
+  workflow_call:
+    inputs:
+      digest_or_tag:
+        required: true
+        type: string
+      stack_dir:
+        required: true
+        type: string
+      img_tag:
+        required: true
+        type: string
+    secrets:
+      TS_AUTHKEY:
+        required: true
+      OPENCODE_API_KEY:
+        required: false
+      ENV_GH_TOKEN:
+        required: false
+      ENV_LITELLM_API_KEY:
+        required: false
+      ENV_OPENCODE_SERVER_PASSWORD:
+        required: false
+      ENV_CLOUDFLARE_API_TOKEN:
+        required: false
+      ENV_CF_AI_TOKEN:
+        required: false
+      ENV_HCLOUD_AK:
+        required: false
+      ENV_HCLOUD_SK:
+        required: false
+      ENV_SSH_PRIVATE_KEY_B64:
+        required: false
+      ENV_SMTP_PASS:
+        required: false
+
+concurrency:
+  group: img-preflight-${{ inputs.img_tag }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 本机加网 + 自建 SSH
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.img_tag }}" --advertise-tags="tag:${{ inputs.img_tag }}" --accept-routes=false --accept-dns=false
+          sudo apt-get install -y -q openssh-server
+          sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
+          ssh-keygen -t ed25519 -N "" -f /tmp/img_key -q
+          sudo tee /root/.ssh/authorized_keys < /tmp/img_key.pub >/dev/null
+          sudo chmod 600 /root/.ssh/authorized_keys
+          sudo sed -i -E 's/^#?Port .*/Port 2222/; s/^#?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+          echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config >/dev/null
+          sudo service ssh restart
+          mkdir -p ~/.ssh && cp /tmp/img_key ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -p 2222 -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p 2222 -i ~/.ssh/ci_key root@127.0.0.1 "echo SELF-SSH-OK"
+
+      - name: 预检（部署给自己，只到探针）
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
+          ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
+          ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
+          ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
+          ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
+          ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
+          ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
+          ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
+          ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="127.0.0.1" \
+            SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2222 ACTION_MODE="preflight" \
+            CANDIDATE_DIGEST="${{ inputs.digest_or_tag }}" \
+            bash scripts/deploy-remote-core.sh
+          echo PREFLIGHT-OK

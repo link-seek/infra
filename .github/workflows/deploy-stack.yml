@@ -1,0 +1,168 @@
+name: deploy-stack
+
+# 复用部署线：唯一会动目标机的线。调用方=各栈薄调用 / img-preflight / 人类 dispatch。
+# 输入只有：节点标签、digest-or-tag（默认 stable，进门即冻结为 digest）、栈目录、up/down。
+# TS-only：远端一律经 Tailscale SSH；无 local 执行器、无 role、无 bypass、无审批、无 teardown。
+# 蓝绿：同 env 同网络起 canary 探针，绿才切流（留下 canary），红删 canary 旧容器不动。
+
+on:
+  workflow_call:
+    inputs:
+      node_tag:
+        required: false
+        type: string
+        default: prod
+      digest_or_tag:
+        required: false
+        type: string
+        default: stable
+      stack_dir:
+        required: true
+        type: string
+      action:
+        required: false
+        type: string
+        default: up
+      ssh_key_b64:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      TS_AUTHKEY:
+        required: true
+      SSH_KEY:
+        required: false
+      OPENCODE_API_KEY:
+        required: false
+      ENV_GH_TOKEN:
+        required: false
+      ENV_LITELLM_API_KEY:
+        required: false
+      ENV_OPENCODE_SERVER_PASSWORD:
+        required: false
+      ENV_CLOUDFLARE_API_TOKEN:
+        required: false
+      ENV_CF_AI_TOKEN:
+        required: false
+      ENV_HCLOUD_AK:
+        required: false
+      ENV_HCLOUD_SK:
+        required: false
+      ENV_SSH_PRIVATE_KEY_B64:
+        required: false
+      ENV_SMTP_PASS:
+        required: false
+  workflow_dispatch:
+    inputs:
+      node_tag:
+        description: "TS 标签（tag:xxx）或主机名（host:yyy），默认 prod"
+        required: false
+        default: prod
+      digest_or_tag:
+        description: "digest（sha256:…）或 tag，默认 stable，进门即冻结"
+        required: false
+        default: stable
+      stack_dir:
+        description: "栈目录，如 stacks/opencode-prod"
+        required: true
+        type: choice
+        options:
+          - stacks/litellm-gateway
+          - stacks/opencode-prod
+      action:
+        description: "up 部署 / down 下线"
+        required: false
+        default: up
+        type: choice
+        options:
+          - up
+          - down
+      ssh_key_b64:
+        description: "临时 SSH 私钥（base64，img 等临机场景；留空则用仓库 SSH_KEY）"
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-stack-${{ inputs.stack_dir }}-${{ inputs.node_tag }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 门禁（digest 存在性，fail-closed）
+        id: gate
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          set -euo pipefail
+          source "${{ inputs.stack_dir }}/deploy.manifest"
+          [ -n "${PIN_REPOS:-}" ] || { echo "manifest 缺 PIN_REPOS"; exit 1; }
+          REPO="${PIN_REPOS%% *}"
+          WANT="${{ inputs.digest_or_tag }}"
+          if [[ "$WANT" == sha256:* ]]; then
+            DIGEST="$WANT"
+          else
+            echo "resolving tag $WANT on $REPO"
+            if [ -n "${SWR_USER:-}" ]; then
+              echo "$SWR_PASS" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_USER" --password-stdin >/dev/null 2>&1 || true
+            fi
+            DIGEST="$(docker buildx imagetools inspect "$REPO:$WANT" --format '{{json .Manifest}}' 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('digest',''))" || true)"
+            [ -n "$DIGEST" ] || { echo "FAIL: tag $WANT 在 $REPO 不存在（匿名+凭证都试过）"; exit 1; }
+          fi
+          echo "frozen digest: $DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: 加网 + 解析节点（TS-only）
+        id: target
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-deploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          TAG="${{ inputs.node_tag }}"
+          if [[ "$TAG" == host:* ]]; then
+            HN="${TAG#host:}"; IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; print(next(p['TailscaleIPs'][0] for p in ps.values() if p.get('HostName')=='$HN'))")"
+          else
+            TG="${TAG#tag:}"; [ "$TG" = "$TAG" ] && TG="$TAG"; TG="${TG#tag:}"
+            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; print(next(p['TailscaleIPs'][0] for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])))")"
+          fi
+          [ -n "$IP" ] || { echo "FAIL: 标签 $TAG 解不出节点"; exit 1; }
+          echo "target $TAG -> $IP"
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+          for f in 100.111.231.85:trial 100.85.128.116:entry; do
+            ip="${f%%:*}"; label="${f##*:}"
+            timeout 12 bash -c "</dev/tcp/$ip/2244" && { echo "CONTAINMENT FAIL: 摸到了 $label"; exit 1; } || echo "containment ok ($label unreachable)"
+          done
+
+      - name: 部署（同步→canary→探针→切流/丢弃）
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KEY_B64: ${{ inputs.ssh_key_b64 }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
+          ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
+          ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
+          ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
+          ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
+          ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
+          ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
+          ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
+          ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          if [ -n "$SSH_KEY_B64" ]; then printf '%s' "$SSH_KEY_B64" | base64 -d > ~/.ssh/ci_key;
+          else printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key; fi
+          chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -p 2244 -H "${{ steps.target.outputs.ip }}" >> ~/.ssh/known_hosts 2>/dev/null
+          STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="${{ steps.target.outputs.ip }}" \
+            SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2244 ACTION_MODE="${{ inputs.action }}" \
+            CANDIDATE_DIGEST="${{ steps.gate.outputs.digest }}" \
+            bash scripts/deploy-remote-core.sh

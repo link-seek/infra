@@ -1,0 +1,9 @@
+# stacks/opencode-prod/deploy.manifest — 部署形状声明（deploy-stack.yml 复用线读取）
+REMOTE_DIR=/root/stacks/opencode-prod
+ENV_CONF=env-sources.conf
+# pin 冻结：只冻 tools（chrome-cjk 无构建线，只跟 pin，不动）
+PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools"
+SYNC_FILES="compose.yml README.md .env.example"
+CUTOVER_SERVICES="opencode-prod opencode-browser"
+# canary 宿主端口（生产 4097，避免冲突）
+CANARY_PORT=14097

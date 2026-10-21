@@ -1,98 +1,45 @@
 name: deploy-opencode-prod
 
-# 生产栈：stacks/opencode-prod/** 进 main 即发 HW21。机制与试用共用 deploy-opencode-stack。
-# 铁律代码化：CI 绿门 fail-closed（手动 bypass 仅救火）。
-
+# 薄调用：opencode 栈部署 = 复用线 + prod 标签 + stable。日常改 pin 即 push compose.yml。
 on:
   push:
     branches: [main]
-    paths: ['stacks/opencode-prod/**']
+    paths:
+      - stacks/opencode-prod/compose.yml
+      - stacks/opencode-prod/env-sources.conf
+      - stacks/opencode-prod/canary-*.sh
+      - stacks/opencode-prod/deploy.manifest
   workflow_dispatch:
     inputs:
-      bypass_ci_gate:
-        description: "跳过 CI 绿门（仅救火，run 记录留痕）"
+      digest_or_tag:
+        description: "tools 镜像 digest（sha256:…）或 tag，默认 stable"
         required: false
-        default: "false"
-
-concurrency:
-  group: deploy-opencode-prod
-  cancel-in-progress: false
+        default: stable
+      action:
+        description: "up 部署 / down 下线"
+        required: false
+        default: up
+        type: choice
+        options: [up, down]
 
 jobs:
-  gate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: CI 绿门（fail-closed）
-        if: inputs.bypass_ci_gate != 'true'
-        run: |
-          set -euo pipefail
-          GATE="$(curl -s --max-time 30 "https://api.github.com/repos/link-seek/docker-images/actions/workflows/test-memory.yml/runs?branch=main&status=completed&per_page=1" | python3 -c "import json,sys; r=json.load(sys.stdin)['workflow_runs'][0]; print(r['conclusion'])" | tr -d ') \r\n')"
-          echo "memory-e2e on main: $GATE"
-          [ "$GATE" = "success" ] || { echo "BLOCKED: CI 未绿，拒绝发生产"; exit 1; }
-
   deploy:
-    needs: gate
-    uses: ./.github/workflows/deploy-opencode-stack.yml
+    uses: ./.github/workflows/deploy-stack.yml
     with:
-      role: prod
-      target: 100.91.222.51
-      ssh_port: "2244"
+      node_tag: prod
+      digest_or_tag: ${{ inputs.digest_or_tag || 'stable' }}
       stack_dir: stacks/opencode-prod
-      remote_dir: /root/stacks/opencode-prod
-      tar_files: compose.yml README.md .env.example
-      forbid: "100.111.231.85:trial 100.85.128.116:entry"
-      hostname_prefix: ci-prod
-      verify_cmd: |
-        cd /root/stacks/opencode-prod && docker compose pull --quiet && docker compose up -d
-        # 等容器 ready（entrypoint 有 ssh-keyscan 重试，可能要 30s+）
-        for i in $(seq 1 12); do sleep 5; CODE=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:4097/); [ "$CODE" = '200' ] && break; echo "wait 4097: $i (got $CODE)"; done
-        # 同工件比对必须用镜像 ID（RepoDigest 和 Id 是两个命名空间，混比永假——灰度误报根因）
-        PIN_TOOLS="$(grep -oP '^    image: \K\S+opencode-tools@\S+' compose.yml | head -n1)"
-        PIN_BR="$(grep -oP '^    image: \K\S+chrome-cjk@\S+' compose.yml | head -n1)"
-        EXP_TOOLS="$(docker inspect "$PIN_TOOLS" --format '{{.Id}}')"
-        EXP_BR="$(docker inspect "$PIN_BR" --format '{{.Id}}')"
-        RUN_TOOLS="$(docker inspect opencode-prod --format '{{.Image}}')"
-        RUN_BR="$(docker inspect opencode-browser --format '{{.Image}}')"
-        if curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/ | grep -q 200 && [ "$RUN_TOOLS" = "$EXP_TOOLS" ] && [ "$RUN_BR" = "$EXP_BR" ]; then
-          echo "VERIFY OK: 4097 通 + 双镜像 ID 相符"
-          # session drain 回归测试：opencode run 必须成功返回（验证 key 透传 litellm → opencode.ai）
-          echo "Testing session drain (opencode run)..."
-          DRAIN_OUT="$(docker exec opencode-prod opencode run "reply with exactly: DRAIN-OK" 2>&1)"
-          if echo "$DRAIN_OUT" | grep -q "DRAIN-OK"; then
-            echo "DRAIN TEST OK: session drain 正常，key 透传生效"
-          else
-            echo "DRAIN TEST FAIL: opencode run 未返回预期结果"
-            echo "output: $DRAIN_OUT"
-            # drain 失败不立即回滚（可能是模型侧问题），但标记警告
-            echo "WARN: session drain 异常，请检查 litellm key 一致性"
-          fi
-          # 透明代理模式：litellm 不验证 key，无需 key 一致性检查
-        else
-          echo "VERIFY FAIL: 回滚到备份（备份由 reusable 在同步前生成）"
-          PREV="$(ls -t compose.yml.prev-* | head -1)"
-          cp "$PREV" compose.yml && docker compose up -d
-          ROLL_OK=""
-          for i in 1 2 3; do
-            sleep 15
-            CODE="$(curl -s -m 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:4097/)"
-            if [ "$CODE" = "200" ]; then echo "rollback:$CODE"; ROLL_OK=1; break; fi
-            echo "rollback retry $i (got $CODE)..."
-          done
-          [ -n "$ROLL_OK" ] || exit 1
-          exit 1
-        fi
+      action: ${{ inputs.action || 'up' }}
     secrets:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
-      CLIENT_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-      # 终态：单 key 透传，stack 内现场 render；存量 PROD_DOTENV_B64 待绿部署后删除
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
-      ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}  # 网关client key正主：Go key（UNIFIED/PROD_LITELLM退役，见master#65）
+      ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
       ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
+      ENV_CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
       ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
       ENV_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
       ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.PROD_SSH_PRIVATE_KEY_B64 }}
       ENV_SMTP_PASS: ${{ secrets.PROD_SMTP_PASS }}
-      ENV_CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}

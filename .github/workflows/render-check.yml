@@ -24,15 +24,18 @@ jobs:
       - name: 键集合对齐（gateway）
         run: bash scripts/render-dotenv.sh --map stacks/litellm-gateway/env-sources.conf --example stacks/litellm-gateway/.env.example --check-only
 
-      - name: map secret 后缀 ↔ workflow S_ 导出对齐
+      - name: map secret 后缀 ↔ 复用线 secrets + 薄调用透传对齐
         run: |
           set -euo pipefail
           fail=0
-          for pair in "stacks/opencode-prod/env-sources.conf:.github/workflows/deploy-opencode-stack.yml" "stacks/litellm-gateway/env-sources.conf:.github/workflows/deploy-litellm-gateway.yml"; do
-            map="${pair%%:*}"; wf="${pair##*:}"
+          # 约定：map 里 KEY=secret:SUFFIX 要求两处同改——deploy-stack.yml 的 secrets: 声明 SUFFIX，
+          # 对应薄调用（deploy-<name>.yml）透传 SUFFIX: ${{ secrets.… }}。只核键名，不碰值。
+          for pair in "stacks/opencode-prod/env-sources.conf:.github/workflows/deploy-opencode-prod.yml" "stacks/litellm-gateway/env-sources.conf:.github/workflows/deploy-litellm-gateway.yml"; do
+            map="${pair%%:*}"; caller="${pair##*:}"
             suffixes="$(grep -oP '^[^#\s=]+=secret:\K[A-Z_0-9]+' "$map" | sort -u || true)"
             for s in $suffixes; do
-              grep -q "S_$s:" "$wf" || { echo "EXPORT_MISSING: $wf 缺 S_$s:（map $map 要它）"; fail=1; }
+              grep -q "^      $s:" .github/workflows/deploy-stack.yml || { echo "EXPORT_MISSING: deploy-stack.yml 的 secrets: 缺 $s（map $map 要它）"; fail=1; }
+              grep -q "^      $s:" "$caller" || { echo "EXPORT_MISSING: $caller 缺 $s: 透传（map $map 要它）"; fail=1; }
             done
           done
           [ "$fail" = 0 ] && echo "EXPORT OK" || exit 1
