@@ -104,6 +104,8 @@ jobs:
 
       - name: 预检（部署给自己，只到探针）
         env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
           ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
@@ -117,7 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           # tag 先冻结为 digest（core 脚本只认 digest；stable/ci-* 等 tag 在此解析，fail-closed）
-          DIGEST="$(STACK_DIR="${{ inputs.stack_dir }}" bash scripts/freeze-digest.sh "${{ inputs.digest_or_tag }}")"
+          DIGEST="$(STACK_DIR="${{ inputs.stack_dir }}" SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" bash scripts/freeze-digest.sh "${{ inputs.digest_or_tag }}")"
           STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="127.0.0.1" \
             SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2222 ACTION_MODE="preflight" \
             CANDIDATE_DIGEST="$DIGEST" \
