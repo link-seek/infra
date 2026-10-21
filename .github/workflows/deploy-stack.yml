@@ -133,6 +133,8 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SSH_KEY_B64: ${{ inputs.ssh_key_b64 }}
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
           ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
@@ -154,4 +156,5 @@ jobs:
           STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="${{ steps.target.outputs.ip }}" \
             SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2244 ACTION_MODE="${{ inputs.action }}" \
             CANDIDATE_DIGEST="${{ steps.gate.outputs.digest }}" \
+            SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" \
             bash scripts/deploy-remote-core.sh

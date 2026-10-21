@@ -7,6 +7,11 @@ cd "$REMOTE_DIR"
 docker rm -f litellm-guard-canary 2>/dev/null || true
 NEW_IMG="$(grep 'image:' compose.yml | head -1 | sed 's/.*image: *//')"
 echo "canary image: $NEW_IMG (want $CANDIDATE_DIGEST)"
+# 干净机（如 img 预检 runner）无 registry 凭证时先登录；有则复用宿主已有凭证
+if [ -n "${SWR_USER:-}" ]; then
+  REG="${NEW_IMG%%/*}"
+  case "$REG" in *.*) printf '%s' "${SWR_PASS:-}" | docker login "$REG" -u "$SWR_USER" --password-stdin;; esac
+fi
 docker pull "$NEW_IMG"
 export LITELLM_MASTER_KEY="sk-$(openssl rand -hex 32)"
 printf '%s' "$LITELLM_MASTER_KEY" > "$REMOTE_DIR/.canary_master"

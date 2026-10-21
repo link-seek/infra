@@ -7,6 +7,11 @@ CANARY_PORT="${CANARY_PORT:-14097}"
 docker compose -p opencode-prod-canary down 2>/dev/null || true
 NEW_IMG="$(grep 'image:' compose.yml | grep opencode-tools | head -1 | sed 's/.*image: *//')"
 echo "canary image: $NEW_IMG (want $CANDIDATE_DIGEST)"
+# 干净机（如 img 预检 runner）无 registry 凭证时先登录；有则复用宿主已有凭证
+if [ -n "${SWR_USER:-}" ]; then
+  REG="${NEW_IMG%%/*}"
+  case "$REG" in *.*) printf '%s' "${SWR_PASS:-}" | docker login "$REG" -u "$SWR_USER" --password-stdin;; esac
+fi
 docker pull "$NEW_IMG"
 # 端口/container_name 覆盖（源 compose 写死 4097 与固定容器名，canary 必须错开）
 cat > /tmp/canary-override.yml <<EOF

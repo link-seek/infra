@@ -123,5 +123,6 @@ jobs:
           STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="127.0.0.1" \
             SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2222 ACTION_MODE="preflight" \
             CANDIDATE_DIGEST="$DIGEST" \
+            SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" \
             bash scripts/deploy-remote-core.sh
           echo PREFLIGHT-OK
