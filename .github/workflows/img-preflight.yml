@@ -84,6 +84,7 @@ jobs:
           sudo chmod 600 /root/.ssh/authorized_keys
           sudo sed -i -E 's/^#?Port .*/Port 2222/; s/^#?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
           grep -q '^Port 2222$' /etc/ssh/sshd_config || echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config >/dev/null
+          sudo mkdir -p /run/sshd
           sudo sshd -t || { echo "sshd_config 非法"; exit 1; }
           sudo service ssh restart || sudo service ssh start
           for i in $(seq 1 15); do (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null && break || sleep 1; done
