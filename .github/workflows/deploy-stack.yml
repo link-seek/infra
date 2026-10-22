@@ -137,6 +137,32 @@ jobs:
             timeout 12 bash -c "</dev/tcp/$ip/2244" && { echo "CONTAINMENT FAIL: 摸到了 $label"; exit 1; } || echo "containment ok ($label unreachable)"
           done
 
+      - name: 双侧证据②：infra 侧网络面转储（仅 preflight，只记录不判死）
+        if: inputs.action == 'preflight'
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+        run: |
+          set -uo pipefail
+          echo "=== SELF+TARGET-PEER ==="
+          tailscale status --json | python3 -c "import json,os,sys; d=json.load(sys.stdin); s=d.get('Self',{}); t=os.environ['TARGET_IP']; print('self:', s.get('HostName'), s.get('TailscaleIPs')); print('target-peer:', [(p.get('HostName'),p.get('TailscaleIPs')) for p in d.get('Peer',{}).values() if (p.get('TailscaleIPs') or [''])[0]==t])" || true
+          echo "=== NETCHECK FULL ==="
+          tailscale netcheck --format=json > /tmp/infra_netcheck.json 2>/tmp/infra_netcheck.err || echo "netcheck rc=$?"
+          python3 - <<'EOF' || true
+          import json
+          try:
+              d = json.load(open('/tmp/infra_netcheck.json'))
+          except Exception as e:
+              print('netcheck 无 JSON:', e); raise SystemExit(0)
+          print('UDP:', d.get('UDP'), 'MappingVariesByDestIP:', d.get('MappingVariesByDestIP'))
+          print('DERP_latency:', json.dumps(d.get('DERP_latency', {})))
+          print('PreferredDERP:', d.get('PreferredDERP'))
+          EOF
+          echo "=== DERP 443 直探（取自 DERPMap） ==="
+          python3 -c "import json; d=json.load(open('/tmp/infra_netcheck.json')); print('\n'.join(sorted({v.get('Hostname','') for r in d.get('DERPMap',{}).get('Regions',{}).values() for v in r.get('Nodes',[])}) - {''}))" 2>/dev/null | head -n 8 | while read -r h; do (timeout 10 bash -c "</dev/tcp/$h/443" && echo "DERP-OK $h" || echo "DERP-FAIL $h"); done || true
+          echo "=== PING TARGET x10（定 direct/relay，只记录） ==="
+          tailscale ping -c 10 "$TARGET_IP" || echo "ping 非绿（记录）"
+          echo "EVIDENCE-INFRA-OK"
+
       - name: 部署（同步→canary→探针→切流/丢弃）
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
