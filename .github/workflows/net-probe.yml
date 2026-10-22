@@ -23,6 +23,14 @@ on:
         options:
           - mint-fresh
           - direct-old-key
+      client-join-mode:
+        description: "client 加网方式：mint-fresh（现场 mint，供双 mint 基线）/ direct-old-key（拿 TAILSCALE_AUTH_KEY_PROD 老 key 直连，复刻 img 流发起侧）"
+        required: false
+        default: mint-fresh
+        type: choice
+        options:
+          - mint-fresh
+          - direct-old-key
 
 jobs:
   probe-server:
@@ -102,9 +110,15 @@ jobs:
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
           TSKEY: ${{ vars.TS_API_KEY != '' && vars.TS_API_KEY || secrets.TS_API_KEY }}
+          OLDKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
+          if [ "${{ inputs.client-join-mode }}" = "direct-old-key" ]; then
+            echo "JOIN-MODE=direct-old-key（复刻 img 流发起侧：老 key 直连发起，无 mint 回退）"
+            [ -n "$OLDKEY" ] || { echo "FAIL: TAILSCALE_AUTH_KEY_PROD 为空"; exit 1; }
+            sudo tailscale up --authkey="$OLDKEY" --hostname="netprobe-client-${{ github.run_id }}" --accept-routes=false --accept-dns=false
+          else
           sudo tailscale up --authkey="$TSKEY" --hostname="netprobe-client-${{ github.run_id }}" --accept-routes=false --accept-dns=false 2>/dev/null || {
             MINT_BODY=$(python3 -c "import json,os; print(json.dumps({'capabilities':{'devices':{'create':{'reusable':False,'ephemeral':True,'preauthorized':True}}},'expirySeconds':1800}))")
             MINTED=""; for AUTH in "Bearer $TSKEY" "Basic $(printf '%s' "$TSKEY" | base64 -w0)"; do
@@ -115,6 +129,7 @@ jobs:
             echo "::add-mask::$MINTED"
             sudo tailscale up --authkey="$MINTED" --hostname="netprobe-client-${{ github.run_id }}" --accept-routes=false --accept-dns=false
           }
+          fi
           sudo apt-get install -y iperf3
           sudo tailscale netcheck --format=json > netcheck.json 2>&1 || true
           echo "=== netcheck ==="; cat netcheck.json
