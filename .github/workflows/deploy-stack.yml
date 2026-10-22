@@ -117,17 +117,19 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
+          set -x
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-deploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-deploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false \
+            || { echo "TS-UP-FAILED"; sudo tailscale status 2>&1 | head -n 5; exit 1; }
           TAG="${{ inputs.node_tag }}"
           if [[ "$TAG" == host:* ]]; then
-            HN="${TAG#host:}"; IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; print(next(p['TailscaleIPs'][0] for p in ps.values() if p.get('HostName')=='$HN'))")"
+            HN="${TAG#host:}"; IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=[p['TailscaleIPs'][0] for p in ps.values() if p.get('HostName')=='$HN']; print(ms[0] if ms else 'NO-MATCH')")"
           else
             TG="${TAG#tag:}"; [ "$TG" = "$TAG" ] && TG="$TAG"; TG="${TG#tag:}"
-            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; print(next(p['TailscaleIPs'][0] for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])))")"
+            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=[p['TailscaleIPs'][0] for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])]; print(ms[0] if ms else 'NO-MATCH')")"
           fi
-          [ -n "$IP" ] || { echo "FAIL: 标签 $TAG 解不出节点"; exit 1; }
+          [ "$IP" != "NO-MATCH" ] || { echo "FAIL: 标签/主机 $TAG 在 tailnet 无匹配（tag 需后台先贴好）"; tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('self:', d.get('Self',{}).get('HostName')); [print(p.get('HostName'), p.get('Tags')) for p in d['Peer'].values()]"; exit 1; }
           echo "target $TAG -> $IP"
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
           for f in 100.111.231.85:trial 100.85.128.116:entry; do
