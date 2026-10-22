@@ -7,3 +7,5 @@ PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway"
 SYNC_FILES="compose.yml config/litellm_config.yaml guard/vault_guard.py guard/models-denied.json guard/rules.json"
 # 切流时重建的服务（canary 已验过，留下同样内容）
 CUTOVER_SERVICES="litellm-guard"
+# 生产 up 探针级别：boot（就绪+黑名单轻链路；真假 key verdict 只在 img 细测跑）
+UP_PROBE_LEVEL="boot"

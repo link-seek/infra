@@ -46,8 +46,11 @@ scp -o BatchMode=yes -P "$SSH_PORT" -i "$SSH_KEY_FILE" "$STACK_DIR/canary-run.sh
 DIGEST_FOR_CANARY="${CANDIDATE_DIGEST:-$(grep -oP '(?<=@)sha256:[0-9a-f]+' /tmp/compose.deploy.yml | head -n1)}"
 export REMOTE_DIR CANDIDATE_DIGEST="$DIGEST_FOR_CANARY"
 export CANARY_PORT CANARY_BROWSER_PORT 2>/dev/null || true
+# 探针级别：preflight 恒 boot（装上+启动自测）；up 看栈 manifest 的 UP_PROBE_LEVEL（网关 boot 轻链路/opencode full 含 drain 活证明）
+if [ "$ACTION_MODE" = "preflight" ]; then PROBE_LEVEL=boot; else PROBE_LEVEL="${UP_PROBE_LEVEL:-boot}"; fi
+export PROBE_LEVEL
 $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' SWR_USER='${SWR_USER:-}' SWR_PASS='${SWR_PASS:-}' bash -s" < "$STACK_DIR/canary-run.sh"
-if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' OPENCODE_API_KEY='${OPENCODE_API_KEY:-}' bash -s" < "$STACK_DIR/canary-probe.sh"; then
+if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' PROBE_LEVEL='$PROBE_LEVEL' OPENCODE_API_KEY='${OPENCODE_API_KEY:-}' bash -s" < "$STACK_DIR/canary-probe.sh"; then
   echo "探针通过"
   if [ "$ACTION_MODE" = "preflight" ]; then
     echo "PREFLIGHT-OK（canary 留给调用方处置）"

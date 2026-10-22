@@ -1,9 +1,10 @@
 #!/bin/bash
 # canary-probe.sh — 探 canary（网关栈）：就绪 + 真 key + 假 key + 黑名单。任一红即非零退出。
-# 输入 env：REMOTE_DIR、OPENCODE_API_KEY（真 key，现取 secret）。
+# 输入 env：REMOTE_DIR、OPENCODE_API_KEY（真 key，现取 secret）、PROBE_LEVEL（boot=就绪+黑名单轻链路/full=再加真假 key 上游 verdict，默认 full）。
 set -euo pipefail
+PROBE_LEVEL="${PROBE_LEVEL:-full}"
 CANARY_IP=$(docker inspect litellm-guard-canary --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-echo "canary ip: $CANARY_IP"
+echo "canary ip: $CANARY_IP (level=$PROBE_LEVEL)"
 PASS=1
 
 READY=""
@@ -27,6 +28,7 @@ probe_chat() { # $1=key $2=outfile -> http code
     http://$CANARY_IP:4000/v1/chat/completions || echo 000
 }
 
+if [ "$PROBE_LEVEL" = "full" ]; then
 CC="$(probe_chat "$OPENCODE_API_KEY" /tmp/cc.json)"
 echo "verify: real-key=$CC $(head -c 120 /tmp/cc.json)"
 if grep -qi "no.connected.db\|no_db_connection" /tmp/cc.json 2>/dev/null; then
@@ -50,6 +52,7 @@ elif { [ "$IC" = "401" ] || [ "$IC" = "403" ]; } && grep -qi "upstream request f
 else
   echo "FAIL: fake key 未透传上游"; PASS=0
 fi
+fi # PROBE_LEVEL=full（真假 key 上游 verdict 只在细测跑；生产轻链路只验就绪+黑名单）
 
 # 黑名单（models-denied.json 首条应 400，由 vault guard 拦，非上游）
 DENIED="$(python3 -c "import json;print(json.load(open('$REMOTE_DIR/guard/models-denied.json'))[0])")"

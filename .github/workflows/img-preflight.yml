@@ -1,8 +1,8 @@
 name: img-preflight
 
-# img 预检线：被镜像线跨仓触发（gh workflow run + 轮询），在 infra 侧本机完成
-# 「部署给自己 + e2e」——与生产部署共用 deploy-remote-core.sh 同一真相。
-# 本机先加网（标签 img-<run号>），再对自己做 TS+SSH 部署（preflight 模式：只到探针，停 canary）。
+# img 预检入口：被镜像线跨仓触发（gh workflow run + 轮询），只做「部署到镜像 runner 的标签 + 启动自测」。
+# 细致测试在镜像 runner 本地跑（镜像仓的步骤，直连 canary）；本线成功只代表装上且 boot 通过。
+# 内部转调 deploy-stack（复用线，action=preflight：同 env 同网络起 canary，boot 探针，停 canary 不切流）。
 on:
   workflow_dispatch:
     inputs:
@@ -16,8 +16,11 @@ on:
         options:
           - stacks/litellm-gateway
           - stacks/opencode-prod
-      img_tag:
-        description: "本机 TS 标签（镜像线生成，img-<run号>），防并发"
+      node_tag:
+        description: "镜像 runner 的 TS 标签（镜像线生成，如 img-<run号>），防并发"
+        required: true
+      ssh_key_b64:
+        description: "镜像 runner 现生成的单次 SSH 私钥（base64，仅本 run 有效）"
         required: true
   workflow_call:
     inputs:
@@ -27,12 +30,17 @@ on:
       stack_dir:
         required: true
         type: string
-      img_tag:
+      node_tag:
+        required: true
+        type: string
+      ssh_key_b64:
         required: true
         type: string
     secrets:
       TAILSCALE_AUTH_KEY_PROD:
         required: true
+      SSH_KEY:
+        required: false
       OPENCODE_API_KEY:
         required: false
       ENV_GH_TOKEN:
@@ -55,74 +63,28 @@ on:
         required: false
 
 concurrency:
-  group: img-preflight-${{ inputs.img_tag }}
+  group: img-preflight-${{ inputs.node_tag }}
   cancel-in-progress: false
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 本机加网 + 自建 SSH
-        env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
-        run: |
-          set -euo pipefail
-          trap 'echo "FAILED-CMD: $BASH_COMMAND"' ERR
-          curl -fsSL https://tailscale.com/install.sh | sh
-          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
-          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
-          # 注：不 advertise-tags（authkey 无该 tag 授权；预检本就只部署给 127.0.0.1，加网仅作在网审计）
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="${{ inputs.img_tag }}" --accept-routes=false --accept-dns=false
-          set -x  # tailscale 安装脚本尾部自带 set +x，重新打开，否则后面全程静默
-          sudo apt-get install -y -q openssh-server
-          sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
-          rm -f /tmp/img_key /tmp/img_key.pub
-          ssh-keygen -t ed25519 -N "" -f /tmp/img_key -q
-          sudo tee /root/.ssh/authorized_keys < /tmp/img_key.pub >/dev/null
-          sudo chmod 600 /root/.ssh/authorized_keys
-          # 独立 sshd（最小自带配置，不碰系统 sshd/systemd/socket 激活，避免配置被覆盖或端口抢占）
-          sudo mkdir -p /run/sshd
-          printf '%s\n' "Port 2222" "ListenAddress 127.0.0.1" "PermitRootLogin prohibit-password" \
-            "PasswordAuthentication no" "PubkeyAuthentication yes" "PidFile /tmp/img_sshd.pid" \
-            "AuthorizedKeysFile /root/.ssh/authorized_keys" \
-            "Subsystem sftp /usr/lib/openssh/sftp-server" | sudo tee /tmp/img_sshd_config >/dev/null
-          # sftp subsystem 是 scp 的必备件（当代 scp 默认走 sftp 通道；没有它就是 subsystem request failed）
-          ls /usr/lib/openssh/sftp-server || { echo "缺 sftp-server"; exit 1; }
-          sudo sshd -t -f /tmp/img_sshd_config || { echo "sshd_config 非法"; exit 1; }
-          sudo /usr/sbin/sshd -f /tmp/img_sshd_config -E /tmp/img_sshd.log
-          for i in $(seq 1 15); do (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null && break || sleep 1; done
-          (echo >/dev/tcp/127.0.0.1/2222) 2>/dev/null || { echo "2222 未监听"; sudo cat /tmp/img_sshd.log || true; ps aux | grep -a '[s]shd' || true; exit 1; }
-          mkdir -p ~/.ssh && cp /tmp/img_key ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          ssh-keyscan -p 2222 -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
-          for i in $(seq 1 10); do
-            ssh -o BatchMode=yes -o ConnectTimeout=5 -p 2222 -i ~/.ssh/ci_key root@127.0.0.1 "echo SELF-SSH-OK" && break || sleep 2
-            [ "$i" = 10 ] && { echo "自连失败"; exit 1; }
-          done
-
-      - name: 预检（部署给自己，只到探针）
-        env:
-          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
-          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
-          ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
-          ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
-          ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
-          ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
-          ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
-          ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
-          ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
-          ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
-        run: |
-          set -euo pipefail
-          # tag 先冻结为 digest（core 脚本只认 digest；stable/ci-* 等 tag 在此解析，fail-closed）
-          DIGEST="$(STACK_DIR="${{ inputs.stack_dir }}" SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" bash scripts/freeze-digest.sh "${{ inputs.digest_or_tag }}")"
-          STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="127.0.0.1" \
-            SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2222 ACTION_MODE="preflight" \
-            CANDIDATE_DIGEST="$DIGEST" \
-            SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" \
-            bash scripts/deploy-remote-core.sh
-          echo PREFLIGHT-OK
+    uses: ./.github/workflows/deploy-stack.yml
+    with:
+      node_tag: ${{ inputs.node_tag }}
+      digest_or_tag: ${{ inputs.digest_or_tag }}
+      stack_dir: ${{ inputs.stack_dir }}
+      action: preflight
+      ssh_key_b64: ${{ inputs.ssh_key_b64 }}
+    secrets:
+      TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+      SSH_KEY: ${{ secrets.SSH_KEY }}
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
+      ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
+      ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
+      ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
+      ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
+      ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
+      ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
+      ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
+      ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}

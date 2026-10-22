@@ -1,7 +1,8 @@
 name: deploy-stack
 
 # 复用部署线：唯一会动目标机的线。调用方=各栈薄调用 / img-preflight / 人类 dispatch。
-# 输入只有：节点标签、digest-or-tag（默认 stable，进门即冻结为 digest）、栈目录、up/down。
+# 输入只有：节点标签、digest-or-tag（默认 stable，进门即冻结为 digest）、栈目录、up/down/preflight。
+# action=preflight 只到探针（img 场景，canary 留给调用方处置）；up 的探针级别看栈 manifest 的 UP_PROBE_LEVEL。
 # TS-only：远端一律经 Tailscale SSH；无 local 执行器、无 role、无 bypass、无审批、无 teardown。
 # 蓝绿：同 env 同网络起 canary 探针，绿才切流（留下 canary），红删 canary 旧容器不动。
 
@@ -70,13 +71,14 @@ on:
           - stacks/litellm-gateway
           - stacks/opencode-prod
       action:
-        description: "up 部署 / down 下线"
+        description: "up 部署 / down 下线 / preflight 只到探针（img 场景）"
         required: false
         default: up
         type: choice
         options:
           - up
           - down
+          - preflight
       ssh_key_b64:
         description: "临时 SSH 私钥（base64，img 等临机场景；留空则用仓库 SSH_KEY）"
         required: false
