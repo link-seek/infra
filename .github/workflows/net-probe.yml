@@ -2,11 +2,19 @@ name: net-probe
 
 # 一次性 runner-to-runner 连通实验（Mic92 tribuchet tailscale-probe 仿写）。
 # 目的：干净条件（合规凭证+3 分钟耐心+全证据）下重测 GH-runner↔runner 数据面，给 img 预检定案。
+# server-idle-minutes=0：基线（join 后 ~1 分钟即互打，已两次全绿）。
+# server-idle-minutes=12：idle 判别（复刻 img 几何：server 加网后静默 12 分钟，client 卡点到时再打；
+#   复现黑洞=定案 idle-time，仍通=idle 无罪另找变量）。
 # 通→抄参数回镜像线；3 分钟仍不通→img 改本地自装。跑完即删本文件。
 
 on:
   workflow_dispatch:
     inputs:
+      server-idle-minutes:
+        description: "server 加网后静默等待分钟数（0=基线即打；12=idle 判别复刻 img 几何）"
+        required: false
+        default: 0
+        type: number
       server-join-mode:
         description: "server 加网方式：mint-fresh（现场 mint，供双 mint 基线）/ direct-old-key（拿 TAILSCALE_AUTH_KEY_PROD 老 key 直连，复刻 img 流 infra 侧）"
         required: false
@@ -19,7 +27,7 @@ on:
 jobs:
   probe-server:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ inputs.server-idle-minutes > 0 && 30 || 15 }}
     steps:
       - name: 加网（server）
         id: join
@@ -49,23 +57,32 @@ jobs:
           echo "TSIP=$(tailscale ip -4)" >> "$GITHUB_OUTPUT"
           sudo apt-get install -y iperf3
 
-      - name: 发布本机地址（artifact）
+      - name: 发布本机地址+加网时刻（artifact）
         run: |
           echo -n "${{ steps.join.outputs.TSIP }}" > server-ip.txt
-          cat server-ip.txt; echo
+          date +%s > server-join-epoch.txt
+          cat server-ip.txt; echo; cat server-join-epoch.txt; echo
 
       - uses: actions/upload-artifact@v4
         with:
           name: server-info
-          path: server-ip.txt
+          path: |
+            server-ip.txt
+            server-join-epoch.txt
 
-      - name: 起 iperf 服务端（等客户端打流）
+      - name: 起 iperf 服务端（先监听，再按 idle 睡）
         run: |
           set -uo pipefail
           sudo tailscale status --json | python3 -c "import json,sys; print(json.load(sys.stdin)['Self']['HostName'])"
           # 前向+反向两轮，单测模式循环
           (sudo iperf3 -s -1 -p 5000 &) ; sleep 2
           (sudo iperf3 -s -1 -p 5001 &) ; sleep 2
+          IDLE_MIN="${{ inputs.server-idle-minutes }}"
+          if [ "${IDLE_MIN:-0}" -gt 0 ] 2>/dev/null; then
+            echo "IDLE-EXPERIMENT: 监听已起，像 img 的 sshd 一样在线静默 ${IDLE_MIN} 分钟（零 Tailscale 流量）"
+            sleep $(( IDLE_MIN * 60 ))
+            echo "IDLE-EXPERIMENT: 静默结束，等客户端打流"
+          fi
           echo "servers listening; waiting for client-done (max ~12min)"
           for i in $(seq 1 72); do
             gh run download ${{ github.run_id }} -n client-done -R ${{ github.repository }} >/dev/null 2>&1 && { echo "CLIENT-DONE seen"; break; }
@@ -79,7 +96,7 @@ jobs:
 
   probe-client:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ inputs.server-idle-minutes > 0 && 30 || 15 }}
     steps:
       - name: 加网（client）
         env:
@@ -116,6 +133,21 @@ jobs:
           [ -n "$SIP" ] || { echo "FAIL: 8 分钟没等到 server 地址"; exit 1; }
           echo "SERVER=$SIP"
           echo "server=$SIP" >> "$GITHUB_OUTPUT"
+
+      - name: 等到 server 空闲期满（idle 判别卡点）
+        run: |
+          IDLE_MIN="${{ inputs.server-idle-minutes }}"
+          if [ "${IDLE_MIN:-0}" -gt 0 ] 2>/dev/null; then
+            EPOCH="$(cat server-join-epoch.txt 2>/dev/null || echo 0)"
+            TARGET=$(( EPOCH + IDLE_MIN * 60 ))
+            NOW=$(date +%s)
+            WAIT=$(( TARGET - NOW ))
+            echo "IDLE-EXPERIMENT: server 加网时刻=$EPOCH，目标打流时刻=$TARGET，当前=$NOW，需再等 ${WAIT}s"
+            if [ "$WAIT" -gt 0 ]; then sleep "$WAIT"; fi
+            echo "IDLE-EXPERIMENT: 卡点到，开打（此时 server 已静默 ${IDLE_MIN} 分钟，复刻 img 几何）"
+          else
+            echo "基线模式：不等，直接开打"
+          fi
 
       - name: ping 定性（direct 还是 relay）
         run: |
