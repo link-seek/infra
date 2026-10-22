@@ -162,11 +162,12 @@ jobs:
           [ -s ~/.ssh/ci_key ] || { echo "SSH key missing (SSH_KEY secret 与 ssh_key_b64 输入都空)"; exit 1; }
           chmod 600 ~/.ssh/ci_key
           # keyscan 失败必须大声死：旧写法 2>/dev/null + set -e 会在 5 秒内零输出退出（preflight-39712410423 教训）
-          for i in 1 2 3; do
+          # 判死放宽到约 3 分钟：Tailscale 官方称新 peer 首次连通要等（eventual consistency），15 秒判死太急
+          for i in $(seq 1 12); do
             ssh-keyscan -p 2244 -H "${{ steps.target.outputs.ip }}" >> ~/.ssh/known_hosts 2>/tmp/keyscan.err && break
             echo "keyscan 第 $i 次失败："; head -c 500 /tmp/keyscan.err; echo
-            [ "$i" = 3 ] && { echo "FAIL: keyscan 三次连不上 ${{ steps.target.outputs.ip }}:2244（sshd 未起或网络不通）"; exit 1; }
-            sleep 10
+            [ "$i" = 12 ] && { echo "FAIL: keyscan 12 次（约 3 分钟）连不上 ${{ steps.target.outputs.ip }}:2244（sshd 未起或网络不通）"; exit 1; }
+            sleep 15
           done
           STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="${{ steps.target.outputs.ip }}" \
             SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2244 ACTION_MODE="${{ inputs.action }}" \
