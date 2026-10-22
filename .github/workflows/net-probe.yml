@@ -1,0 +1,136 @@
+name: net-probe
+
+# 一次性 runner-to-runner 连通实验（Mic92 tribuchet tailscale-probe 仿写）。
+# 目的：干净条件（合规凭证+3 分钟耐心+全证据）下重测 GH-runner↔runner 数据面，给 img 预检定案。
+# 通→抄参数回镜像线；3 分钟仍不通→img 改本地自装。跑完即删本文件。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 加网（server）
+        id: join
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+          TSKEY: ${{ vars.TS_API_KEY != '' && vars.TS_API_KEY || secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="$TSKEY" --hostname="netprobe-server-${{ github.run_id }}" --accept-routes=false --accept-dns=false 2>/dev/null || {
+            MINT_BODY=$(python3 -c "import json,os; print(json.dumps({'capabilities':{'devices':{'create':{'reusable':False,'ephemeral':True,'preauthorized':True}}},'expirySeconds':1800}))")
+            MINTED=""; for AUTH in "Bearer $TSKEY" "Basic $(printf '%s' "$TSKEY" | base64 -w0)"; do
+              MINT_RESP=$(mktemp); MINT_CODE=$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST 'https://api.tailscale.com/api/v2/tailnet/-/keys' -H "Authorization: $AUTH" -H 'Content-Type: application/json' -d "$MINT_BODY" || echo 000)
+              if [ "$MINT_CODE" -ge 200 ] && [ "$MINT_CODE" -lt 300 ]; then MINTED=$(python3 -c "import json; print(json.load(open('$MINT_RESP')).get('key',''))"); [ -n "$MINTED" ] && break; fi
+            done
+            [ -n "$MINTED" ] || { echo "FAIL: mint 失败"; exit 1; }
+            echo "::add-mask::$MINTED"
+            sudo tailscale up --authkey="$MINTED" --hostname="netprobe-server-${{ github.run_id }}" --accept-routes=false --accept-dns=false
+          }
+          echo "TSIP=$(tailscale ip -4)" >> "$GITHUB_OUTPUT"
+          sudo apt-get install -y iperf3
+
+      - name: 发布本机地址（artifact）
+        run: |
+          echo -n "${{ steps.join.outputs.TSIP }}" > server-ip.txt
+          cat server-ip.txt; echo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-info
+          path: server-ip.txt
+
+      - name: 起 iperf 服务端（等客户端打流）
+        run: |
+          set -uo pipefail
+          sudo tailscale status --json | python3 -c "import json,sys; print(json.load(sys.stdin)['Self']['HostName'])"
+          # 前向+反向两轮，单测模式循环
+          (sudo iperf3 -s -1 -p 5000 &) ; sleep 2
+          (sudo iperf3 -s -1 -p 5001 &) ; sleep 2
+          echo "servers listening; waiting for client-done (max ~12min)"
+          for i in $(seq 1 72); do
+            gh run download ${{ github.run_id }} -n client-done -R ${{ github.repository }} >/dev/null 2>&1 && { echo "CLIENT-DONE seen"; break; }
+            sleep 10
+          done
+          echo "server side finished"
+
+      - name: 下线（无条件 logout，不留尸体）
+        if: always()
+        run: sudo tailscale logout || true
+
+  probe-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 加网（client）
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+          TSKEY: ${{ vars.TS_API_KEY != '' && vars.TS_API_KEY || secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="$TSKEY" --hostname="netprobe-client-${{ github.run_id }}" --accept-routes=false --accept-dns=false 2>/dev/null || {
+            MINT_BODY=$(python3 -c "import json,os; print(json.dumps({'capabilities':{'devices':{'create':{'reusable':False,'ephemeral':True,'preauthorized':True}}},'expirySeconds':1800}))")
+            MINTED=""; for AUTH in "Bearer $TSKEY" "Basic $(printf '%s' "$TSKEY" | base64 -w0)"; do
+              MINT_RESP=$(mktemp); MINT_CODE=$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST 'https://api.tailscale.com/api/v2/tailnet/-/keys' -H "Authorization: $AUTH" -H 'Content-Type: application/json' -d "$MINT_BODY" || echo 000)
+              if [ "$MINT_CODE" -ge 200 ] && [ "$MINT_CODE" -lt 300 ]; then MINTED=$(python3 -c "import json; print(json.load(open('$MINT_RESP')).get('key',''))"); [ -n "$MINTED" ] && break; fi
+            done
+            [ -n "$MINTED" ] || { echo "FAIL: mint 失败"; exit 1; }
+            echo "::add-mask::$MINTED"
+            sudo tailscale up --authkey="$MINTED" --hostname="netprobe-client-${{ github.run_id }}" --accept-routes=false --accept-dns=false
+          }
+          sudo apt-get install -y iperf3
+          sudo tailscale netcheck --format=json > netcheck.json 2>&1 || true
+          echo "=== netcheck ==="; cat netcheck.json
+
+      - name: 等 server 地址（artifact，最长 ~8 分钟）
+        id: waitaddr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          for i in $(seq 1 48); do
+            gh run download ${{ github.run_id }} -n server-info -R ${{ github.repository }} >/dev/null 2>&1 && break
+            sleep 10
+          done
+          SIP="$(cat server-ip.txt 2>/dev/null || true)"
+          [ -n "$SIP" ] || { echo "FAIL: 8 分钟没等到 server 地址"; exit 1; }
+          echo "SERVER=$SIP"
+          echo "server=$SIP" >> "$GITHUB_OUTPUT"
+
+      - name: ping 定性（direct 还是 relay）
+        run: |
+          set -uo pipefail
+          sudo tailscale ping -c 10 "${{ steps.waitaddr.outputs.server }}" || echo "PING-FAILED(记分)"
+
+      - name: 双向打流（前向+反向，重试）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          SIP="${{ steps.waitaddr.outputs.server }}"
+          ok=0
+          for i in 1 2 3; do
+            echo "--- forward try $i ---"
+            sudo iperf3 -c "$SIP" -p 5000 -t 5 && { ok=$((ok+1)); break; } || sleep 10
+          done
+          for i in 1 2 3; do
+            echo "--- reverse try $i ---"
+            sudo iperf3 -c "$SIP" -p 5001 -t 5 -R && { ok=$((ok+1)); break; } || sleep 10
+          done
+          echo "DIRECTIONS_OK=$ok/2"
+          [ "$ok" = 2 ] || { echo "FAIL: 双向打流未全通"; exit 1; }
+          echo done > client-done.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: client-done
+          path: client-done.txt
+
+      - name: 下线（无条件 logout，不留尸体）
+        if: always()
+        run: sudo tailscale logout || true
