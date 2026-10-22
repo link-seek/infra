@@ -5,6 +5,8 @@
 # 可选：CANDIDATE_DIGEST（digest 门禁已在外层冻好；为空则只读 compose 现有 pin，不改）
 #       REMOTE_DIR 缺省 /root/<stack>；ENV_* 由调用方 export 进来；OPENCODE_API_KEY 供探针。
 set -euo pipefail
+echo "CORE-START stack=${STACK_DIR:-?} target=${TARGET_IP:-?} action=${ACTION_MODE:-?} digest=${CANDIDATE_DIGEST:-none}"
+set -x
 : "${STACK_DIR:?}" : "${TARGET_IP:?}" : "${SSH_KEY_FILE:?}" : "${ACTION_MODE:?}"
 SSH_PORT="${SSH_PORT:-2244}"
 REMOTE_DIR="${REMOTE_DIR:-/root/$STACK_DIR}"
