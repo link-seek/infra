@@ -33,6 +33,10 @@ on:
         required: true
       SSH_KEY:
         required: false
+      SWR_LOGIN_USER:
+        required: false
+      SWR_LOGIN_PASS:
+        required: false
       OPENCODE_API_KEY:
         required: false
       ENV_GH_TOKEN:
@@ -109,7 +113,7 @@ jobs:
       - name: 加网 + 解析节点（TS-only）
         id: target
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh

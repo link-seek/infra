@@ -41,6 +41,10 @@ on:
         required: true
       SSH_KEY:
         required: false
+      SWR_LOGIN_USER:
+        required: false
+      SWR_LOGIN_PASS:
+        required: false
       OPENCODE_API_KEY:
         required: false
       ENV_GH_TOKEN:
@@ -78,6 +82,8 @@ jobs:
     secrets:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
       SSH_KEY: ${{ secrets.SSH_KEY }}
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
       ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}

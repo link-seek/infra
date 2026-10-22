@@ -33,6 +33,8 @@ jobs:
     secrets:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
       ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
