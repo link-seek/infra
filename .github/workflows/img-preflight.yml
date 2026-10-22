@@ -20,8 +20,9 @@ on:
         description: "镜像 runner 的 TS 标签（镜像线生成，如 img-<run号>），防并发"
         required: true
       ssh_key_b64:
-        description: "镜像 runner 现生成的单次 SSH 私钥（base64，仅本 run 有效）"
-        required: true
+        description: "镜像 runner 现生成的单次 SSH 私钥（base64，仅本 run 有效；留空则用仓库 SSH_KEY）"
+        required: false
+        default: ""
   workflow_call:
     inputs:
       digest_or_tag:
@@ -34,8 +35,9 @@ on:
         required: true
         type: string
       ssh_key_b64:
-        required: true
+        required: false
         type: string
+        default: ""
     secrets:
       TAILSCALE_AUTH_KEY_PROD:
         required: true
@@ -81,7 +83,7 @@ jobs:
       ssh_key_b64: ${{ inputs.ssh_key_b64 }}
     secrets:
       TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
-      SSH_KEY: ${{ secrets.SSH_KEY }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
       SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
       SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
