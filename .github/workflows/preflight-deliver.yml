@@ -67,6 +67,7 @@ jobs:
           sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
           sudo cp /tmp/ci_ephem.pub /root/.ssh/authorized_keys && sudo chmod 600 /root/.ssh/authorized_keys
           sudo apt-get update -qq && sudo apt-get install -y -qq openssh-server
+          sudo mkdir -p /run/sshd
           sudo /usr/sbin/sshd -p 2244 -o PermitRootLogin=prohibit-password
           sleep 2
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -p 2244 -i /tmp/ci_ephem root@127.0.0.1 'docker info >/dev/null && echo SELF-SSH-OK'
