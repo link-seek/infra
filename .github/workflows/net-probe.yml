@@ -35,7 +35,7 @@ on:
 jobs:
   probe-server:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.server-idle-minutes > 0 && 30 || 15 }}
+    timeout-minutes: ${{ inputs.server-idle-minutes > 0 && 45 || 15 }}
     steps:
       - name: 加网（server）
         id: join
@@ -79,20 +79,30 @@ jobs:
             server-join-epoch.txt
 
       - name: 起 iperf 服务端（先监听，再按 idle 睡）
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
           sudo tailscale status --json | python3 -c "import json,sys; print(json.load(sys.stdin)['Self']['HostName'])"
           # 前向+反向两轮，单测模式循环
           (sudo iperf3 -s -1 -p 5000 &) ; sleep 2
           (sudo iperf3 -s -1 -p 5001 &) ; sleep 2
+          # 监听自检：双端口必须 LISTEN（fail-loud，永绝“server 没监听”之疑）
+          sudo ss -ltn | tee /tmp/listen.txt | grep -q ':5000' || { echo "FAIL: 5000 未监听"; cat /tmp/listen.txt; exit 1; }
+          sudo ss -ltn | grep -q ':5001' || { echo "FAIL: 5001 未监听"; exit 1; }
+          echo "LISTEN-OK: 5000+5001 双监听在位"
           IDLE_MIN="${{ inputs.server-idle-minutes }}"
           if [ "${IDLE_MIN:-0}" -gt 0 ] 2>/dev/null; then
             echo "IDLE-EXPERIMENT: 监听已起，像 img 的 sshd 一样在线静默 ${IDLE_MIN} 分钟（零 Tailscale 流量）"
             sleep $(( IDLE_MIN * 60 ))
             echo "IDLE-EXPERIMENT: 静默结束，等客户端打流"
           fi
-          echo "servers listening; waiting for client-done (max ~12min)"
-          for i in $(seq 1 72); do
+          echo "=== post-idle evidence（idle 后状态，无条件采集）==="
+          sudo tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); ps=d.get('Peer',{}); print('peers:',len(ps)); [print(' ',p.get('HostName'),(p.get('TailscaleIPs') or ['?'])[0]) for p in list(ps.values())[:15]]"
+          sudo tailscale netcheck --format=json > post-idle-netcheck.json 2>&1 || true
+          python3 -c "import json; d=json.load(open('post-idle-netcheck.json')); print('UDP:',d.get('UDP'),'MappingVariesByDestIP:',d.get('MappingVariesByDestIP'),'DERP_latency:',d.get('DERP_latency'),'PreferredDERP:',d.get('PreferredDERP'))"
+          echo "servers listening; waiting for client-done (max ~25min)"
+          for i in $(seq 1 150); do
             gh run download ${{ github.run_id }} -n client-done -R ${{ github.repository }} >/dev/null 2>&1 && { echo "CLIENT-DONE seen"; break; }
             sleep 10
           done
@@ -104,7 +114,7 @@ jobs:
 
   probe-client:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.server-idle-minutes > 0 && 30 || 15 }}
+    timeout-minutes: ${{ inputs.server-idle-minutes > 0 && 45 || 15 }}
     steps:
       - name: 加网（client）
         env:
