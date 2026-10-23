@@ -3,8 +3,10 @@ REMOTE_DIR=/root/stacks/litellm-gateway
 ENV_CONF=env-sources.conf
 # pin 冻结：compose 里这些 repo 的 @sha256 会被候选 digest 替换
 PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway"
-# 同步到目标机的文件（相对栈目录；.env 另走 render+scp，不在此列）
-SYNC_FILES="compose.yml config/litellm_config.yaml guard/vault_guard.py guard/models-denied.json guard/rules.json"
+# 同步到目标机的文件（相对栈目录；.env 另走 render+scp，不在此列）。
+# 注意：config/guard 不在此列——compose 零挂载，靶机上的拷贝无人读取（读执行以 canary 内 bake 的为准）；
+# 探针要的黑名单从运行中的 canary 现场取，不读同步拷贝。
+SYNC_FILES="compose.yml"
 # 切流时重建的服务（canary 已验过，留下同样内容）
 CUTOVER_SERVICES="litellm-guard"
 # 生产 up 探针级别：boot（就绪+黑名单轻链路；真假 key verdict 只在 img 细测跑）
