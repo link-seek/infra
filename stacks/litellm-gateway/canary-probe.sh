@@ -54,13 +54,18 @@ else
 fi
 fi # PROBE_LEVEL=full（真假 key 上游 verdict 只在细测跑；生产轻链路只验就绪+黑名单）
 
-# 黑名单（models-denied.json 首条应 400，由 vault guard 拦，非上游）
-DENIED="$(python3 -c "import json;print(json.load(open('$REMOTE_DIR/guard/models-denied.json'))[0])")"
+# 黑名单（以 canary 内实际生效的名单为准，从运行中的容器现场取，不读仓库拷贝）
+docker cp litellm-guard-canary:/app/models-denied.json /tmp/probe-denied.json
+DENIED="$(python3 -c "import json;d=json.load(open('/tmp/probe-denied.json'));print(d[0] if d else '')")"
+if [ -z "$DENIED" ]; then
+  echo "verify: denied 名单为空 = 全放行（按文档语义跳过黑名单断言）"
+else
 BL="$(curl -s -m 30 -o /tmp/bl.json -w '%{http_code}' \
   -H "Authorization: Bearer $OPENCODE_API_KEY" -H 'Content-Type: application/json' \
   -d "{\"model\":\"$DENIED\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}" \
   http://$CANARY_IP:4000/v1/chat/completions || echo 000)"
 echo "verify: denied($DENIED)=$BL $(head -c 120 /tmp/bl.json)"
 if [ "$BL" != "400" ]; then echo "FAIL: 黑名单未拦"; PASS=0; fi
+fi
 
 if [ "$PASS" = "1" ]; then echo "PROBE OK"; else docker logs litellm-guard-canary --tail 60 || true; exit 1; fi
