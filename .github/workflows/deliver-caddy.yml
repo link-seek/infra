@@ -1,4 +1,5 @@
-name: deploy-caddy
+name: deliver-caddy
+# 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
 # Caddy 配置变更 → 自动部署到入口机，全程留痕。
 # 触发：edge/caddy/** 在 main 上变化，或手动 workflow_dispatch。
@@ -10,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-caddy
+  group: deliver-caddy
   cancel-in-progress: false
 
 jobs:
@@ -80,7 +81,7 @@ jobs:
 
       - name: 部署摘要
         run: |
-          echo "## deploy-caddy ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "## deliver-caddy ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- 变更文件：$(git diff --name-only HEAD~1 HEAD -- edge/caddy/ | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 退出 tailnet（焚毁节点）

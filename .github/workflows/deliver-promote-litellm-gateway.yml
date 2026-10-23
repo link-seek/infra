@@ -1,9 +1,10 @@
-name: promote-litellm-gateway
+name: deliver-promote-litellm-gateway
+# 快递手续（deliver-promote）：只办 tag 晋升手续（retag 不 rebuild），不管镜像内容，不管目标机。
 
 # 晋升线：把一个已测 digest 打不可变 tag（默认 stable）+ 改 compose pin。
 # 只办手续不复核内容：输入 digest 必须已在 registry 存在；retag 不 rebuild（测即所得）。
-# 责任链：打包保内容 → promote 保手续 → 部署保目标机实测。本线不管镜像内容，不管目标机。
-# pin 提交回 main 会触发 deploy（蓝绿 canary→切流）；同 digest 重部署无害。
+# 责任链：商家（bake）保内容 → 本线保手续 → 快递（deliver-stack）保目标机实测。
+# pin 提交回 main 会触发 deliver（蓝绿 canary→切流）；同 digest 重部署无害。
 
 on:
   workflow_dispatch:
@@ -20,7 +21,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: promote-litellm-gateway
+  group: deliver-promote-litellm-gateway
   cancel-in-progress: false
 
 env:
@@ -85,5 +86,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git diff --quiet && { echo "pin 无变化，无需提交"; exit 0; }
           git add "$F"
-          git commit -m "promote(gateway): ${{ inputs.tag }} -> ${{ inputs.digest }}（retag 不 rebuild；触发 deploy 蓝绿切流）"
+          git commit -m "promote(gateway): ${{ inputs.tag }} -> ${{ inputs.digest }}（retag 不 rebuild；触发 deliver 蓝绿切流）"
           git push

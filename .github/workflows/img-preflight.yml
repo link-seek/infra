@@ -1,8 +1,9 @@
-name: img-preflight
+name: deliver-preflight
 
 # img 预检入口：被镜像线跨仓触发（gh workflow run + 轮询），只做「部署到镜像 runner 的标签 + 启动自测」。
+# 文件名冻结为跨仓契约（docker-images bake-* 按文件名调用），只改 name 显示为 deliver-preflight。
 # 细致测试在镜像 runner 本地跑（镜像仓的步骤，直连 canary）；本线成功只代表装上且 boot 通过。
-# 内部转调 deploy-stack（复用线，action=preflight：同 env 同网络起 canary，boot 探针，停 canary 不切流）。
+# 内部转调 deliver-stack（复用线，action=preflight：同 env 同网络起 canary，boot 探针，停 canary 不切流）。
 on:
   workflow_dispatch:
     inputs:
@@ -69,12 +70,12 @@ on:
         required: false
 
 concurrency:
-  group: img-preflight-${{ inputs.node_tag }}
+  group: deliver-preflight-${{ inputs.node_tag }}
   cancel-in-progress: false
 
 jobs:
   preflight:
-    uses: ./.github/workflows/deploy-stack.yml
+    uses: ./.github/workflows/deliver-stack.yml
     with:
       node_tag: ${{ inputs.node_tag }}
       digest_or_tag: ${{ inputs.digest_or_tag }}

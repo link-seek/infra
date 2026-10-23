@@ -12,7 +12,7 @@
 ## 发版（无确认，合 PR 即发）
 
 1. 改 `compose.yml` 里 pin（tools / chrome-cjk 二选一或都改）→ 提 PR → 合。
-2. `deploy-opencode-prod` 自动跑：CI 绿门（docker-images 主分支
+2. `deliver-opencode-prod` 自动跑：CI 绿门（docker-images 主分支
    test-memory 必须 success，否则 fail-closed）→ tailnet 上机 → 备份线上
    compose → 下发 → pull → up → 验活（4097 通 + 运行中 digest == pin）。
 3. 验活失败自动回滚：恢复备份 compose + up（旧镜像留本地，不 prune）。

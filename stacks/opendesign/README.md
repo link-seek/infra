@@ -16,7 +16,7 @@
 
 ## 本 PR 边界（只收编，不切流）
 
-* `deploy-opendesign.yml` 为 `workflow_dispatch` 专属（**无 push 触发**）：合 PR 只同步校验，不上机、不 `up`、不动现网容器。
+* `deliver-opendesign.yml` 为 `workflow_dispatch` 专属（**无 push 触发**）：合 PR 只同步校验，不上机、不 `up`、不动现网容器。
 * 切流（另约窗口，`confirm=CUTOVER` 才执行）：备份旧目录 → 同步文件 → `.env` 存在性门禁 → `up -d` → verify（见下）→ 失败回滚旧目录 `up`。
 * deploy 永不 `down -v`（卷里是 OD 全量数据）。
 

@@ -31,9 +31,9 @@
 
 ## 部署
 
-* `deploy-litellm-gateway`：push main 即蓝绿部署。canary 起新容器探针（就绪 + 真 key + 假 key 透传），
+* `deliver-litellm-gateway`：push main 即蓝绿部署。canary 起新容器探针（就绪 + 真 key + 假 key 透传），
   通了才 `force-recreate` 正式容器，不通就丢弃 canary，旧容器全程在线。
-* 镜像构建 + 行为门在 `link-seek/docker-images` 仓 `docker-gateway.yml`（测试归镜像构建）。
+* 镜像构建 + 行为门在 `link-seek/docker-images` 仓 `bake-gateway.yml`（测试归镜像构建）。
   `.env` 更新走 render-dotenv（workflow 永不手写 `.env`）。
 * 黑名单增减：改 `guard/models-denied.json`（数组），保存 60 秒内生效，不用重启；
   空数组 = 全放行；文件坏掉 = 全拦（fail-closed）。

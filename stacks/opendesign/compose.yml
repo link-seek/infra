@@ -3,7 +3,7 @@ name: opendesign
 # 现网运行体：HW21 /root/opendesign/compose.yml（黑户启动，tunnel → 127.0.0.1:7456）。
 # 与现网差异（有意，见 README 对账表）：
 #   镜像 tag → digest pin；明文 key 出 compose → .env；watchtower label 摘掉（改 pin PR＋deploy）。
-# 切流另起 dispatch（deploy-opendesign.yml），合 PR 不触发，不碰生产。
+# 切流另起 dispatch（deliver-opendesign.yml），合 PR 不触发，不碰生产。
 services:
   opendesign:
     # 版本 pin（digest）：升级 = 改这行发 PR。禁止改回 :latest（watchtower 已摘，见 README）。

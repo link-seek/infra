@@ -1,4 +1,4 @@
-# stacks/opencode-prod/deploy.manifest — 部署形状声明（deploy-stack.yml 复用线读取）
+# stacks/opencode-prod/deploy.manifest — 快递形状声明（deliver-stack.yml 复用线读取）
 REMOTE_DIR=/root/stacks/opencode-prod
 ENV_CONF=env-sources.conf
 # pin 冻结：只冻 tools（chrome-cjk 无构建线，只跟 pin，不动）
