@@ -167,7 +167,9 @@ jobs:
           [ "$IP" != "NO-MATCH" ] || { echo "FAIL: 标签/主机 $TAG 在 tailnet 无匹配（tag 需后台先贴好）"; tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('self:', d.get('Self',{}).get('HostName')); [print(p.get('HostName'), p.get('Tags')) for p in d['Peer'].values()]"; exit 1; }
           echo "target $TAG -> $IP"
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
-          for f in 100.111.231.85:trial 100.85.128.116:entry; do
+          # 脆弱点已删：旧 forbid 名单（trial 下线期在线即误杀全部 deploy，见 2026-10-23 containment 开火事件）。
+          # 现只留 entry 探测（entry 是跳板机，部署流量绝不该碰它；trial 已退役，不再探测）。
+          for f in 100.85.128.116:entry; do
             ip="${f%%:*}"; label="${f##*:}"
             timeout 12 bash -c "</dev/tcp/$ip/2244" && { echo "CONTAINMENT FAIL: 摸到了 $label"; exit 1; } || echo "containment ok ($label unreachable)"
           done
