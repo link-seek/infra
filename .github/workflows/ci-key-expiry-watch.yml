@@ -1,0 +1,59 @@
+name: ci-key-expiry-watch
+
+# CI deploy key 到期提醒：短期 key 靠人脑记不住，靠 issue 记。
+# 每月 1 号查两把 key 的 expires，<6 天就开 issue 催轮换（值班人重建 + secret set）。
+# 需要 repo secret：TAILSCALE_API_RO（API token，只需 Keys:读 scope）。
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 查 key 有效期
+        env:
+          TS_API_RO: ${{ secrets.TAILSCALE_API_RO }}
+        run: |
+          set -euo pipefail
+          [ -n "${TS_API_RO:-}" ] || { echo "SKIP: TAILSCALE_API_RO 未配"; exit 0; }
+          curl -s --max-time 30 -u "$TS_API_RO:" "https://api.tailscale.com/api/v2/tailnet/-/keys" -o /tmp/keys.json
+          python3 - <<'EOF' > /tmp/report.txt
+          import json, datetime
+          d = json.load(open('/tmp/keys.json'))
+          now = datetime.datetime.now(datetime.timezone.utc)
+          for k in d.get('keys', []):
+              desc = k.get('description') or ''
+              if 'ci ' not in desc or 'deploy' not in desc:
+                  continue
+              exp = k.get('expires', '')
+              try:
+                  dt = datetime.datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                  days = (dt - now).days
+              except Exception:
+                  days = -1
+              print(f"{k['id']} | {desc} | expires={exp} | left={days}d")
+          EOF
+          cat /tmp/report.txt
+
+      - name: 快到期就开 issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          URGENT="$(awk -F'left=' '{print $2}' /tmp/report.txt | grep -oE '^[0-9]+' | awk '$1<6' | head -3)"
+          [ -z "$URGENT" ] && { echo "all keys healthy (>6d)"; exit 0; }
+          TITLE="CI deploy key 即将过期（<6天），请轮换"
+          if gh issue list --repo "$GITHUB_REPOSITORY" --search "$TITLE" --state open --json number --jq length | grep -q '^0$'; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$(cat /tmp/report.txt)
+
+轮换步骤：控制台 Keys 重建（reusable 开/ephemeral 开/对应 tag）→ \`gh secret set TAILSCALE_AUTH_KEY_TRIAL/PROD\` → 删旧 key。" | head -2
+          else
+            echo "reminder issue already open"
+          fi
