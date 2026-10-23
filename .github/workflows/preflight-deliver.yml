@@ -82,7 +82,9 @@ jobs:
           FIXED="sha256:13bff929911f56856857bbb1fbf6a690096d1fd8b95c53f8951b4bcb24515726"
           HEAD_REF="${{ github.event.pull_request.head.ref }}"
           [ -n "$HEAD_REF" ] || HEAD_REF="${{ github.ref_name }}"
-          T0="$(date +%s)"
+          # T0 回拨 300 秒：runner 本地钟与 GitHub 钟有偏差，卡太紧会把自己的 run 滤掉；
+          # 同分支取最新，旧 push 的试送不会被误认（创建时间只增不减）。
+          T0="$(( $(date +%s) - 300 ))"
           echo "T0=$T0" >> "$GITHUB_OUTPUT"
           echo "REF=$HEAD_REF" >> "$GITHUB_OUTPUT"
           HN="${{ steps.node.outputs.hostname }}"
