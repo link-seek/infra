@@ -106,13 +106,13 @@ jobs:
           # 注：gh api --jq 输出紧凑单行无空格，一律用 -r 取标量再比对，不许 glob 整段 JSON。
           for i in $(seq 1 90); do
             sleep 20
-            ST="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq -r .status)"
+            ST="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .status)"
             echo "poll$i: status=$ST"
-            [ "$ST" = "completed" ] && break
+            [ "$ST" = '"completed"' ] && break
             [ "$i" = 90 ] && { echo "FAIL: 试送 30 分钟未结束"; exit 1; }
           done
-          CONC="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq -r .conclusion)"
-          [ "$CONC" = "success" ] || { echo "FAIL: 试送结论=$CONC（见上 run 链接查明细）"; exit 1; }
+          CONC="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .conclusion)"
+          [ "$CONC" = '"success"' ] || { echo "FAIL: 试送结论=$CONC（见上 run 链接查明细）"; exit 1; }
           echo "PREFLIGHT-TRIAL-OK"
 
       - name: 焚毁临时节点
