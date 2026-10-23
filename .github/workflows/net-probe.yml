@@ -98,12 +98,19 @@ jobs:
             echo "IDLE-EXPERIMENT: 静默结束，等客户端打流"
           fi
           echo "=== post-idle evidence（idle 后状态，无条件采集）==="
-          sudo tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); ps=d.get('Peer',{}); print('peers:',len(ps)); [print(' ',p.get('HostName'),(p.get('TailscaleIPs') or ['?'])[0]) for p in list(ps.values())[:15]]"
+          sudo tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); ps=d.get('Peer',{}); print('peers:',len(ps)); [print(' ',p.get('HostName'),(p.get('TailscaleIPs') or ['?'])[0]) for p in list(ps.values())[:15]]" || echo "STATUS-DUMP-FAILED(不判死)"
           sudo tailscale netcheck --format=json > post-idle-netcheck.json 2>&1 || true
-          python3 -c "import json; d=json.load(open('post-idle-netcheck.json')); print('UDP:',d.get('UDP'),'MappingVariesByDestIP:',d.get('MappingVariesByDestIP'),'DERP_latency:',d.get('DERP_latency'),'PreferredDERP:',d.get('PreferredDERP'))"
+          python3 - <<'PYEOF' || echo "NETCHECK-PARSE-FAILED(不判死)"
+          import json
+          try:
+              d=json.load(open('post-idle-netcheck.json'))
+              print('UDP:',d.get('UDP'),'MappingVariesByDestIP:',d.get('MappingVariesByDestIP'),'DERP_latency:',d.get('DERP_latency'),'PreferredDERP:',d.get('PreferredDERP'))
+          except Exception as ex:
+              print('NETCHECK-PARSE-FAILED:',ex)
+          PYEOF
           echo "servers listening; waiting for client-done (max ~25min)"
           for i in $(seq 1 150); do
-            gh run download ${{ github.run_id }} -n client-done -R ${{ github.repository }} >/dev/null 2>&1 && { echo "CLIENT-DONE seen"; break; }
+            if gh run download ${{ github.run_id }} -n client-done -R ${{ github.repository }} >/dev/null 2>&1; then echo "CLIENT-DONE seen"; break; fi
             sleep 10
           done
           echo "server side finished"
