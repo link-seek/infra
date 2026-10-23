@@ -106,16 +106,9 @@ jobs:
           [ -n "$RUN_ID" ] || { echo "FAIL: 试送 run 没出现（30 次轮询）"; exit 1; }
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "trial run: https://github.com/link-seek/infra/actions/runs/$RUN_ID"
-          # 注：gh api --jq 取标量字符串输出裸值（无引号），直接比 completed/success；不许 glob 整段 JSON。
-          for i in $(seq 1 90); do
-            sleep 20
-            ST="$(timeout 60 gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .status 2>/dev/null || true)"
-            echo "poll$i: status=$ST"
-            [ "$ST" = completed ] && break
-            [ "$i" = 90 ] && { echo "FAIL: 试送 30 分钟未结束"; exit 1; }
-          done
-          CONC="$(timeout 60 gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .conclusion 2>/dev/null || echo '"unknown"')"
-          [ "$CONC" = success ] || { echo "FAIL: 试送结论=$CONC（见上 run 链接查明细）"; exit 1; }
+          # 注：gh run watch 自带轮询+等完+按结论退出，比手写 sleep 循环可靠（ phase-1 找单号仍需一次 list 查询）。
+          timeout 1800 gh run watch "$RUN_ID" -R link-seek/infra --interval 20 --exit-status \
+            || { echo "FAIL: 试送未过（见上 run 链接查明细）"; exit 1; }
           echo "PREFLIGHT-TRIAL-OK"
 
       - name: 焚毁临时节点
