@@ -82,13 +82,14 @@ jobs:
           FIXED="sha256:13bff929911f56856857bbb1fbf6a690096d1fd8b95c53f8951b4bcb24515726"
           HEAD_REF="${{ github.event.pull_request.head.ref }}"
           [ -n "$HEAD_REF" ] || HEAD_REF="${{ github.ref_name }}"
+          # 注：gh api 偶发挂起（无内置超时），轮询调用一律包 timeout 60，失败当轮空。
           # T0 回拨 300 秒：runner 本地钟与 GitHub 钟有偏差，卡太紧会把自己的 run 滤掉；
           # 同分支取最新，旧 push 的试送不会被误认（创建时间只增不减）。
           T0="$(( $(date +%s) - 300 ))"
           echo "T0=$T0" >> "$GITHUB_OUTPUT"
           echo "REF=$HEAD_REF" >> "$GITHUB_OUTPUT"
           HN="${{ steps.node.outputs.hostname }}"
-          gh workflow run deliver-stack.yml -R link-seek/infra --ref "$HEAD_REF" \
+          timeout 120 gh workflow run deliver-stack.yml -R link-seek/infra --ref "$HEAD_REF" \
             -f node_tag="host:$HN" \
             -f stack_dir="stacks/litellm-gateway" \
             -f digest_or_tag="$FIXED" \
@@ -98,8 +99,8 @@ jobs:
           RUN_ID=""
           for i in $(seq 1 30); do
             sleep 20
-            RUN_ID="$(gh api "repos/link-seek/infra/actions/workflows/deliver-stack.yml/runs?event=workflow_dispatch&per_page=20" \
-              --jq "[.workflow_runs[] | select(.head_branch==\"$HEAD_REF\" and ((.created_at|fromdateiso8601)>=$T0))] | sort_by(.created_at) | last | .id // empty")"
+            RUN_ID="$(timeout 60 gh api "repos/link-seek/infra/actions/workflows/deliver-stack.yml/runs?event=workflow_dispatch&per_page=20" \
+              --jq "[.workflow_runs[] | select(.head_branch==\"$HEAD_REF\" and ((.created_at|fromdateiso8601)>=$T0))] | sort_by(.created_at) | last | .id // empty" 2>/dev/null || true)"
             [ -n "$RUN_ID" ] && break
           done
           [ -n "$RUN_ID" ] || { echo "FAIL: 试送 run 没出现（30 次轮询）"; exit 1; }
@@ -108,12 +109,12 @@ jobs:
           # 注：gh api --jq 输出紧凑单行无空格，一律用 -r 取标量再比对，不许 glob 整段 JSON。
           for i in $(seq 1 90); do
             sleep 20
-            ST="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .status)"
+            ST="$(timeout 60 gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .status 2>/dev/null || true)"
             echo "poll$i: status=$ST"
             [ "$ST" = '"completed"' ] && break
             [ "$i" = 90 ] && { echo "FAIL: 试送 30 分钟未结束"; exit 1; }
           done
-          CONC="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .conclusion)"
+          CONC="$(timeout 60 gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq .conclusion 2>/dev/null || echo '"unknown"')"
           [ "$CONC" = '"success"' ] || { echo "FAIL: 试送结论=$CONC（见上 run 链接查明细）"; exit 1; }
           echo "PREFLIGHT-TRIAL-OK"
 
