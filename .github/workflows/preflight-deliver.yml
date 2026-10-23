@@ -1,0 +1,122 @@
+name: preflight-deliver
+
+# 流水线代码试送门：改快递流水线本身，必须先试送一次，绿了才准合。
+# 试送 = 固定镜像（网关 stable digest 常量，不随 PR 浮动）+ 临时 TS 节点（本 runner 现建现焚）
+#        + deliver-stack 真跑 preflight（canary 探针，不切流）→ 探针绿才算过。
+# 非流水线改动（只改 stacks/edge/docs 等）直接 SKIP，门禁照绿（避免 pending 卡死）。
+# 调用链：本 job（起节点+sshd）→ dispatch deliver-stack --ref=PR 分支（跑 PR 版流水线代码）→ 轮询结论 → 焚毁节点。
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 判定是否触及流水线代码
+        id: scope
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "match=true  # 手动触发：必跑一次试送"; echo "match=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          FILES="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "$FILES"
+          if echo "$FILES" | grep -qE '^(\.github/workflows/(deliver-|img-preflight|preflight-deliver|render-check|secret-hygiene)|scripts/)'; then
+            echo "match=true"; echo "match=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "match=false（未改流水线代码，SKIP）"; echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 起临时 TS 节点 + sshd（现建现焚）
+        if: steps.scope.outputs.match == 'true'
+        id: node
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          HN="ci-preflight-$GITHUB_RUN_ID"
+          echo "hostname=$HN" >> "$GITHUB_OUTPUT"
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配（试送门需现场 mint 临时节点）"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true}}},"expirySeconds":7200}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: 临时 key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="$HN" --accept-routes=false --accept-dns=false
+          tailscale ip -4
+          # 单次 SSH 钥匙（只活本 run；公钥进本机 root，私钥 b64 传给 deliver-stack）
+          ssh-keygen -t ed25519 -N '' -f /tmp/ci_ephem -q
+          sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
+          sudo cp /tmp/ci_ephem.pub /root/.ssh/authorized_keys && sudo chmod 600 /root/.ssh/authorized_keys
+          sudo apt-get update -qq && sudo apt-get install -y -qq openssh-server
+          sudo /usr/sbin/sshd -p 2244 -o PermitRootLogin=prohibit-password
+          sleep 2
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -p 2244 -i /tmp/ci_ephem root@127.0.0.1 'docker info >/dev/null && echo SELF-SSH-OK'
+          echo "KEYB64=$(base64 -w0 /tmp/ci_ephem)" >> "$GITHUB_OUTPUT"
+
+      - name: 试送（dispatch deliver-stack 跑 PR 版代码，preflight 不切流）
+        if: steps.scope.outputs.match == 'true'
+        id: trial
+        run: |
+          set -euo pipefail
+          # 固定镜像：网关已验证 digest 常量（只验证流水线逻辑，不验证 pin 新旧；stable 搬家时手动跟）
+          FIXED="sha256:13bff929911f56856857bbb1fbf6a690096d1fd8b95c53f8951b4bcb24515726"
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
+          [ -n "$HEAD_REF" ] || HEAD_REF="${{ github.ref_name }}"
+          T0="$(date +%s)"
+          echo "T0=$T0" >> "$GITHUB_OUTPUT"
+          echo "REF=$HEAD_REF" >> "$GITHUB_OUTPUT"
+          HN="${{ steps.node.outputs.hostname }}"
+          gh workflow run deliver-stack.yml -R link-seek/infra --ref "$HEAD_REF" \
+            -f node_tag="host:$HN" \
+            -f stack_dir="stacks/litellm-gateway" \
+            -f digest_or_tag="$FIXED" \
+            -f action="preflight" \
+            -f ssh_key_b64="${{ steps.node.outputs.KEYB64 }}"
+          echo "dispatched, waiting for run (branch=$HEAD_REF)"
+          RUN_ID=""
+          for i in $(seq 1 30); do
+            sleep 20
+            RUN_ID="$(gh api "repos/link-seek/infra/actions/workflows/deliver-stack.yml/runs?event=workflow_dispatch&per_page=20" \
+              --jq "[.workflow_runs[] | select(.head_branch==\"$HEAD_REF\" and ((.created_at|fromdateiso8601)>=$T0))] | sort_by(.created_at) | last | .id // empty")"
+            [ -n "$RUN_ID" ] && break
+          done
+          [ -n "$RUN_ID" ] || { echo "FAIL: 试送 run 没出现（30 次轮询）"; exit 1; }
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "trial run: https://github.com/link-seek/infra/actions/runs/$RUN_ID"
+          for i in $(seq 1 90); do
+            sleep 20
+            ST="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq '{status, conclusion}')"
+            echo "poll$i: $ST"
+            case "$ST" in
+              *'"status": "completed"'*) break;;
+            esac
+            [ "$i" = 90 ] && { echo "FAIL: 试送 30 分钟未结束"; exit 1; }
+          done
+          CONC="$(gh api "repos/link-seek/infra/actions/runs/$RUN_ID" --jq -r .conclusion)"
+          [ "$CONC" = "success" ] || { echo "FAIL: 试送结论=$CONC（见上 run 链接查明细）"; exit 1; }
+          echo "PREFLIGHT-TRIAL-OK"
+
+      - name: 焚毁临时节点
+        if: always() && steps.scope.outputs.match == 'true'
+        run: |
+          sudo tailscale logout || true
+          shred -u /tmp/ci_ephem /tmp/ci_ephem.pub 2>/dev/null || true
