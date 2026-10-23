@@ -29,7 +29,7 @@ on:
         type: string
         default: ""
     secrets:
-      TS_AUTHKEY:
+      TS_API_KEY:
         required: true
       SSH_KEY:
         required: false
@@ -110,18 +110,53 @@ jobs:
           echo "frozen digest: $DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
-      - name: 加网 + 解析节点（TS-only）
+      - name: 加网 + 解析节点（TS-only；API token 现场 mint，mint-only）
         id: target
         env:
-          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -z "$TSKEY" ] || echo "::add-mask::$TSKEY"
+          MINTED=""
+          if [ -n "$TSKEY" ]; then
+            MINT_BODY="{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true}}},\"expirySeconds\":21600}"
+            # 无 tag 版：tag:img 在该 tailnet 从未定义（ACL tagOwners 为空），带 tag 必 400；preauthorized 照样免审批，寻址走 host:
+            MINT_RESP="$(mktemp)"
+            MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+              -d "$MINT_BODY" \
+              https://api.tailscale.com/api/v2/tailnet/-/keys 2>/tmp/mint.err || true)"
+            if [ "$MINT_CODE" = "200" ] || [ "$MINT_CODE" = "201" ]; then
+              echo "mint-bearer: HTTP $MINT_CODE（包体已遮蔽，内含 key）"
+              MINTED="$(python3 -c "import json; print(json.load(open('$MINT_RESP')).get('key',''))" || true)"
+              [ -n "$MINTED" ] && echo "::add-mask::$MINTED"
+            else
+              echo "mint-bearer: HTTP $MINT_CODE body: $(head -c 400 "$MINT_RESP")"
+            fi
+            if [ -z "$MINTED" ]; then
+              MINT_CODE2="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -u "$TSKEY:" -H 'Content-Type: application/json' \
+                -d "$MINT_BODY" \
+                https://api.tailscale.com/api/v2/tailnet/-/keys 2>/tmp/mint.err || true)"
+              if [ "$MINT_CODE2" = "200" ] || [ "$MINT_CODE2" = "201" ]; then
+                echo "mint-basic: HTTP $MINT_CODE2（包体已遮蔽，内含 key）"
+                MINTED="$(python3 -c "import json; print(json.load(open('$MINT_RESP')).get('key',''))" || true)"
+                [ -n "$MINTED" ] && echo "::add-mask::$MINTED"
+              else
+                echo "mint-basic: HTTP $MINT_CODE2 body: $(head -c 400 "$MINT_RESP")"
+              fi
+            fi
+            rm -f "$MINT_RESP"
+          fi
+          if [ -n "$MINTED" ]; then
+            echo "ephemeral key minted（无 tag + preauthorized，有效期 21600s）"
+            timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-deploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false \
+              || { echo "TS-UP-FAILED"; sudo tailscale status 2>&1 | head -n 5; exit 1; }
+          else
+            echo "FAIL: 现场 mint 未成功（无 TS_API_KEY 或 Bearer/Basic 双试皆拒，见上）；本线 mint-only，不回退任何直连 key（含已退役的 TAILSCALE_AUTH_KEY_PROD）"
+            exit 1
+          fi
           set -x
-          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
-          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-deploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false \
-            || { echo "TS-UP-FAILED"; sudo tailscale status 2>&1 | head -n 5; exit 1; }
           TAG="${{ inputs.node_tag }}"
           if [[ "$TAG" == host:* ]]; then
             HN="${TAG#host:}"; IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=[p['TailscaleIPs'][0] for p in ps.values() if p.get('HostName')=='$HN']; print(ms[0] if ms else 'NO-MATCH')")"

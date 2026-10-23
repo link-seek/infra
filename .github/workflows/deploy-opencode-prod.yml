@@ -31,7 +31,7 @@ jobs:
       stack_dir: stacks/opencode-prod
       action: ${{ inputs.action || 'up' }}
     secrets:
-      TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
       SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
       SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}

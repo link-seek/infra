@@ -39,7 +39,7 @@ on:
         type: string
         default: ""
     secrets:
-      TAILSCALE_AUTH_KEY_PROD:
+      TS_API_KEY:
         required: true
       SSH_KEY:
         required: false
@@ -82,7 +82,7 @@ jobs:
       action: preflight
       ssh_key_b64: ${{ inputs.ssh_key_b64 }}
     secrets:
-      TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
       SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
       SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
