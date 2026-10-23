@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy-remote-core.sh — 部署厚脚本（deploy-stack.yml 与 img-preflight.yml 共用，唯一真相）。
+# deliver-remote-core.sh — 快递厚脚本（deliver-stack.yml 与 img-preflight.yml 共用，唯一真相）。
 # 输入全走环境变量；MODE=up 走完切流，MODE=preflight 只到探针（img 场景，完事调用方自行丢 canary 或随 runner 消失）。
 # 必需：STACK_DIR TARGET_IP SSH_KEY_FILE SSH_PORT ACTION_MODE(up/down/preflight)
 # 可选：CANDIDATE_DIGEST（digest 门禁已在外层冻好；为空则只读 compose 现有 pin，不改）

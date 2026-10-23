@@ -1,4 +1,4 @@
-# stacks/litellm-gateway/deploy.manifest — 部署形状声明（deploy-stack.yml 复用线读取）
+# stacks/litellm-gateway/deploy.manifest — 快递形状声明（deliver-stack.yml 复用线读取）
 REMOTE_DIR=/root/stacks/litellm-gateway
 ENV_CONF=env-sources.conf
 # pin 冻结：compose 里这些 repo 的 @sha256 会被候选 digest 替换

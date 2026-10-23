@@ -1,4 +1,5 @@
-name: deploy-cloudflared
+name: deliver-cloudflared
+# 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
 # 隧道即代码：edge/cloudflared/** 进 main 即上机（备份→只换 ingress 段→restart→验证→失败回滚）。
 # 合 PR 即闪断窗口（cloudflared restart 时隧道内两个现网域名闪断十几秒），挑空闲时间合。
@@ -11,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-cloudflared
+  group: deliver-cloudflared
   cancel-in-progress: false
 
 jobs:

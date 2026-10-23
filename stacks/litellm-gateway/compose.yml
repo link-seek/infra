@@ -6,7 +6,7 @@ services:
     # 2026-10-15：沿用 guard-rules e2e 已验证的上游 digest；切流 PR 用线上 docker inspect 对账。
     # 2026-10-20：da89b6（custom_auth 官方键名修 + internal_user 小写枚举修 + 空 key 放行对齐上游；
     # 2026-10-20：3c7cbc3（空 key 放行重 bake：行为门 nokey/newmaster/validkey/randkey 全 200 已验）。
-    # 行为门已验：认证矩阵/真透传/等价性/master 轮换）。来源：link-seek/docker-images docker-gateway.yml。
+    # 行为门已验：认证矩阵/真透传/等价性/master 轮换）。来源：link-seek/docker-images bake-gateway.yml。
     image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:13bff929911f56856857bbb1fbf6a690096d1fd8b95c53f8951b4bcb24515726
     pull_policy: always
     container_name: litellm-guard

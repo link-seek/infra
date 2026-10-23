@@ -1,6 +1,7 @@
-name: deploy-stack
+name: deliver-stack
+# 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
-# 复用部署线：唯一会动目标机的线。调用方=各栈薄调用 / img-preflight / 人类 dispatch。
+# 复用快递线：唯一会动目标机的线。调用方=各栈薄调用 / img-preflight / 人类 dispatch。
 # 输入只有：节点标签、digest-or-tag（默认 stable，进门即冻结为 digest）、栈目录、up/down/preflight。
 # action=preflight 只到探针（img 场景，canary 留给调用方处置）；up 的探针级别看栈 manifest 的 UP_PROBE_LEVEL。
 # TS-only：远端一律经 Tailscale SSH；无 local 执行器、无 role、无 bypass、无审批、无 teardown。
@@ -89,7 +90,7 @@ on:
         default: ""
 
 concurrency:
-  group: deploy-stack-${{ inputs.stack_dir }}-${{ inputs.node_tag }}
+  group: deliver-stack-${{ inputs.stack_dir }}-${{ inputs.node_tag }}
   cancel-in-progress: false
 
 jobs:
@@ -236,4 +237,4 @@ jobs:
             SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2244 ACTION_MODE="${{ inputs.action }}" \
             CANDIDATE_DIGEST="${{ steps.gate.outputs.digest }}" \
             SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" \
-            bash scripts/deploy-remote-core.sh
+            bash scripts/deliver-remote-core.sh

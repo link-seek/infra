@@ -99,7 +99,7 @@ jobs:
             CODE="$(curl -s -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:7457/ || echo 000)"
             echo "boot-probe#$i -> $CODE"
             # 存活即过：GHCR 重构建版 / 回 200（UI），线上 SWR 版回 401（认证门）——构建不同行为不同；
-            # 部署物（SWR）的 401 语义由 deploy-opendesign 在线上验。此处只证明 compose/env/启动链全通。
+            # 部署物（SWR）的 401 语义由 deliver-opendesign 在线上验。此处只证明 compose/env/启动链全通。
             case "$CODE" in 200|401|403|404) PASS=1; break;; esac
             sleep 10
           done

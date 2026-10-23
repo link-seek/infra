@@ -6,10 +6,10 @@ name: render-check
 
 on:
   pull_request:
-    paths: ['stacks/**', 'scripts/render-dotenv.sh', '.github/workflows/deploy-opencode-*.yml', '.github/workflows/cutover-*.yml', '.github/workflows/render-check.yml']
+    paths: ['stacks/**', 'scripts/render-dotenv.sh', '.github/workflows/deliver-opencode-*.yml', '.github/workflows/cutover-*.yml', '.github/workflows/render-check.yml']
   push:
     branches: [main]
-    paths: ['stacks/**', 'scripts/render-dotenv.sh', '.github/workflows/deploy-opencode-*.yml', '.github/workflows/cutover-*.yml']
+    paths: ['stacks/**', 'scripts/render-dotenv.sh', '.github/workflows/deliver-opencode-*.yml', '.github/workflows/cutover-*.yml']
 
 jobs:
   check:
@@ -28,13 +28,13 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          # 约定：map 里 KEY=secret:SUFFIX 要求两处同改——deploy-stack.yml 的 secrets: 声明 SUFFIX，
-          # 对应薄调用（deploy-<name>.yml）透传 SUFFIX: ${{ secrets.… }}。只核键名，不碰值。
-          for pair in "stacks/opencode-prod/env-sources.conf:.github/workflows/deploy-opencode-prod.yml" "stacks/litellm-gateway/env-sources.conf:.github/workflows/deploy-litellm-gateway.yml"; do
+          # 约定：map 里 KEY=secret:SUFFIX 要求两处同改——deliver-stack.yml 的 secrets: 声明 SUFFIX，
+          # 对应薄调用（deliver-<name>.yml）透传 SUFFIX: ${{ secrets.… }}。只核键名，不碰值。
+          for pair in "stacks/opencode-prod/env-sources.conf:.github/workflows/deliver-opencode-prod.yml" "stacks/litellm-gateway/env-sources.conf:.github/workflows/deliver-litellm-gateway.yml"; do
             map="${pair%%:*}"; caller="${pair##*:}"
             suffixes="$(grep -oP '^[^#\s=]+=secret:\K[A-Z_0-9]+' "$map" | sort -u || true)"
             for s in $suffixes; do
-              grep -q "^      $s:" .github/workflows/deploy-stack.yml || { echo "EXPORT_MISSING: deploy-stack.yml 的 secrets: 缺 $s（map $map 要它）"; fail=1; }
+              grep -q "^      $s:" .github/workflows/deliver-stack.yml || { echo "EXPORT_MISSING: deliver-stack.yml 的 secrets: 缺 $s（map $map 要它）"; fail=1; }
               grep -q "^      $s:" "$caller" || { echo "EXPORT_MISSING: $caller 缺 $s: 透传（map $map 要它）"; fail=1; }
             done
           done
