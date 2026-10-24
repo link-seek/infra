@@ -14,6 +14,10 @@ if ! docker network inspect litellm-guard_default >/dev/null 2>&1; then
     --label com.docker.compose.project=litellm-gateway \
     litellm-guard_default
 fi
+# 干净机适配：compose 绑了生产机才有的 172.19.0.1（172.17.0.1 是 docker0 自带）。
+# 靶机上没有就给 lo 补一个 /32（生产机自带，走 grep 直接跳过；只影响本机绑端口，不碰容器网段）。
+# 不改 compose 文件本身：测的就是要发的那份（试送保真）。
+ip addr show | grep -qw 172.19.0.1 || ip addr add 172.19.0.1/32 dev lo
 NEW_IMG="$(grep -E 'image:[[:space:]]*[^[:space:]]+@sha256:[0-9a-f]+' compose.yml | head -1 | sed 's/.*image: *//')"
 [ -n "$NEW_IMG" ] || { echo "FAIL: compose 里找不到 digest pin 的 image 行（schema 门应已拦下）"; exit 1; }
 echo "canary image: $NEW_IMG (want $CANDIDATE_DIGEST)"
