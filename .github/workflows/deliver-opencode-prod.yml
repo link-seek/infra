@@ -1,15 +1,8 @@
 name: deliver-opencode-prod
 # 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
-# 薄调用：opencode 栈部署 = 复用线 + prod 标签 + stable。日常改 pin 即 push compose.yml。
+# 薄调用：opencode 栈部署 = 复用线 + prod 标签 + stable。只手动 dispatch（合 pin 不自动发）。
 on:
-  push:
-    branches: [main]
-    paths:
-      - stacks/opencode-prod/compose.yml
-      - stacks/opencode-prod/env-sources.conf
-      - stacks/opencode-prod/canary-*.sh
-      - stacks/opencode-prod/deploy.manifest
   workflow_dispatch:
     inputs:
       digest_or_tag:

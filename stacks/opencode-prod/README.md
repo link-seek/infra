@@ -9,15 +9,15 @@
 里根本没写 pin——每次 up 拉什么全凭 registry 当时指向谁。**无审计、无回退**。
 本目录终结它：两个镜像 digest pin 死在 compose 里，版本 = git 历史。
 
-## 发版（无确认，合 PR 即发）
+## 发版（只手动 dispatch，合 PR 不自动发）
 
 1. 改 `compose.yml` 里 pin（tools / chrome-cjk 二选一或都改）→ 提 PR → 合。
-2. `deliver-opencode-prod` 自动跑：CI 绿门（docker-images 主分支
+2. Actions 里手动点 `deliver-opencode-prod` 跑：CI 绿门（docker-images 主分支
    test-memory 必须 success，否则 fail-closed）→ tailnet 上机 → 备份线上
    compose → 下发 → pull → up → 验活（4097 通 + 运行中 digest == pin）。
 3. 验活失败自动回滚：恢复备份 compose + up（旧镜像留本地，不 prune）。
 
-回退 = revert 上次 pin 的 PR → 合 → 自动重发上一版。`git log -- compose.yml`
+回退 = revert 上次 pin 的 PR → 合 → 手动再发一次。`git log -- compose.yml`
 即全部发版审计。
 
 ## 首次灰度（一次性，从旧 Alpine 迁 glibc 2.0.29）

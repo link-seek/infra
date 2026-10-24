@@ -2,12 +2,9 @@ name: deliver-caddy
 # 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
 # Caddy 配置变更 → 自动部署到入口机，全程留痕。
-# 触发：edge/caddy/** 在 main 上变化，或手动 workflow_dispatch。
+# 触发：只手动 workflow_dispatch（改仓不自动发；生产变更永远人手点火）。
 
 on:
-  push:
-    branches: [main]
-    paths: ['edge/caddy/**']
   workflow_dispatch:
 
 concurrency:

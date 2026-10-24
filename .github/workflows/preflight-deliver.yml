@@ -2,7 +2,8 @@ name: preflight-deliver
 
 # 流水线代码试送门：改快递流水线本身，必须先试送一次，绿了才准合。
 # 试送 = 固定镜像（网关 stable digest 常量，不随 PR 浮动）+ 临时 TS 节点（本 runner 现建现焚）
-#        + deliver-stack 真跑 preflight（canary 探针，不切流）→ 探针绿才算过。
+#        + deliver-stack 真跑全量 up（canary 探针→切流→丢 canary，节点随 runner 焚毁，零生产影响）→ 全绿才算过。
+# 不用 preflight 档：安全来自靶子用完即焚，不来自代码分支；全量才能验到切流段。
 # 非流水线改动（只改 stacks/edge/docs 等）直接 SKIP，门禁照绿（避免 pending 卡死）。
 # 调用链：本 job（起节点+sshd）→ dispatch deliver-stack --ref=PR 分支（跑 PR 版流水线代码）→ 轮询结论 → 焚毁节点。
 
@@ -73,7 +74,7 @@ jobs:
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no -p 2244 -i /tmp/ci_ephem root@127.0.0.1 'docker info >/dev/null && echo SELF-SSH-OK'
           echo "KEYB64=$(base64 -w0 /tmp/ci_ephem)" >> "$GITHUB_OUTPUT"
 
-      - name: 试送（dispatch deliver-stack 跑 PR 版代码，preflight 不切流）
+      - name: 试送（dispatch deliver-stack 跑 PR 版代码，全量 up，靶子随节点焚毁）
         if: steps.scope.outputs.match == 'true'
         id: trial
         run: |
@@ -93,7 +94,7 @@ jobs:
             -f node_tag="host:$HN" \
             -f stack_dir="stacks/litellm-gateway" \
             -f digest_or_tag="$FIXED" \
-            -f action="preflight" \
+            -f action="up" \
             -f ssh_key_b64="${{ steps.node.outputs.KEYB64 }}"
           echo "dispatched, waiting for run (branch=$HEAD_REF)"
           RUN_ID=""

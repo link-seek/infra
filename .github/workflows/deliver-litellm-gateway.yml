@@ -1,19 +1,8 @@
 name: deliver-litellm-gateway
 # 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
-# 薄调用：网关栈部署 = 复用线 + prod 标签 + stable。日常改 pin 即 push compose.yml。
+# 薄调用：网关栈部署 = 复用线 + prod 标签 + stable。只手动 dispatch（合 pin 不自动发）。
 on:
-  push:
-    branches: [main]
-    paths:
-      - stacks/litellm-gateway/compose.yml
-      - stacks/litellm-gateway/config/**
-      - stacks/litellm-gateway/guard/vault_guard.py
-      - stacks/litellm-gateway/guard/models-denied.json
-      - stacks/litellm-gateway/guard/rules.json
-      - stacks/litellm-gateway/env-sources.conf
-      - stacks/litellm-gateway/canary-*.sh
-      - stacks/litellm-gateway/deploy.manifest
   workflow_dispatch:
     inputs:
       digest_or_tag:
