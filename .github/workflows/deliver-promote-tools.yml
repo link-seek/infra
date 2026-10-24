@@ -4,7 +4,7 @@ name: deliver-promote-tools
 # 晋升线：把一个已测 tools digest 打不可变 tag（默认 stable）+ 改 compose pin。
 # 只办手续不复核内容：输入 digest 必须已在 registry 存在；retag 不 rebuild（测即所得）。
 # tools 双 registry（ghcr.io/link-seek/opencode-tools 与 SWR linkseed）：两边都打 tag。
-# pin 提交回 main 会触发 deliver（蓝绿 canary→切流）；同 digest 重部署无害。
+# pin 提交回 main 只改单子不发货；发生产请手动 dispatch 对应 deliver（蓝绿 canary→切流）。
 
 on:
   workflow_dispatch:
