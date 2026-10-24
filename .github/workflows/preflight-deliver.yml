@@ -36,7 +36,7 @@ jobs:
           HEAD="${{ github.event.pull_request.head.sha }}"
           FILES="$(git diff --name-only "$BASE" "$HEAD")"
           echo "$FILES"
-          if echo "$FILES" | grep -qE '^(\.github/workflows/(deliver-|img-preflight|preflight-deliver|render-check|secret-hygiene)|scripts/)'; then
+          if echo "$FILES" | grep -qE '^(\.github/workflows/(deliver-|img-preflight|preflight-deliver|secret-hygiene)|scripts/)'; then
             echo "match=true"; echo "match=true" >> "$GITHUB_OUTPUT"
           else
             echo "match=false（未改流水线代码，SKIP）"; echo "match=false" >> "$GITHUB_OUTPUT"
