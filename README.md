@@ -6,7 +6,9 @@
 1. 按系统/节点分目录存放，每次变更只动自己的目录。
 2. 真值（IP、主机名、端口、DNS 内容）直接进 git，commit diff 即审计底账；
    真钥匙（Tailscale/SSH/Cloudflare）一律进 org secrets，永不进仓。
-3. 部署只从 `main` 分支触发（PR 合并），回滚 = revert 对应目录。
+3. 生产部署永远手动点火：改仓（合 PR、改配置、改流水线）不触发任何部署；
+   发货 = 人手动 dispatch 对应 `deliver-*`（digest/tag 可选，默认 stable）。
+   回滚 = revert 对应目录 + 手动再发一次。
 
 ## 目录
 
@@ -28,12 +30,17 @@ stacks/<system>/          # 各系统 topology 级引用，不搬业务仓代码
 - **门（`secret-hygiene` / `render-check` 等）只验货**：核密钥卫生与键集合，不碰值。
 - 命名：`bake-*` = 烘焙镜像，`deliver-*` = 送达目标机，`deliver-promote-*` = 只办 tag 晋升手续（retag 不 rebuild）。`img-preflight.yml` 文件名冻结为跨仓契约（bake 线按文件名调用），显示名是 `deliver-preflight`。
 
-## 部署（快递线）
+## 部署（快递线：全部手动 dispatch，改仓不自动发）
 
-| workflow | 触发 | 动作 |
+| workflow | 手动点火 | 动作 |
 |---|---|---|
-| `deliver-caddy.yml` | `edge/caddy/**` 变 + `main` | ephemeral runner → tailnet → 目标节点 reload + 验证 |
-| `dns-apply.yml` | 手动（`workflow_dispatch`） | 按 `records.yaml` 对账 Cloudflare（二期启用） |
+| `deliver-litellm-gateway.yml` | Actions → deliver-litellm-gateway → Run（digest 默认 stable） | 蓝绿：canary 探针绿才切流 |
+| `deliver-opencode-prod.yml` | Actions → deliver-opencode-prod → Run（digest 默认 stable） | 蓝绿 + 失败自动回滚（旧镜像留本地） |
+| `deliver-opendesign.yml` | 同上，输入 `CUTOVER` 才执行 | 切流 OD |
+| `deliver-caddy.yml` | 同上 | ephemeral runner → tailnet → 目标节点 reload + 验证 |
+| `deliver-cloudflared.yml` | 同上（挑空闲时间，有十几秒闪断） | 备份 → 只换 ingress 段 → restart → 验证，失败回滚 |
+| `dns-apply.yml` | 同上（默认 dry-run 只打印） | 按 `records.yaml` 对账 Cloudflare（二期启用） |
+| `deliver-promote-*.yml` | 同上（输已测 digest） | 只打 tag + 回写 pin，不发货；发生产再手动点上面对应项 |
 
 ## 规整专项
 

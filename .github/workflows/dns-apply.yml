@@ -3,12 +3,6 @@ name: dns-apply（DNS 声明对账）
 # records.json 是唯一真相源：只动声明过的记录，未列出的不动；
 # 删记录必须 state=absent 且内容比对一致。密钥只用仓级 CLOUDFLARE_API_TOKEN。
 on:
-  push:
-    branches: [main]
-    paths:
-      - dns/records.json
-      - scripts/cf-dns-apply.py
-      - .github/workflows/dns-apply.yml
   workflow_dispatch:
     inputs:
       dry_run:
