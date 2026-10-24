@@ -1,0 +1,151 @@
+name: schema-stacks
+
+# 全栈运单门（快递侧验货，只查形状不查行为）：每个 stacks/<name>/ 发货前核单子。
+# 验：镜像全 digest pin＋禁 latest、无明文 key（全 ${VAR} 引用）、watchtower 禁止、
+# 数据连续性（卷/网络名精确匹配，改名=丢数据）、manifest 探针级别合法、compose 可渲染。
+# 不验：digest 在 registry 真存在（发货时 freeze-digest fail-closed 管）、行为对错（商家 e2e 管）、真值（hygiene 管）。
+# 无 paths 过滤：静态秒级门，每 PR 必跑（带过滤会导致没命中的 PR 在必需门禁上永久 pending）。
+# 产品行为测试归商家 bake（见 docker-images#37），快递侧不设行为门。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 运单校验（pin＋明文＋连续性＋manifest＋渲染）
+        run: |
+          python3 - <<'EOF'
+          import re, sys, subprocess, os
+
+          # 栈声明：改运单必须同步改这里（显式允许集，防静默改名丢数据）。
+          STACKS = {
+              "stacks/opendesign": {
+                  "project": "opendesign",
+                  "volumes": {"od-data": "opendesign_od-data"},
+                  "networks": {},
+                  "manifest": False,
+                  "env_example_keys": ("OD_API_TOKEN=", "OD_ALLOWED_ORIGINS=",
+                                       "OD_ALLOWED_INTERNAL_HOSTS="),
+              },
+              "stacks/litellm-gateway": {
+                  "project": "litellm-gateway",
+                  "volumes": {},
+                  "networks": {"gw-net": "litellm-guard_default"},
+                  "manifest": True,
+                  "env_example_keys": (),
+              },
+              "stacks/opencode-prod": {
+                  "project": "opencode-prod",
+                  "volumes": {"prod-data": None, "prod-work": None},
+                  "networks": {"opencode-net": None},
+                  "manifest": True,
+                  "env_example_keys": (),
+              },
+          }
+          SECRET_PAT = re.compile(
+              r"^[\s\-]*[A-Z_0-9]*(KEY|TOKEN|SECRET|PASSWD|PASSWORD)[A-Z_0-9_]*\s*[:=]\s*(\S)", re.M)
+          # 注：不能写成 [:：]\s*(?!\$)——\s* 回溯后恒能匹配，判死失效。必须先吃掉一个非空字符再看是不是 $。
+          TRUEVAL_PAT = (r"sk-[A-Za-z0-9\-_]{16,}", r"ghp_[A-Za-z0-9]+",
+                         r"github_pat_[A-Za-z0-9_]+", r"tskey-[A-Za-z0-9_\-]+",
+                         r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+
+          bad = 0
+          def fail(msg):
+              global bad
+              print(f"FAIL: {msg}"); bad += 1
+
+          def top_block(comp, kind):
+              m = re.search(rf"(?m)^{kind}:\s*\n((?:[ \t]+.*\n?)*)", comp)
+              return m.group(1) if m else ""
+
+          for s, want in STACKS.items():
+              comp = open(f"{s}/compose.yml").read()
+              # 去注释后再查（注释里提及不算）
+              code = re.sub(r"(?m)^\s*#.*$", "", comp)
+
+              # 1. project 名（默认卷/网名前缀由此来，改名=换卷）
+              m = re.search(r"(?m)^name:\s*(\S+)", comp)
+              if not m or m.group(1) != want["project"]:
+                  fail(f"{s}: 顶级 name 必须是 {want['project']}")
+              else:
+                  print(f"OK {s}: project={want['project']}")
+
+              # 2. 镜像全 digest pin，禁 latest
+              imgs = re.findall(r"(?m)^\s*image:\s*(\S+)", comp)
+              if not imgs:
+                  fail(f"{s}: 没找到 image 行")
+              for img in imgs:
+                  if "@sha256:" not in img:
+                      fail(f"{s}: {img} 不是 digest pin")
+                  if re.search(r":latest(@|$|\s)", img):
+                      fail(f"{s}: {img} 用了 latest")
+
+              # 3. 无明文 key（KEY/TOKEN/SECRET/PASS 类赋值必须 ${VAR} 引用）
+              for line in code.splitlines():
+                  mm = SECRET_PAT.match(line)
+                  if mm and not mm.group(2).startswith("$"):
+                      fail(f"{s}: 明文 key 赋值：{line.strip()[:80]}")
+
+              # 4. watchtower 禁止
+              if "watchtower" in code.lower():
+                  fail(f"{s}: watchtower 未摘")
+
+              # 5. 卷/网络连续性（精确匹配，增删改名都要同步改本门）
+              for kind in ("volumes", "networks"):
+                  blk = top_block(comp, kind)
+                  keys = re.findall(r"(?m)^  ([A-Za-z_][A-Za-z0-9_.\-]*):", blk)
+                  want_map = want[kind]
+                  if set(keys) != set(want_map):
+                      fail(f"{s}: {kind} 必须恰为 {sorted(want_map)}，实际 {keys}（改名=丢数据/断连，先改本门再合）")
+                  for k, v in want_map.items():
+                      if v is not None and f"name: {v}" not in blk:
+                          fail(f"{s}: {kind}.{k} 必须显式 name: {v}")
+
+              # 6. manifest 探针级别（有 manifest 的栈）
+              if want["manifest"]:
+                  try:
+                      mf = open(f"{s}/deploy.manifest").read()
+                  except FileNotFoundError:
+                      fail(f"{s}: 缺 deploy.manifest"); mf = ""
+                  m2 = re.search(r'(?m)^UP_PROBE_LEVEL="(\w+)"', mf)
+                  if not m2 or m2.group(1) not in ("boot", "full"):
+                      fail(f"{s}: UP_PROBE_LEVEL 只能是 boot/full")
+                  else:
+                      print(f"OK {s}: UP_PROBE_LEVEL={m2.group(1)}")
+
+              # 7. .env.example 键齐且无真值模式
+              try:
+                  env = open(f"{s}/.env.example").read()
+              except FileNotFoundError:
+                  fail(f"{s}: 缺 .env.example"); env = ""
+              for k in want["env_example_keys"]:
+                  if k not in env:
+                      fail(f"{s}: .env.example 缺 {k}")
+              for pat in TRUEVAL_PAT:
+                  if re.search(pat, env):
+                      fail(f"{s}: .env.example 命中真值模式 {pat}")
+
+              # 8. compose 可渲染（dummy env，只渲染不启动不拉镜像）
+              vs = sorted(set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)", comp)))
+              d = f"/tmp/schematest/{os.path.basename(s)}"
+              os.makedirs(d, exist_ok=True)
+              open(f"{d}/compose.yml", "w").write(comp)
+              open(f"{d}/.env", "w").write("".join(f"{v}=dummy\n" for v in vs))
+              r = subprocess.run(["docker", "compose", "-f", f"{d}/compose.yml",
+                                  "--env-file", f"{d}/.env", "config"],
+                                 capture_output=True, text=True)
+              if r.returncode != 0:
+                  fail(f"{s}: compose 渲染失败：{r.stderr.strip()[:200]}")
+              else:
+                  print(f"OK {s}: 渲染通过")
+
+          sys.exit(1 if bad else 0)
+          EOF
