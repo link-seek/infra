@@ -30,6 +30,10 @@ on:
         required: false
         type: string
         default: ""
+      ssh_transport:
+        required: false
+        type: string
+        default: key   # key | tailscale。过渡期默认 key（2244 + 私钥），验完切 tailscale 再删 key。
     secrets:
       TS_API_KEY:
         required: true
@@ -89,6 +93,14 @@ on:
         description: "临时 SSH 私钥（base64，img 等临机场景；留空则用仓库 SSH_KEY）"
         required: false
         default: ""
+      ssh_transport:
+        description: "key（2244+私钥）或 tailscale（TS SSH 22）"
+        required: false
+        default: key
+        type: choice
+        options:
+          - key
+          - tailscale
 
 concurrency:
   group: deliver-stack-${{ inputs.stack_dir }}-${{ inputs.node_tag }}
@@ -123,8 +135,8 @@ jobs:
           [ -z "$TSKEY" ] || echo "::add-mask::$TSKEY"
           MINTED=""
           if [ -n "$TSKEY" ]; then
-            MINT_BODY="{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true}}},\"expirySeconds\":21600}"
-            # 无 tag 版：tag:img 在该 tailnet 从未定义（ACL tagOwners 为空），带 tag 必 400；preauthorized 照样免审批，寻址走 host:
+            MINT_BODY="{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"tag:ci\"]}}},\"expirySeconds\":21600}"
+            # tag:ci 必须在 ACL tagOwners 里先定义（PR #90）；加上后节点身份=taged，不再是 autogroup:member。
             MINT_RESP="$(mktemp)"
             MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
               -d "$MINT_BODY" \
@@ -221,21 +233,29 @@ jobs:
         run: |
           set -euo pipefail
           set -x
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          if [ -n "$SSH_KEY_B64" ]; then printf '%s' "$SSH_KEY_B64" | base64 -d > ~/.ssh/ci_key;
-          else printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key; fi
-          [ -s ~/.ssh/ci_key ] || { echo "SSH key missing (SSH_KEY secret 与 ssh_key_b64 输入都空)"; exit 1; }
-          chmod 600 ~/.ssh/ci_key
-          # keyscan 失败必须大声死：旧写法 2>/dev/null + set -e 会在 5 秒内零输出退出（preflight-39712410423 教训）
-          # 判死放宽到约 3 分钟：Tailscale 官方称新 peer 首次连通要等（eventual consistency），15 秒判死太急
-          for i in $(seq 1 12); do
-            ssh-keyscan -p 2244 -H "${{ steps.target.outputs.ip }}" >> ~/.ssh/known_hosts 2>/tmp/keyscan.err && break
-            echo "keyscan 第 $i 次失败："; head -c 500 /tmp/keyscan.err; echo
-            [ "$i" = 12 ] && { echo "FAIL: keyscan 12 次（约 3 分钟）连不上 ${{ steps.target.outputs.ip }}:2244（sshd 未起或网络不通）"; exit 1; }
-            sleep 15
-          done
+          TRANSPORT="${{ inputs.ssh_transport }}"
+          if [ "$TRANSPORT" = "tailscale" ]; then
+            # TS SSH：身份=tag:ci，目标侧 tailscaled 接管 22；不需要私钥、不需要 known_hosts、不支持 scp
+            echo "transport: tailscale ssh（无 key、无 2244）"
+            tailscale status --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print("self tags:",d["Self"].get("Tags"))'
+          else
+            mkdir -p ~/.ssh && chmod 700 ~/.ssh
+            if [ -n "$SSH_KEY_B64" ]; then printf '%s' "$SSH_KEY_B64" | base64 -d > ~/.ssh/ci_key;
+            else printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key; fi
+            [ -s ~/.ssh/ci_key ] || { echo "SSH key missing (SSH_KEY secret 与 ssh_key_b64 输入都空)"; exit 1; }
+            chmod 600 ~/.ssh/ci_key
+            # keyscan 失败必须大声死：旧写法 2>/dev/null + set -e 会在 5 秒内零输出退出（preflight-39712410423 教训）
+            # 判死放宽到约 3 分钟：Tailscale 官方称新 peer 首次连通要等（eventual consistency），15 秒判死太急
+            for i in $(seq 1 12); do
+              ssh-keyscan -p 2244 -H "${{ steps.target.outputs.ip }}" >> ~/.ssh/known_hosts 2>/tmp/keyscan.err && break
+              echo "keyscan 第 $i 次失败："; head -c 500 /tmp/keyscan.err; echo
+              [ "$i" = 12 ] && { echo "FAIL: keyscan 12 次（约 3 分钟）连不上 ${{ steps.target.outputs.ip }}:2244（sshd 未起或网络不通）"; exit 1; }
+              sleep 15
+            done
+          fi
           STACK_DIR="${{ inputs.stack_dir }}" TARGET_IP="${{ steps.target.outputs.ip }}" \
-            SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2244 ACTION_MODE="${{ inputs.action }}" \
+            SSH_KEY_FILE="$HOME/.ssh/ci_key" SSH_PORT=2244 SSH_TRANSPORT="$TRANSPORT" \
+            ACTION_MODE="${{ inputs.action }}" \
             CANDIDATE_DIGEST="${{ steps.gate.outputs.digest }}" \
             SWR_USER="${SWR_USER:-}" SWR_PASS="${SWR_PASS:-}" \
             bash scripts/deliver-remote-core.sh

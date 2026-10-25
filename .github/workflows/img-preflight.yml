@@ -24,6 +24,14 @@ on:
         description: "镜像 runner 现生成的单次 SSH 私钥（base64，仅本 run 有效；留空则用仓库 SSH_KEY）"
         required: false
         default: ""
+      ssh_transport:
+        description: "key 或 tailscale（过渡期默认 key）"
+        required: false
+        default: key
+        type: choice
+        options:
+          - key
+          - tailscale
   workflow_call:
     inputs:
       digest_or_tag:
@@ -39,6 +47,10 @@ on:
         required: false
         type: string
         default: ""
+      ssh_transport:
+        required: false
+        type: string
+        default: key
     secrets:
       TS_API_KEY:
         required: true
@@ -82,6 +94,7 @@ jobs:
       stack_dir: ${{ inputs.stack_dir }}
       action: preflight
       ssh_key_b64: ${{ inputs.ssh_key_b64 }}
+      ssh_transport: ${{ inputs.ssh_transport }}
     secrets:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
