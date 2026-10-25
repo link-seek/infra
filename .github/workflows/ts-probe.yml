@@ -1,9 +1,7 @@
 name: ts-probe
 
-# 一次性探针（用完即删）：在 runner 上验证三件事，全部结果只在本 run 日志。
-# 1. 组织级 TS_API_KEY 能否读 ACL（acl:read 能力）
-# 2. 设备/tag 现状（顺便数僵尸节点）
-# 3. CI 身份（untagged ephemeral）能否直接用 tailscale ssh 登目标机
+# 一次性探针（用完即删）。
+# 测：CI 身份能否 tailscale ssh 进目标机，untagged（=member）与带 tag 两种身份对照。
 
 on:
   workflow_dispatch:
@@ -14,85 +12,58 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: ACL 可读性 + 导出
-        env:
-          TSKEY: ${{ secrets.TS_API_KEY }}
-        run: |
-          set -uo pipefail
-          echo "::add-mask::$TSKEY"
-          CODE="$(curl -sS -m 30 -o /tmp/acl.json -w '%{http_code}' \
-            -u "$TSKEY:" "https://api.tailscale.com/api/v2/tailnet/-/acl" || echo 000)"
-          echo "ACL HTTP: $CODE"
-          if [ "$CODE" = "200" ]; then
-            echo "=== ACL BEGIN ==="
-            cat /tmp/acl.json
-            echo ""
-            echo "=== ACL END ==="
-          else
-            echo "ACL body: $(head -c 300 /tmp/acl.json 2>/dev/null)"
-          fi
+      - name: 安装 tailscale
+        run: curl -fsSL https://tailscale.com/install.sh | sh
 
-      - name: 设备与 tag 现状
+      - name: A. untagged 身份（= autogroup:member）
         env:
           TSKEY: ${{ secrets.TS_API_KEY }}
         run: |
-          set -uo pipefail
+          set +e
           echo "::add-mask::$TSKEY"
-          CODE="$(curl -sS -m 30 -o /tmp/dev.json -w '%{http_code}' \
-            -u "$TSKEY:" "https://api.tailscale.com/api/v2/tailnet/-/devices" || echo 000)"
-          echo "DEVICES HTTP: $CODE"
-          [ "$CODE" = "200" ] || { head -c 300 /tmp/dev.json; exit 0; }
-          python3 - <<'PY'
-          import json, datetime
-          d = json.load(open('/tmp/dev.json'))
-          devs = d.get('devices', [])
-          now = datetime.datetime.now(datetime.timezone.utc)
-          print(f"total devices: {len(devs)}")
-          online = [x for x in devs if x.get('connectedToControl')]
-          print(f"online: {len(online)}")
-          print("--- per-device ---")
-          for x in devs:
-              tags = ",".join(x.get('tags') or []) or "-"
-              last = x.get('lastSeen') or ''
-              name = x.get('hostname') or x.get('name') or '?'
-              ips = ",".join(x.get('addresses') or [])
-              print(f"{name:30} {ips:18} online={str(bool(x.get('connectedToControl'))):5} tags={tags:14} lastSeen={last}")
-          PY
-
-      - name: CI 身份能否 tailscale ssh
-        env:
-          TSKEY: ${{ secrets.TS_API_KEY }}
-        run: |
-          set -uo pipefail
-          echo "::add-mask::$TSKEY"
-          curl -fsSL https://tailscale.com/install.sh | sh
-          MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true}}},"expirySeconds":1800}'
-          CODE="$(curl -sS -m 30 -o /tmp/mint.json -w '%{http_code}' -X POST \
-            -u "$TSKEY:" -H 'Content-Type: application/json' -d "$MINT_BODY" \
-            "https://api.tailscale.com/api/v2/tailnet/-/keys" || echo 000)"
-          echo "MINT HTTP: $CODE"
-          if [ "$CODE" != "200" ] && [ "$CODE" != "201" ]; then
-            echo "mint body: $(head -c 300 /tmp/mint.json)"; exit 0
-          fi
-          KEY="$(python3 -c "import json;print(json.load(open('/tmp/mint.json')).get('key',''))")"
+          mint() {
+            curl -sS -m 30 -X POST -u "$TSKEY:" -H 'Content-Type: application/json' \
+              -d "$1" "https://api.tailscale.com/api/v2/tailnet/-/keys"
+          }
+          R="$(mint '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true}}},"expirySeconds":1800}')"
+          KEY="$(echo "$R" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("key",""))')"
+          KID="$(echo "$R" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("id",""))')"
           [ -n "$KEY" ] && echo "::add-mask::$KEY"
-          KEYID="$(python3 -c "import json;print(json.load(open('/tmp/mint.json')).get('id',''))")"
-          echo "minted key id: $KEYID"
-          timeout 120 sudo tailscale up --authkey="$KEY" --hostname="ts-probe-$GITHUB_RUN_ID" \
-            --accept-routes=false --accept-dns=false || { echo "TS-UP-FAILED"; exit 0; }
-          echo "joined as: $(tailscale status --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["Self"]["HostName"], d["Self"].get("Tags"))')"
-
-          echo "=== 试 tailscale ssh 到各目标（每个 20s 超时） ==="
-          for T in "100.111.231.85:hw-41-trial" "100.91.222.51:hw-21-prod" "100.85.128.116:ali-gz-caddy"; do
-            IP="${T%%:*}"; NAME="${T##*:}"
-            OUT="$(timeout 20 tailscale ssh -o BatchMode=yes root@$IP "hostname; id -un" 2>&1 | tail -3)"
-            RC=$?
-            echo "--- $NAME ($IP) rc=$RC ---"
-            echo "$OUT"
+          sudo tailscale up --authkey="$KEY" --hostname="probe-untagged-$GITHUB_RUN_ID" \
+            --accept-routes=false --accept-dns=false >/dev/null 2>&1
+          echo "identity: $(tailscale status --json | python3 -c 'import json,sys;d=json.load(sys.stdin);s=d["Self"];print(s["HostName"], "tags=", s.get("Tags"))')"
+          for IP in 100.111.231.85 100.91.222.51; do
+            OUT="$(timeout 25 tailscale ssh root@$IP 'hostname; id -un' 2>&1)"; RC=$?
+            echo "--- untagged -> $IP : rc=$RC"
+            echo "$OUT" | tail -3
           done
+          sudo tailscale logout >/dev/null 2>&1
+          curl -sS -m 20 -X DELETE -u "$TSKEY:" "https://api.tailscale.com/api/v2/tailnet/-/keys/$KID" -o /dev/null
 
-          echo "=== 清理 ==="
-          sudo tailscale logout || true
-          curl -sS -m 20 -X DELETE -u "$TSKEY:" "https://api.tailscale.com/api/v2/tailnet/-/keys/$KEYID" -o /dev/null -w 'delete key: %{http_code}\n' || true
+      - name: B. 带 tag:ci-prod 身份
+        env:
+          TSKEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set +e
+          echo "::add-mask::$TSKEY"
+          R="$(curl -sS -m 30 -X POST -u "$TSKEY:" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci-prod"]}}},"expirySeconds":1800}' \
+            "https://api.tailscale.com/api/v2/tailnet/-/keys")"
+          KEY="$(echo "$R" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("key",""))')"
+          KID="$(echo "$R" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("id",""))')"
+          if [ -z "$KEY" ]; then echo "mint-with-tag FAILED: $(echo "$R" | head -c 300)"; exit 0; fi
+          echo "::add-mask::$KEY"
+          sudo tailscale up --authkey="$KEY" --hostname="probe-ciprod-$GITHUB_RUN_ID" \
+            --accept-routes=false --accept-dns=false >/dev/null 2>&1
+          echo "identity: $(tailscale status --json | python3 -c 'import json,sys;d=json.load(sys.stdin);s=d["Self"];print(s["HostName"], "tags=", s.get("Tags"))')"
+          for IP in 100.111.231.85 100.91.222.51; do
+            OUT="$(timeout 25 tailscale ssh root@$IP 'hostname; id -un' 2>&1)"; RC=$?
+            echo "--- tag:ci-prod -> $IP : rc=$RC"
+            echo "$OUT" | tail -3
+            OUT2="$(timeout 25 ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$IP 'hostname' 2>&1)"; RC2=$?
+            echo "--- tag:ci-prod OpenSSH:22 -> $IP : rc=$RC2 : $(echo "$OUT2" | tail -1)"
+          done
+          sudo tailscale logout >/dev/null 2>&1
+          curl -sS -m 20 -X DELETE -u "$TSKEY:" "https://api.tailscale.com/api/v2/tailnet/-/keys/$KID" -o /dev/null
