@@ -1,0 +1,108 @@
+name: ts-acl-apply
+
+# Tailscale 策略下发/核对（唯一入口）。
+#
+# 规矩：
+#   - 正本是 tailscale/policy.hujson；本 workflow 只推仓里的文件，不接受自由输入。
+#   - mode=verify     只读核对：控制台 ACL 与仓里是否一致，顺便列设备 tag。
+#   - mode=apply      覆盖控制台 ACL（必须 confirm=yes）；推完立刻读回逐字段比对。
+#   - mode=tag-device 改单台设备的 tag 集合（必须 confirm=yes；覆盖式，要写全）。
+# 手动触发，不挂任何自动事件。逻辑都在 tailscale/ts-acl.py（可在本地直接跑）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "verify | apply | tag-device"
+        required: true
+        default: verify
+        type: choice
+        options: [verify, apply, tag-device]
+      device:
+        description: "tag-device 用：设备 hostname（如 mesh-hw-21）"
+        required: false
+        default: ""
+      tags:
+        description: "tag-device 用：完整 tag 集合，逗号分隔（覆盖式，如 tag:mesh,tag:prod）"
+        required: false
+        default: ""
+      confirm:
+        description: 'apply / tag-device 必须填 yes'
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TSKEY: ${{ secrets.TS_API_KEY }}
+      MODE: ${{ inputs.mode }}
+      CONFIRM: ${{ inputs.confirm }}
+      DEVICE: ${{ inputs.device }}
+      TAGS: ${{ inputs.tags }}
+      API: https://api.tailscale.com/api/v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 执行
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$TSKEY"
+          api() { curl -sS -m 30 -H 'Accept: application/json' -u "$TSKEY:" -H 'Content-Type: application/json' "$@"; }
+          api_out() { curl -sS -m 30 -o /tmp/out.json -w '%{http_code}' -H 'Accept: application/json' -u "$TSKEY:" -H 'Content-Type: application/json' "$@"; }
+
+          case "$MODE" in
+            verify)
+              CODE="$(api_out "$API/tailnet/-/acl")"
+              [ "$CODE" = 200 ] || { echo "GET ACL HTTP $CODE: $(head -c 200 /tmp/out.json)"; exit 1; }
+              cp /tmp/out.json /tmp/remote.json
+              python3 tailscale/ts-acl.py norm tailscale/policy.hujson > /tmp/local.norm
+              python3 tailscale/ts-acl.py norm /tmp/remote.json > /tmp/remote.norm
+              if diff -q /tmp/local.norm /tmp/remote.norm >/dev/null; then
+                echo "RESULT: 仓里的 policy.hujson 与控制台一致（in sync）"
+              else
+                echo "RESULT: 有漂移（控制台 ≠ 仓），下面 仓 → 控制台"
+                diff -u /tmp/local.norm /tmp/remote.norm | head -60 || true
+              fi
+              echo "--- 设备 tag 现状 ---"
+              api "$API/tailnet/-/devices" | python3 tailscale/ts-acl.py devices-table
+              ;;
+
+            apply)
+              [ "$CONFIRM" = yes ] || { echo "拒绝：apply 需要 confirm=yes"; exit 1; }
+              python3 tailscale/ts-acl.py norm tailscale/policy.hujson > /tmp/policy.norm
+              cp /tmp/policy.norm /tmp/policy.json
+              CODE="$(api_out "$API/tailnet/-/acl")"
+              [ "$CODE" = 200 ] || { echo "读现状 HTTP $CODE"; exit 1; }
+              cp /tmp/out.json /tmp/acl-before.json
+              echo "--- 变更规模 ---"
+              python3 tailscale/ts-acl.py change-summary /tmp/acl-before.json /tmp/policy.json
+              CODE="$(api_out -X POST --data-binary @/tmp/policy.json "$API/tailnet/-/acl")"
+              echo "POST ACL HTTP: $CODE"
+              [ "$CODE" = 200 ] || { echo "失败：$(head -c 500 /tmp/out.json)"; exit 1; }
+              CODE="$(api_out "$API/tailnet/-/acl")"
+              [ "$CODE" = 200 ] || { echo "读回失败 HTTP $CODE"; exit 1; }
+              python3 tailscale/ts-acl.py norm /tmp/out.json > /tmp/remote.norm
+              diff -u /tmp/policy.norm /tmp/remote.norm && echo "RESULT: 已生效，控制台 = 仓（逐字段一致）"
+              ;;
+
+            tag-device)
+              [ "$CONFIRM" = yes ] || { echo "拒绝：tag-device 需要 confirm=yes"; exit 1; }
+              [ -n "$DEVICE" ] && [ -n "$TAGS" ] || { echo "拒绝：tag-device 需要 device 与 tags"; exit 1; }
+              api "$API/tailnet/-/devices" > /tmp/dev.json
+              DID="$(python3 tailscale/ts-acl.py device-id "$DEVICE" < /tmp/dev.json)"
+              BODY="$(python3 tailscale/ts-acl.py tags-json "$TAGS")"
+              echo "设置 $DEVICE ($DID) tags = $BODY"
+              CODE="$(api_out -X POST -d "$BODY" "$API/device/$DID/tags")"
+              echo "POST tags HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
+              [ "$CODE" = 200 ] || exit 1
+              api "$API/tailnet/-/devices" > /tmp/dev-after.json
+              python3 tailscale/ts-acl.py devices-table < /tmp/dev-after.json | grep -F "$DEVICE" || true
+              ;;
+
+            *) echo "未知 mode: $MODE"; exit 1 ;;
+          esac
