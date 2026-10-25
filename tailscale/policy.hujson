@@ -4,7 +4,11 @@
 		"tag:mesh":      ["autogroup:admin"],
 		"tag:connector": ["autogroup:admin"],
 		"tag:ci-trial":  ["autogroup:admin"],
-		"tag:ci-prod":   ["autogroup:admin"]
+		"tag:ci-prod":   ["autogroup:admin"],
+		// CI 起的每一个节点（部署方 + 临时靶子）都带这个 tag。
+		"tag:ci":        ["autogroup:admin"],
+		// 常驻生产机（hw-21）。
+		"tag:prod":      ["autogroup:admin"]
 	},
 	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
 	"grants": [
@@ -36,7 +40,10 @@
 		{"src": ["tag:ci-trial"], "dst": ["100.111.231.85"], "ip": ["22"]},
 		{"src": ["tag:ci-prod"], "dst": ["100.91.222.51"], "ip": ["22"]},
 		{"src": ["tag:ci-trial"], "dst": ["100.111.231.85"], "ip": ["2244"]},
-		{"src": ["tag:ci-prod"], "dst": ["100.91.222.51"], "ip": ["2244"]}
+		{"src": ["tag:ci-prod"], "dst": ["100.91.222.51"], "ip": ["2244"]},
+		// 过渡期 2244 保留：旧 key 通路还在，切完 TS SSH 并验证后删掉 2244。
+		{"src": ["tag:ci"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
+		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]}
 	],
 	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
 		"name":       "opencode-ai",
@@ -91,6 +98,17 @@
 		"dst":    ["autogroup:self"],
 		"users":  ["autogroup:nonroot", "root"]
 	}, {
+		// CI 只能登生产机 / 只能登 CI 自己起的临时靶子。
+		"action": "accept",
+		"src":    ["tag:ci"],
+		"dst":    ["tag:prod"],
+		"users":  ["root"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:ci"],
+		"dst":    ["tag:ci"],
+		"users":  ["root"]
+	}, {
 		"action": "accept",
 		"src":    ["autogroup:member"],
 		"dst":    ["tag:connector"],
@@ -135,6 +153,10 @@
 		{"src": "tag:ci-trial", "allow": ["100.111.231.85:22"]},
 		{"src": "tag:ci-prod", "allow": ["100.91.222.51:22"]},
 		{"src": "tag:ci-trial", "allow": ["100.111.231.85:2244"]},
-		{"src": "tag:ci-prod", "allow": ["100.91.222.51:2244"]}
+		{"src": "tag:ci-prod", "allow": ["100.91.222.51:2244"]},
+		{"src": "tag:ci", "allow": ["100.91.222.51:22"]},
+		{"src": "tag:ci", "deny": ["100.111.231.85:22"]},
+		{"src": "tag:ci", "deny": ["100.69.220.112:22"]},
+		{"src": "tag:ci", "deny": ["100.85.128.116:22"]}
 	]
 }
