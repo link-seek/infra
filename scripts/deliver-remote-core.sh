@@ -20,10 +20,11 @@ else
   SSH="ssh -o BatchMode=yes -p $SSH_PORT -i $SSH_KEY_FILE root@$TARGET_IP"
 fi
 put() { # put <本地文件> <远端绝对路径>
-  local src="$1" dst="$2" ddir
-  ddir="$(dirname "$dst")"
+  local src="$1" dst="$2" ddir sbase base
+  ddir="$(dirname "$dst")"; sbase="$(basename "$src")"; base="$(basename "$dst")"
   if [ "$SSH_TRANSPORT" = "tailscale" ]; then
-    tar -czf - -C "$(dirname "$src")" "$(basename "$src")" | $SSH "mkdir -p '$ddir' && tar -xzf - -C '$ddir'"
+    # TS SSH 不带 sftp/scp：走 tar 流；包内名单≠目标名时 mv 改名（等价 scp 语义），最后验文件存在
+    tar -czf - -C "$(dirname "$src")" "$sbase" | $SSH "mkdir -p '$ddir' && tar -xzf - -C '$ddir' && { [ '$sbase' = '$base' ] || mv -f '$ddir/$sbase' '$dst'; } && test -f '$dst'"
   else
     scp -o BatchMode=yes -P "$SSH_PORT" -i "$SSH_KEY_FILE" "$src" "root@$TARGET_IP:$dst"
   fi
