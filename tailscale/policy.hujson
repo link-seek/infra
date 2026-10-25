@@ -1,0 +1,140 @@
+{
+	"groups": {"group:admin": ["xieyucheng123@github"]},
+	"tagOwners": {
+		"tag:mesh":      ["autogroup:admin"],
+		"tag:connector": ["autogroup:admin"],
+		// CI 起的每一个节点（部署方 + 临时靶子）都带这个 tag。
+		"tag:ci":        ["autogroup:admin"],
+		// 常驻生产机（hw-21）。
+		"tag:prod":      ["autogroup:admin"]
+	},
+	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
+	"grants": [
+		{
+			"src": ["tag:mesh"],
+			"dst": ["100.91.222.51", "100.85.128.116", "100.69.220.112", "100.111.231.85"],
+			"ip":  ["22", "41641"]
+		},
+		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4097"]},
+		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["2222"]},
+		{"src": ["tag:mesh"], "dst": ["tag:connector"], "ip": ["*"]},
+		{"src": ["autogroup:member"], "dst": ["tag:connector"], "ip": ["*"]},
+		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4000"]},
+		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4000"]},
+		{
+			"src": ["autogroup:member"],
+			"dst": ["tag:mesh", "tag:connector", "100.69.220.112/32", "100.78.144.89/32"],
+			"ip":  ["*"]
+		},
+		{"src": ["autogroup:admin"], "dst": ["*"], "ip": ["*"]},
+		{
+			"src": ["tag:mesh"],
+			"dst": ["autogroup:internet"],
+			"via": ["tag:connector"],
+			"ip":  ["*"]
+		},
+		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4098"]},
+		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4098"]},
+		// 过渡期 2244 保留：旧 key 通路还在，切完 TS SSH 并验证后删掉 2244。
+		{"src": ["tag:ci"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
+		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]}
+	],
+	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
+		"name":       "opencode-ai",
+		"connectors": ["tag:connector"],
+		"domains":    ["opencode.ai", "*.opencode.ai"]
+	}, {"name": "huggingface", "connectors": ["tag:connector"], "domains": [
+		"huggingface.co",
+		"*.huggingface.co",
+		"hf.co",
+		"*.hf.co",
+		"hf.space",
+		"*.hf.space",
+		"huggingface.com",
+		"*.huggingface.com",
+		"huggingface.cn",
+		"*.huggingface.cn"
+	]}, {"name": "dev-tools", "connectors": ["tag:connector"], "domains": [
+		"github.com",
+		"*.githubusercontent.com",
+		"github-cloud.s3.amazonaws.com",
+		"pypi.org",
+		"*.pypi.org",
+		"pypi.python.org",
+		"pythonhosted.org",
+		"*.pythonhosted.org",
+		"npmjs.org",
+		"*.npmjs.org",
+		"npmjs.com",
+		"*.npmjs.com",
+		"yarnpkg.com",
+		"*.yarnpkg.com",
+		"docker.io",
+		"*.docker.io",
+		"docker.com",
+		"*.docker.com",
+		"ghcr.io",
+		"quay.io",
+		"registry.k8s.io"
+	]}, {"name": "google", "connectors": ["tag:connector"], "domains": [
+		"google.com",
+		"*.google.com",
+		"googleapis.com",
+		"*.googleapis.com",
+		"gstatic.com",
+		"*.gstatic.com",
+		"google.com.hk",
+		"*.google.com.hk"
+	]}]}}],
+	"ssh": [{
+		"action": "check",
+		"src":    ["autogroup:member"],
+		"dst":    ["autogroup:self"],
+		"users":  ["autogroup:nonroot", "root"]
+	}, {
+		// CI 只能登生产机 / 只能登 CI 自己起的临时靶子。
+		"action": "accept",
+		"src":    ["tag:ci"],
+		"dst":    ["tag:prod"],
+		"users":  ["root"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:ci"],
+		"dst":    ["tag:ci"],
+		"users":  ["root"]
+	}, {
+		// 已删 autogroup:member → tag:mesh / tag:connector：
+		// 那是"任何未打 tag 的成员设备都能 root 进所有机器"，包括随便起的 CI 节点。
+		// 人的设备都是 tag:mesh，走下面这条，能力不受影响。
+		"action": "accept",
+		"src":    ["tag:mesh"],
+		"dst":    ["tag:mesh"],
+		"users":  ["root"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:mesh"],
+		"dst":    ["tag:mesh"],
+		"users":  ["opencode-gate"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:mesh"],
+		"dst":    ["tag:connector"],
+		"users":  ["root"]
+	}],
+	"tests": [
+		{"src": "tag:mesh", "allow": ["100.85.128.116:22"]},
+		{"src": "tag:mesh", "allow": ["100.69.220.112:22"]},
+		{"src": "tag:mesh", "allow": ["100.91.222.51:22"]},
+		{"src": "tag:mesh", "allow": ["100.111.231.85:22"]},
+		{"src": "tag:mesh", "allow": ["100.103.182.112:22"]},
+		{
+			"src":   "xieyucheng123@github",
+			"allow": ["100.85.128.116:22", "100.91.222.51:22"]
+		},
+		{"src": "tag:mesh", "allow": ["20.27.177.113:443"]},
+		{"src": "tag:ci", "allow": ["100.91.222.51:22"]},
+		{"src": "tag:ci", "deny": ["100.111.231.85:22"]},
+		{"src": "tag:ci", "deny": ["100.69.220.112:22"]},
+		{"src": "tag:ci", "deny": ["100.85.128.116:22"]}
+	]
+}
