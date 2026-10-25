@@ -7,7 +7,7 @@ name: opencode-review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready-for-review]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 1
 
       - name: Run OpenCode review
-        uses: anomalyco/opencode/github@latest
+        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
