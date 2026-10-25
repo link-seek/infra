@@ -4,7 +4,7 @@ ENV_CONF=env-sources.conf
 # pin 冻结：只冻 tools（chrome-cjk 无构建线，只跟 pin，不动）
 PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools"
 SYNC_FILES="compose.yml README.md .env.example"
-CUTOVER_SERVICES="opencode-prod opencode-browser"
+CUTOVER_SERVICES="opencode-prod browser"
 # 生产 up 探针级别：full（含 drain 活证明；网关在 prod 机恒在故恒强制执行）
 UP_PROBE_LEVEL="full"
 # canary 宿主端口（生产 4097，避免冲突）

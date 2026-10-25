@@ -25,5 +25,5 @@ services:
     ports:
       - "127.0.0.1:19228:9222"
 EOF
-docker compose -p opencode-prod-canary -f compose.yml -f /tmp/canary-override.yml up -d opencode-prod opencode-browser
+docker compose -p opencode-prod-canary -f compose.yml -f /tmp/canary-override.yml up -d opencode-prod browser
 echo "canary started on :$CANARY_PORT"
