@@ -28,10 +28,10 @@
   - `tag:ci` → `tag:prod` root：生产部署
   - `tag:ci` → `tag:ci` root：部署到临时靶子（靶子 join 时带 `--ssh`）
   - `tag:mesh` → `tag:mesh` root：人登机器
-- **阶段一保留、阶段二删** `autogroup:member` → `tag:mesh` / `tag:connector`：删掉后未打 tag 的节点不再能 root 进任何机器。
+- 已删 `autogroup:member` → `tag:mesh` / `tag:connector`：未打 tag 的节点不再能 root 进任何机器。
   依据：2026-10-25 实测，任意未打 tag 的 CI 节点可直接 `tailscale ssh root@hw-21` 成功。
   人的设备都是 `tag:mesh`，走 `tag:mesh → tag:mesh`，能力不变。
-- 旧 `tag:ci-trial` / `tag:ci-prod`、`TAILSCALE_AUTH_KEY_TRIAL` / `_PROD` 阶段二作废：
+- 旧 `tag:ci-trial` / `tag:ci-prod`、`TAILSCALE_AUTH_KEY_TRIAL` / `_PROD` 一并作废：
   trial 靶子由 CI 现建现焚，hw-41 只是普通 `tag:mesh` 机器，不再承担 trial 角色。
 - 笼子自证：deliver 线在上机前仍做否定测试（连不该连的必须超时），否则 abort。
 - 出网（GitHub/ghcr/SWR）走 runner 本机直连，不经 tailnet，故 CI 节点无需其它放行。

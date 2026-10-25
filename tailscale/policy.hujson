@@ -3,8 +3,6 @@
 	"tagOwners": {
 		"tag:mesh":      ["autogroup:admin"],
 		"tag:connector": ["autogroup:admin"],
-		"tag:ci-trial":  ["autogroup:admin"],
-		"tag:ci-prod":   ["autogroup:admin"],
 		// CI 起的每一个节点（部署方 + 临时靶子）都带这个 tag。
 		"tag:ci":        ["autogroup:admin"],
 		// 常驻生产机（hw-21）。
@@ -37,10 +35,6 @@
 		},
 		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4098"]},
 		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4098"]},
-		{"src": ["tag:ci-trial"], "dst": ["100.111.231.85"], "ip": ["22"]},
-		{"src": ["tag:ci-prod"], "dst": ["100.91.222.51"], "ip": ["22"]},
-		{"src": ["tag:ci-trial"], "dst": ["100.111.231.85"], "ip": ["2244"]},
-		{"src": ["tag:ci-prod"], "dst": ["100.91.222.51"], "ip": ["2244"]},
 		// 过渡期 2244 保留：旧 key 通路还在，切完 TS SSH 并验证后删掉 2244。
 		{"src": ["tag:ci"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
 		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]}
@@ -109,21 +103,9 @@
 		"dst":    ["tag:ci"],
 		"users":  ["root"]
 	}, {
-		"action": "accept",
-		"src":    ["autogroup:member"],
-		"dst":    ["tag:connector"],
-		"users":  ["root", "autogroup:nonroot"]
-	}, {
-		"action": "accept",
-		"src":    ["autogroup:member"],
-		"dst":    ["tag:mesh"],
-		"users":  ["root", "autogroup:nonroot"]
-	}, {
-		"action": "accept",
-		"src":    ["autogroup:member"],
-		"dst":    ["tag:mesh", "tag:connector"],
-		"users":  ["root", "autogroup:nonroot"]
-	}, {
+		// 已删 autogroup:member → tag:mesh / tag:connector：
+		// 那是"任何未打 tag 的成员设备都能 root 进所有机器"，包括随便起的 CI 节点。
+		// 人的设备都是 tag:mesh，走下面这条，能力不受影响。
 		"action": "accept",
 		"src":    ["tag:mesh"],
 		"dst":    ["tag:mesh"],
@@ -150,10 +132,6 @@
 			"allow": ["100.85.128.116:22", "100.91.222.51:22"]
 		},
 		{"src": "tag:mesh", "allow": ["20.27.177.113:443"]},
-		{"src": "tag:ci-trial", "allow": ["100.111.231.85:22"]},
-		{"src": "tag:ci-prod", "allow": ["100.91.222.51:22"]},
-		{"src": "tag:ci-trial", "allow": ["100.111.231.85:2244"]},
-		{"src": "tag:ci-prod", "allow": ["100.91.222.51:2244"]},
 		{"src": "tag:ci", "allow": ["100.91.222.51:22"]},
 		{"src": "tag:ci", "deny": ["100.111.231.85:22"]},
 		{"src": "tag:ci", "deny": ["100.69.220.112:22"]},
