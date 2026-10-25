@@ -1,0 +1,46 @@
+name: ts-acl-export
+
+# 一次性（用完即删）：把控制台里的 ACL 原样导出到分支，作为仓里的 policy 正本。
+# 不打印内容，只打印字节数/顶层键，避免公共日志泄露内部拓扑。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 取 ACL 并落分支
+        env:
+          TSKEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$TSKEY"
+          curl -fsS -m 30 -u "$TSKEY:" -o /tmp/policy.hujson \
+            "https://api.tailscale.com/api/v2/tailnet/-/acl"
+          python3 - <<'PY'
+          import json
+          d = json.load(open('/tmp/policy.hujson'))
+          print("bytes:", len(open('/tmp/policy.hujson','rb').read()))
+          print("top-level keys:", sorted(d.keys()))
+          print("grants:", len(d.get('grants', [])), "ssh rules:", len(d.get('ssh', [])),
+                "tests:", len(d.get('tests', [])))
+          print("tagOwners:", sorted((d.get('tagOwners') or {}).keys()))
+          PY
+          mkdir -p tailscale
+          cp /tmp/policy.hujson tailscale/policy.hujson
+          git config user.name "xieyucheng123"
+          git config user.email "xieyucheng123@users.noreply.github.com"
+          git checkout -B tailscale/acl-snapshot
+          git add tailscale/policy.hujson
+          git commit -q -m "tailscale: 导出 ACL 正本（控制台原样，无改动）"
+          git push -f origin tailscale/acl-snapshot
+          echo "pushed: tailscale/acl-snapshot"
