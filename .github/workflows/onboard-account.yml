@@ -43,7 +43,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: "4953817"
+          app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           # 默认只圈当前仓，不加这俩跨仓调目标仓会 403
           owner: link-seek
