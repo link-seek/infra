@@ -52,6 +52,8 @@ fi
 
 for v in ENV_GH_TOKEN ENV_LITELLM_API_KEY ENV_OPENCODE_SERVER_PASSWORD ENV_CLOUDFLARE_API_TOKEN ENV_CF_AI_TOKEN ENV_HCLOUD_AK ENV_HCLOUD_SK ENV_SSH_PRIVATE_KEY_B64 ENV_SMTP_PASS; do
   export "$v"="${!v:-}"
+  # render-dotenv.sh 只认 S_<SUFFIX>；调用方负责桥接（脚本头注释约定的调用方义务）
+  export "S_$v"="${!v:-}"
 done
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
 $SSH "mkdir -p $REMOTE_DIR" # 干净机（如 img 预检）上目录尚不存在，先建
