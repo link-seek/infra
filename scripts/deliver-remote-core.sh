@@ -1,16 +1,34 @@
 #!/usr/bin/env bash
 # deliver-remote-core.sh — 快递厚脚本（deliver-stack.yml 与 img-preflight.yml 共用，唯一真相）。
 # 输入全走环境变量；MODE=up 走完切流，MODE=preflight 只到探针（img 场景，完事调用方自行丢 canary 或随 runner 消失）。
-# 必需：STACK_DIR TARGET_IP SSH_KEY_FILE SSH_PORT ACTION_MODE(up/down/preflight)
+# 必需：STACK_DIR TARGET_IP ACTION_MODE(up/down/preflight)
+#       SSH_TRANSPORT=key（默认）→ 还需 SSH_KEY_FILE/SSH_PORT；=tailscale → 走 TS SSH，不用钥匙
 # 可选：CANDIDATE_DIGEST（digest 门禁已在外层冻好；为空则只读 compose 现有 pin，不改）
 #       REMOTE_DIR 缺省 /root/<stack>；ENV_* 由调用方 export 进来；OPENCODE_API_KEY 供探针。
 set -euo pipefail
-echo "CORE-START stack=${STACK_DIR:-?} target=${TARGET_IP:-?} action=${ACTION_MODE:-?} digest=${CANDIDATE_DIGEST:-none}"
+echo "CORE-START stack=${STACK_DIR:-?} target=${TARGET_IP:-?} action=${ACTION_MODE:-?} digest=${CANDIDATE_DIGEST:-none} transport=${SSH_TRANSPORT:-key}"
 set -x
-: "${STACK_DIR:?}" : "${TARGET_IP:?}" : "${SSH_KEY_FILE:?}" : "${ACTION_MODE:?}"
+: "${STACK_DIR:?}" : "${TARGET_IP:?}" : "${ACTION_MODE:?}"
 SSH_PORT="${SSH_PORT:-2244}"
 REMOTE_DIR="${REMOTE_DIR:-/root/$STACK_DIR}"
-SSH="ssh -o BatchMode=yes -p $SSH_PORT -i $SSH_KEY_FILE root@$TARGET_IP"
+SSH_TRANSPORT="${SSH_TRANSPORT:-key}"
+if [ "$SSH_TRANSPORT" = "tailscale" ]; then
+  # TS SSH 自己校验主机身份（不读 known_hosts），也不支持 scp/sftp：文件一律 tar 流
+  SSH="tailscale ssh root@$TARGET_IP"
+else
+  : "${SSH_KEY_FILE:?key 传输需要 SSH_KEY_FILE（或改用 SSH_TRANSPORT=tailscale）}"
+  SSH="ssh -o BatchMode=yes -p $SSH_PORT -i $SSH_KEY_FILE root@$TARGET_IP"
+fi
+put() { # put <本地文件> <远端绝对路径>
+  local src="$1" dst="$2" ddir sbase base
+  ddir="$(dirname "$dst")"; sbase="$(basename "$src")"; base="$(basename "$dst")"
+  if [ "$SSH_TRANSPORT" = "tailscale" ]; then
+    # TS SSH 不带 sftp/scp：走 tar 流；包内名单≠目标名时 mv 改名（等价 scp 语义），最后验文件存在
+    tar -czf - -C "$(dirname "$src")" "$sbase" | $SSH "mkdir -p '$ddir' && tar -xzf - -C '$ddir' && { [ '$sbase' = '$base' ] || mv -f '$ddir/$sbase' '$dst'; } && test -f '$dst'"
+  else
+    scp -o BatchMode=yes -P "$SSH_PORT" -i "$SSH_KEY_FILE" "$src" "root@$TARGET_IP:$dst"
+  fi
+}
 # shellcheck disable=SC1090
 source "$STACK_DIR/deploy.manifest"
 REMOTE_DIR="${REMOTE_DIR:-/root/$STACK_DIR}"
@@ -37,13 +55,14 @@ for v in ENV_GH_TOKEN ENV_LITELLM_API_KEY ENV_OPENCODE_SERVER_PASSWORD ENV_CLOUD
 done
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
 $SSH "mkdir -p $REMOTE_DIR" # 干净机（如 img 预检）上目录尚不存在，先建
-scp -o BatchMode=yes -P "$SSH_PORT" -i "$SSH_KEY_FILE" /tmp/ci-dotenv "root@$TARGET_IP:$REMOTE_DIR/.env"
+put /tmp/ci-dotenv "$REMOTE_DIR/.env"
 rm -f /tmp/ci-dotenv
 cp /tmp/compose.deploy.yml /tmp/sync-compose.yml
 ( cd "$STACK_DIR" && tar -czf /tmp/sync-files.tgz $SYNC_FILES )
 $SSH "mkdir -p $REMOTE_DIR && tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env && echo synced" < /tmp/sync-files.tgz
-scp -o BatchMode=yes -P "$SSH_PORT" -i "$SSH_KEY_FILE" /tmp/sync-compose.yml "root@$TARGET_IP:$REMOTE_DIR/compose.yml"
-scp -o BatchMode=yes -P "$SSH_PORT" -i "$SSH_KEY_FILE" "$STACK_DIR/canary-run.sh" "$STACK_DIR/canary-probe.sh" "root@$TARGET_IP:/tmp/"
+put /tmp/sync-compose.yml "$REMOTE_DIR/compose.yml"
+put "$STACK_DIR/canary-run.sh" /tmp/canary-run.sh
+put "$STACK_DIR/canary-probe.sh" /tmp/canary-probe.sh
 
 DIGEST_FOR_CANARY="${CANDIDATE_DIGEST:-$(grep -oP '(?<=@)sha256:[0-9a-f]+' /tmp/compose.deploy.yml | head -n1)}"
 export REMOTE_DIR CANDIDATE_DIGEST="$DIGEST_FOR_CANARY"

@@ -57,22 +57,15 @@ jobs:
           echo "::add-mask::$TSKEY"
           curl -fsSL https://tailscale.com/install.sh | sh
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true}}},"expirySeconds":7200}' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci"]}}},"expirySeconds":7200}' \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: 临时 key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="$HN" --accept-routes=false --accept-dns=false
+          # --ssh：既是 tag:ci 靶子（供部署方 tailscale ssh 进来），也为去掉 sshd/单次钥匙做准备
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="$HN" --ssh --accept-routes=false --accept-dns=false
           tailscale ip -4
-          # 单次 SSH 钥匙（只活本 run；公钥进本机 root，私钥 b64 传给 deliver-stack）
-          ssh-keygen -t ed25519 -N '' -f /tmp/ci_ephem -q
-          sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
-          sudo cp /tmp/ci_ephem.pub /root/.ssh/authorized_keys && sudo chmod 600 /root/.ssh/authorized_keys
-          sudo apt-get update -qq && sudo apt-get install -y -qq openssh-server
-          sudo mkdir -p /run/sshd
-          sudo /usr/sbin/sshd -p 2244 -o PermitRootLogin=prohibit-password
-          sleep 2
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -p 2244 -i /tmp/ci_ephem root@127.0.0.1 'docker info >/dev/null && echo SELF-SSH-OK'
-          echo "KEYB64=$(base64 -w0 /tmp/ci_ephem)" >> "$GITHUB_OUTPUT"
+          # 靶子以 tag:ci + --ssh 入网：部署方（同为 tag:ci）直接 tailscale ssh，无需 sshd/单次钥匙
+          tailscale status --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print("target tags:",d["Self"].get("Tags"))'
 
       - name: 试送（dispatch deliver-stack 跑 PR 版代码，全量 up，靶子随节点焚毁）
         if: steps.scope.outputs.match == 'true'
@@ -95,7 +88,7 @@ jobs:
             -f stack_dir="stacks/litellm-gateway" \
             -f digest_or_tag="$FIXED" \
             -f action="up" \
-            -f ssh_key_b64="${{ steps.node.outputs.KEYB64 }}"
+            -f ssh_transport="tailscale"
           echo "dispatched, waiting for run (branch=$HEAD_REF)"
           RUN_ID=""
           for i in $(seq 1 30); do
