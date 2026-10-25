@@ -1,0 +1,50 @@
+name: opencode-review
+
+# PR 评审门（advisory：只评论，不 block 合并）。
+# 只判三类：①商家/快递铁律（业务逻辑不许进 infra，只能进镜像），
+# ②密钥（明文真值不许进仓，只认 ${VAR} 引用），③硬伤（空指针/越界/静默吞错/条件写反/竞态/引号）。
+# 不谈风格、命名、注释、行长。无违规就回一句干净，不要车轱辘话。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready-for-review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run OpenCode review
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        with:
+          model: opencode/deepseek-v4.1-flash-free
+          variant: high
+          use_github_token: true
+          prompt: |
+            Review this pull request for the link-seek/infra repo.
+            This is the DEPLOY repo ("courier"): it only ships things, it never owns product logic.
+            Flag ONLY violations of these three categories, each with file:line and trigger path:
+
+            1. Merchant/courier split: business logic (guard/auth/retries/default configs/baked files)
+               must NOT enter this repo; it belongs in link-seek/docker-images bake. Compose pins must
+               be digests (@sha256:), never :latest. New shell logic that duplicates bake-side behavior is a violation.
+            2. Secrets: no plaintext secrets or real-looking keys/tokens anywhere; secrets only via ${VAR} references.
+               ENV values must come from org secrets through the deliver-stack wiring, never literals.
+            3. Hard bugs only: null/empty dereference, silently swallowed errors (set -e gaps, `|| true`
+               hiding real failures), wrong conditionals, race conditions, unquoted shell variables that break
+               on spaces, jq/yaml parsing that fails on valid input.
+
+            Do NOT comment on style, naming, comments, or line length.
+            If no violations, reply briefly that the PR is clean per these rules. Keep each finding under 5 lines.
