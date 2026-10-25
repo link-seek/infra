@@ -42,8 +42,9 @@
 		{"src": ["tag:ci-trial"], "dst": ["100.111.231.85"], "ip": ["2244"]},
 		{"src": ["tag:ci-prod"], "dst": ["100.91.222.51"], "ip": ["2244"]},
 		// 过渡期 2244 保留：旧 key 通路还在，切完 TS SSH 并验证后删掉 2244。
-		{"src": ["tag:ci"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
-		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]}
+		// 阶段一用 IP（tag:prod 要等本段下发后才能贴到 hw-21 上；阶段二再换成 tag:prod）。
+		{"src": ["tag:ci"], "dst": ["100.91.222.51"], "ip": ["22", "2244"]},
+		{"src": ["tag:ci"], "dst": ["tag:ci"],        "ip": ["22", "2244"]}
 	],
 	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
 		"name":       "opencode-ai",
