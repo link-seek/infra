@@ -9,3 +9,5 @@ CUTOVER_SERVICES="opencode-prod browser"
 UP_PROBE_LEVEL="full"
 # canary 宿主端口（生产 4097，避免冲突）
 CANARY_PORT=14097
+# canary 浏览器宿主端口（生产 9222，避免冲突；tools 经 172.17.0.1 连）
+CANARY_BROWSER_PORT=19228
