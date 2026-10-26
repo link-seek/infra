@@ -1,10 +1,7 @@
 name: deliver-promote-tools
 # 快递手续（deliver-promote）：只办 tag 晋升手续（retag 不 rebuild），不管镜像内容，不管目标机。
-
-# 晋升线：把一个已测 tools digest 打不可变 tag（默认 stable）+ 改 compose pin。
-# 只办手续不复核内容：输入 digest 必须已在 registry 存在；retag 不 rebuild（测即所得）。
-# tools 双 registry（ghcr.io/link-seek/opencode-tools 与 SWR linkseed）：两边都打 tag。
-# pin 提交回 main 只改单子不发货；发生产请手动 dispatch 对应 deliver（蓝绿 canary→切流）。
+# 薄调用 promote-stack.yml；tools 双 registry（GHCR + SWR）两边都打 tag。
+# stable 可覆盖（reason 必填），pin 走 PR（只 pin SWR 那条，chrome-cjk 不动），合入后再手动 dispatch deliver。
 
 on:
   workflow_dispatch:
@@ -13,66 +10,30 @@ on:
         description: "已测 digest（sha256:64位hex）"
         required: true
       tag:
-        description: "要打的 tag（只建不覆盖已存在的同名 tag）"
+        description: "要覆盖的 tag（可移动指针，默认 stable）"
         required: false
         default: "stable"
-
-permissions:
-  contents: write
-  packages: write
+      reason:
+        description: "覆盖 tag 的原因（必填非空）"
+        required: true
 
 concurrency:
   group: deliver-promote-tools
   cancel-in-progress: false
 
-env:
-  GHCR_IMAGE: ghcr.io/link-seek/opencode-tools
-  SWR_REGISTRY: swr.cn-north-9.myhuaweicloud.com
-  SWR_IMAGE: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools
-
 jobs:
   promote:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 校验输入
-        run: |
-          set -euo pipefail
-          echo "${{ inputs.digest }}" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "digest 格式错"; exit 1; }
-          echo "${{ inputs.tag }}" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$' || { echo "tag 格式错"; exit 1; }
-          echo "digest=${{ inputs.digest }} tag=${{ inputs.tag }}"
-
-      - name: Login registries
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          echo "${{ secrets.SWR_LOGIN_PASS }}" | docker login ${{ env.SWR_REGISTRY }} -u "${{ secrets.SWR_LOGIN_USER }}" --password-stdin
-
-      - name: retag 双 registry（只建不覆盖，registry 侧建 tag 不 rebuild）
-        run: |
-          set -euo pipefail
-          for img in "${{ env.GHCR_IMAGE }}" "${{ env.SWR_IMAGE }}"; do
-            if docker buildx imagetools inspect "$img:${{ inputs.tag }}" >/dev/null 2>&1; then
-              echo "$img:${{ inputs.tag }} 已存在，复核指向"
-            else
-              docker buildx imagetools create -t "$img:${{ inputs.tag }}" "$img@${{ inputs.digest }}"
-              echo "$img:${{ inputs.tag }} 新建 done"
-            fi
-            docker buildx imagetools inspect "$img:${{ inputs.tag }}" > /tmp/insp.json
-            grep -q "${{ inputs.digest }}" /tmp/insp.json || { echo "FAIL: $img tag 解析树里没有目标 digest"; exit 1; }
-          done
-          echo "双 registry 复核通过"
-
-      - name: 改 compose pin 并提交（只 pin SWR 那条，chrome-cjk 不动）
-        run: |
-          set -euo pipefail
-          F=stacks/opencode-prod/compose.yml
-          sed -i "s|image: ${{ env.SWR_IMAGE }}@sha256:[0-9a-f]*|image: ${{ env.SWR_IMAGE }}@${{ inputs.digest }}|" "$F"
-          grep -q "${{ inputs.digest }}" "$F" || { echo "FAIL: pin 未写入"; exit 1; }
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git diff --quiet && { echo "pin 无变化，无需提交"; exit 0; }
-          git add "$F"
-          git commit -m "promote(tools): ${{ inputs.tag }} -> ${{ inputs.digest }}（retag 不 rebuild；触发 deliver 蓝绿切流）"
-          git push
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+    uses: ./.github/workflows/promote-stack.yml
+    with:
+      images: ghcr.io/link-seek/opencode-tools swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools
+      pin_file: stacks/opencode-prod/compose.yml
+      digest: ${{ inputs.digest }}
+      tag: ${{ inputs.tag }}
+      reason: ${{ inputs.reason }}
+    secrets:
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
