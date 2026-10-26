@@ -33,7 +33,7 @@ on:
       ssh_transport:
         required: false
         type: string
-        default: key   # key | tailscale。过渡期默认 key（2244 + 私钥），验完切 tailscale 再删 key。
+        default: tailscale   # tailscale（TS SSH 22）为主；key（2244 + 私钥）只留手动回退。
     secrets:
       TS_API_KEY:
         required: true
@@ -94,9 +94,9 @@ on:
         required: false
         default: ""
       ssh_transport:
-        description: "key（2244+私钥）或 tailscale（TS SSH 22）"
+        description: "tailscale（TS SSH 22）或 key（2244+私钥，仅回退）"
         required: false
-        default: key
+        default: tailscale
         type: choice
         options:
           - key

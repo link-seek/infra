@@ -25,9 +25,9 @@ on:
         required: false
         default: ""
       ssh_transport:
-        description: "key 或 tailscale（过渡期默认 key）"
+        description: "tailscale 或 key（仅回退）"
         required: false
-        default: key
+        default: tailscale
         type: choice
         options:
           - key
@@ -50,7 +50,7 @@ on:
       ssh_transport:
         required: false
         type: string
-        default: key
+        default: tailscale
     secrets:
       TS_API_KEY:
         required: true
