@@ -18,11 +18,14 @@ cat > /tmp/canary-override.yml <<EOF
 services:
   opencode-prod:
     container_name: opencode-prod-canary
-    ports:
+    # !override：ports 默认是累加合并，不加这个底包的宿主绑定会漏进 canary，
+    # 生产机上直接撞车（hw-21 Compose v2.27.1，门槛 2.24.4，2026-10-26 实测）。
+    # canary 仍走 compose up，真源仍是 compose.yml，不分叉。
+    ports: !override
       - "$CANARY_PORT:4097"
   browser:
     container_name: opencode-browser-canary
-    ports:
+    ports: !override
       - "127.0.0.1:19228:9222"
 EOF
 docker compose -p opencode-prod-canary -f compose.yml -f /tmp/canary-override.yml up -d opencode-prod browser
