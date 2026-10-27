@@ -2,7 +2,7 @@ name: opencode-prod
 services:
   opencode-prod:
     # 版本 pin（digest）：升级 = 改这行发 PR，合后自动灰度。禁止改回 :latest。
-    image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:e96165f4607b9516d3d93d24f8e522a692c8ccf6bc274b3b2c7ca84080bba8ba
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:5e20e232caf75a42ce030821dc2d5ec2b1de55fd11d7d1e55c87388eecea8a17
     pull_policy: always
     container_name: opencode-prod
     # PID 1 僵尸回收：opencode serve 自身是 PID 1（entrypoint 末尾 exec），不收 git/gh/sleep 孤儿；
