@@ -55,6 +55,70 @@ for v in ENV_GH_TOKEN ENV_LITELLM_API_KEY ENV_OPENCODE_SERVER_PASSWORD ENV_CLOUD
   # render-dotenv.sh 只认 S_<SUFFIX>；调用方负责桥接（脚本头注释约定的调用方义务）
   export "S_$v"="${!v:-}"
 done
+# CF deploy 现签：栈点名要 CLOUDFLARE_API_TOKEN（env-sources）但没给静态值、却给了
+# CF_PARENT_TOKEN → 现签 90 天 DNS/Zone Read 只读子 key。不存 secret、不续期，发版即续。
+# 栈要点名却两样都没有 → 大声死（fail-closed）。网关栈无此点名，不受影响。
+if grep -q "CLOUDFLARE_API_TOKEN" "$STACK_DIR/$ENV_CONF" 2>/dev/null && [ -z "${ENV_CLOUDFLARE_API_TOKEN:-}" ]; then
+  set +x # 敏感段：关 trace，值只走 mask 通道
+  : "${CF_PARENT_TOKEN:?FAIL: 栈要点 CLOUDFLARE_API_TOKEN 但没给值也没给 CF_PARENT_TOKEN（现签不了）}"
+  echo "CF deploy 签发（90 天只读，audit 见 Cloudflare 侧 cf-deploy- 前缀 token）"
+  MINTED="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-47ce24ced58f17c9fb15351adcbe67d4}" python3 - <<'PY'
+import json
+import os
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
+BASE = "https://api.cloudflare.com/client/v4"
+TOKEN = os.environ["CF_PARENT_TOKEN_SANITIZED"]
+ACCOUNT_ID = os.environ["CF_ACCOUNT_ID"]
+print("::add-mask::%s" % TOKEN)
+def call(method, path, body=None):
+    headers = {"Authorization": "Bearer " + TOKEN}
+    data = None
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode()
+    req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read() or b"{}")
+        except Exception:
+            return exc.code, {}
+st, r = call("GET", "/accounts/%s/tokens/permission_groups?per_page=50" % ACCOUNT_ID)
+groups = r.get("result") if isinstance(r.get("result"), list) else []
+by_name = {str(g.get("name", "")).lower(): str(g.get("id") or "") for g in groups}
+dns_id = by_name.get("dns read", "c8fed203ed3043cba015a93ad1616f1f")
+zone_id = by_name.get("zone read", "82e64a83756745bbbb1c9c2701bf816b")
+expires = (datetime.now(timezone.utc) + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+st, r = call("POST", "/accounts/%s/tokens" % ACCOUNT_ID, {
+    "name": "cf-deploy-%s" % datetime.now(timezone.utc).strftime("%Y%m%d"),
+    "policies": [{"effect": "allow",
+                  "resources": {("com.cloudflare.api.account.%s" % ACCOUNT_ID): {"com.cloudflare.api.account.zone.*": "*"}},
+                  "permission_groups": [{"id": dns_id}, {"id": zone_id}]}],
+    "expires_on": expires,
+})
+if not r.get("success"):
+    print("FAIL: CF 现签 status=%s" % st)
+    raise SystemExit(1)
+value = str((r.get("result") or {}).get("value") or "")
+if not value:
+    print("FAIL: CF 现签无值")
+    raise SystemExit(1)
+print("::add-mask::%s" % value)
+print("CF_MINTED_VALUE=%s" % value)
+PY
+)"
+  CHILD="$(printf '%s' "$MINTED" | grep '^CF_MINTED_VALUE=' | cut -d= -f2-)"
+  [ -n "$CHILD" ] || { echo "FAIL: CF 现签没拿到值"; exit 1; }
+  echo "::add-mask::$CHILD"
+  export ENV_CLOUDFLARE_API_TOKEN="$CHILD"
+  export S_ENV_CLOUDFLARE_API_TOKEN="$CHILD"
+  echo "CF 现签 OK（90 天，值已进 render）"
+  set -x # 敏感段结束
+fi
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
 $SSH "mkdir -p $REMOTE_DIR" # 干净机（如 img 预检）上目录尚不存在，先建
 put /tmp/ci-dotenv "$REMOTE_DIR/.env"

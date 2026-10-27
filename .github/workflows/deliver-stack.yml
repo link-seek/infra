@@ -63,6 +63,8 @@ on:
         required: false
       ENV_SMTP_PASS:
         required: false
+      CF_PARENT_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       node_tag:
@@ -230,6 +232,7 @@ jobs:
           ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
           ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
           ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
+          CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
         run: |
           set -euo pipefail
           set -x
