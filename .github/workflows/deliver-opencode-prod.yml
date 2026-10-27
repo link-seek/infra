@@ -33,7 +33,7 @@ jobs:
       ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
       ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
-      ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
+      CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
       ENV_CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
       ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
       ENV_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
