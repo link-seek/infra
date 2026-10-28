@@ -6,8 +6,32 @@ PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools"
 SYNC_FILES="compose.yml README.md .env.example goss-trial.yaml probe-cases"
 # 探针 goss 版本（deliver-remote-core.sh 在 CI 下载后按同一条 tar 路送上靶机，不烘镜像）
 GOSS_VERSION="v0.4.10"
+# —— canary 三件套参数（共用 scripts/canary-*.sh；本栈不保留重复脚本）——
+CANARY_PROJECT=opencode-prod-canary
+CANARY_SERVICE=opencode-prod
+CANARY_SERVICES="opencode-prod browser"
+CANARY_CONTAINER=opencode-prod-canary
+# canary 先上线：hostname/TS_HOSTNAME 必须错开，避免抢正式节点名
+CANARY_HOSTNAME=opencode-prod-canary
+CANARY_TS_HOSTNAME=1
+# canary 宿主端口（生产 4097，避免冲突）
+CANARY_PORT=14097
+CANARY_CONTAINER_PORT=4097
+CANARY_BROWSER_SERVICE=browser
+CANARY_BROWSER_CONTAINER=opencode-browser-canary
+CANARY_BROWSER_PORT=19228
+CANARY_BROWSER_CONTAINER_PORT=9222
+# goss 文件 / 用例下限（现 13 条：http1+command10+file1+process1）；防删门禁
+GOSS_FILE=goss-trial.yaml
+MIN_GOSS_CASES=10
+# 探针参数：走宿主端口；校验双镜像 pin；full 且有网关时强制 drain
+PROBE_NEEDS_IP=0
+PROBE_PIN_VARS="PIN_TOOLS=opencode-tools PIN_BROWSER=chrome-cjk"
+PROBE_DRAIN=1
+PROBE_GATEWAY_URL=http://127.0.0.1:4000/v1/models
+PROBE_TS_PEER=1
+PROBE_REQUIRE_DRAIN=1
+GOSS_RETRY_TIMEOUT=120s
 CUTOVER_SERVICES="opencode-prod browser"
 # 生产 up 探针级别：full（含 drain 活证明；网关在 prod 机恒在故恒强制执行）
 UP_PROBE_LEVEL="full"
-# canary 宿主端口（生产 4097，避免冲突）
-CANARY_PORT=14097
