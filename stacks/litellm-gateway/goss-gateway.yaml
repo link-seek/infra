@@ -1,0 +1,26 @@
+http:
+  http://{{ .Vars.CANARY_IP }}:4000/v1/models:
+    status: 200
+    timeout: 5000
+    no-follow-redirects: false
+
+command:
+  gateway-image-pin:
+    exec: |
+      img="$(docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Image"])')" || exit 1
+      pin="$(docker inspect {{ .Vars.PIN_GATEWAY }} | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Id"])')" || exit 1
+      test -n "$img" && test "$img" = "$pin"
+    exit-status: 0
+    timeout: 30000
+  gateway-blacklist-400:
+    exec: |
+      code="$(curl -s -m 30 -o /dev/null -w '%{http_code}' \
+        -H "Authorization: Bearer $OPENCODE_API_KEY" \
+        -H 'Content-Type: application/json' \
+        -d '{"model":"{{ .Vars.DENIED_MODEL }}","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+        http://{{ .Vars.CANARY_IP }}:4000/v1/chat/completions)"
+      echo "blacklist({{ .Vars.DENIED_MODEL }}): $code"
+      test "$code" = "400"
+    exit-status: 0
+    timeout: 60000
+    skip: {{ .Vars.SKIP_BLACKLIST }}

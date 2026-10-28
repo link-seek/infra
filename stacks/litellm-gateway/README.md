@@ -31,8 +31,11 @@
 
 ## 部署
 
-* `deliver-litellm-gateway`：只手动 dispatch（Actions 里点火，digest 默认 stable）。canary 起新容器探针（就绪 + 真 key + 假 key 透传），
-  通了才 `force-recreate` 正式容器，不通就丢弃 canary，旧容器全程在线。
+* `deliver-litellm-gateway`：只手动 dispatch（Actions 里点火，digest 默认 stable）。canary 起新容器跑 goss runner：
+  `goss-gateway.yaml` 断言就绪（容器 IP:4000）、镜像 pin、黑名单 400；真/假 key verdict 透传（要解析 JSON 回包）
+  留在 `probe-cases/verdict-passthrough.sh`。junit 与统一表落靶机 `.probe-results/`；任一红即丢 canary，旧容器全程在线，
+  绿才 `force-recreate` 正式容器。生产 `UP_PROBE_LEVEL=full`，手动发一次即跑全套。
+  goss 二进制版本由 `deploy.manifest` 的 `GOSS_VERSION` 钉死，复用线下载后与栈文件同路送上靶机。
 * 镜像构建 + 行为门在 `link-seek/docker-images` 仓 `bake-gateway.yml`（测试归镜像构建）。
   `.env` 更新走 render-dotenv（workflow 永不手写 `.env`）。
 * 黑名单增减：改 `guard/models-denied.json`（数组）后必须走 bake 重打才生效
