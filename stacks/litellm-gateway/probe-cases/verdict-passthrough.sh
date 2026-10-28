@@ -32,7 +32,6 @@ if grep -qi "no.connected.db\|no_db_connection" "$REAL_OUT" 2>/dev/null; then
 elif [ "$CC" = "200" ]; then
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); m=d["choices"][0].get("message") or {}; assert isinstance(m.get("content"), str) or isinstance(m.get("reasoning_content"), str), "no text content keys=%s" % sorted(m.keys())' "$REAL_OUT" \
     || { fail "回包格式错"; echo "--- DEBUG full choices[0] (model chatter, no secrets) ---"; head -c 1500 "$REAL_OUT"; echo; }
-    || fail "回包格式错"
 elif [ "$CC" = "400" ] && grep -qi "does not support this protocol" "$REAL_OUT"; then
   : # 上游形：模型只支持 responses API
 elif { [ "$CC" = "401" ] || [ "$CC" = "403" ]; } && grep -qi "upstream request failed" "$REAL_OUT"; then
