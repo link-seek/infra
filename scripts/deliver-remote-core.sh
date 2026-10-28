@@ -161,6 +161,31 @@ put /tmp/sync-compose.yml "$REMOTE_DIR/compose.yml"
 put "$STACK_DIR/canary-run.sh" /tmp/canary-run.sh
 put "$STACK_DIR/canary-probe.sh" /tmp/canary-probe.sh
 
+# goss 二进制：CI 侧下载后与 canary 脚本同一条 tar 路上靶机（不烘镜像，版本由 manifest 钉死）。
+GOSS_REMOTE=""
+if [ -n "${GOSS_VERSION:-}" ]; then
+  TARGET_ARCH="$($SSH 'uname -m')"
+  case "$TARGET_ARCH" in
+    x86_64|amd64) GOSS_ARCH=x86_64 ;;
+    aarch64|arm64) GOSS_ARCH=arm64 ;;
+    *) echo "FAIL: goss 不支持目标架构 $TARGET_ARCH" >&2; exit 1 ;;
+  esac
+  GOSS_LOCAL="/tmp/goss-${GOSS_VERSION}-linux-${GOSS_ARCH}"
+  GOSS_TGZ="${GOSS_LOCAL}.tar.gz"
+  if [ ! -x "$GOSS_LOCAL" ]; then
+    curl -fsSL -m 120 -o "$GOSS_TGZ" \
+      "https://github.com/goss-org/goss/releases/download/${GOSS_VERSION}/goss_${GOSS_VERSION#v}_linux_${GOSS_ARCH}.tar.gz"
+    mkdir -p "$GOSS_LOCAL.dir"
+    tar -xzf "$GOSS_TGZ" -C "$GOSS_LOCAL.dir" goss
+    install -m 0755 "$GOSS_LOCAL.dir/goss" "$GOSS_LOCAL"
+  fi
+  GOSS_REMOTE="$REMOTE_DIR/.probe/goss"
+  $SSH "mkdir -p $REMOTE_DIR/.probe"
+  put "$GOSS_LOCAL" "$GOSS_REMOTE"
+  $SSH "chmod 0755 '$GOSS_REMOTE'"
+  echo "goss synced: $GOSS_REMOTE ($($SSH "$GOSS_REMOTE --version" 2>/dev/null || echo 'version check skipped'))"
+fi
+
 DIGEST_FOR_CANARY="${CANDIDATE_DIGEST:-$(grep -oP '(?<=@)sha256:[0-9a-f]+' /tmp/compose.deploy.yml | head -n1)}"
 export REMOTE_DIR CANDIDATE_DIGEST="$DIGEST_FOR_CANARY"
 export CANARY_PORT CANARY_BROWSER_PORT 2>/dev/null || true
@@ -168,7 +193,7 @@ export CANARY_PORT CANARY_BROWSER_PORT 2>/dev/null || true
 if [ "$ACTION_MODE" = "preflight" ]; then PROBE_LEVEL=boot; else PROBE_LEVEL="${UP_PROBE_LEVEL:-boot}"; fi
 export PROBE_LEVEL
 $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' SWR_USER='${SWR_USER:-}' SWR_PASS='${SWR_PASS:-}' bash -s" < "$STACK_DIR/canary-run.sh"
-if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' PROBE_LEVEL='$PROBE_LEVEL' OPENCODE_API_KEY='${OPENCODE_API_KEY:-}' bash -s" < "$STACK_DIR/canary-probe.sh"; then
+if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' PROBE_LEVEL='$PROBE_LEVEL' OPENCODE_API_KEY='${OPENCODE_API_KEY:-}' GOSS_BIN='$GOSS_REMOTE' bash -s" < "$STACK_DIR/canary-probe.sh"; then
   echo "探针通过"
   if [ "$ACTION_MODE" = "preflight" ]; then
     echo "PREFLIGHT-OK（canary 留给调用方处置）"
