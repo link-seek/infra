@@ -46,7 +46,7 @@
 - 每次 deploy 由 `deliver-remote-core.sh` 现场 mint 一把
   reusable+ephemeral+90 天、`tag:opencode` 的 auth key，经 render 写入 `.env` 的
   `TS_JOIN_KEY`；容器启动时 `tailscale up --ssh`。
-- 验活：`canary-probe.sh` 是 goss runner。`goss-trial.yaml` 断言就绪、双镜像 pin、卷挂载点、
+- 验活：共用 `scripts/canary-probe.sh` 是 goss runner（本栈只在 `deploy.manifest` 留参数）。`goss-trial.yaml` 断言就绪、双镜像 pin、卷挂载点、
   容器 tailscaled（Running+IP）、gh/wrangler/send-mail、drain 固定问答；junit 落靶机
   `.probe-results/`，宿主 tailnet 设备表与 `probe-cases/*.sh` 仍由 runner 跑，统一表＋底线断言。
   生产上再验双向：`tailscale ssh root@opencode-prod` 进去，

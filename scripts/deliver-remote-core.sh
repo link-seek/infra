@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # deliver-remote-core.sh — 快递厚脚本（deliver-stack.yml 与 img-preflight.yml 共用，唯一真相）。
+# canary 三件套在 scripts/canary-{run,probe,drop}.sh（唯一真相），栈侧只留 deploy.manifest 参数表。
 # 输入全走环境变量；MODE=up 走完切流，MODE=preflight 只到探针（img 场景，完事调用方自行丢 canary 或随 runner 消失）。
 # 必需：STACK_DIR TARGET_IP ACTION_MODE(up/down/preflight)
 #       SSH_TRANSPORT=key（默认）→ 还需 SSH_KEY_FILE/SSH_PORT；=tailscale → 走 TS SSH，不用钥匙
@@ -158,8 +159,12 @@ cp /tmp/compose.deploy.yml /tmp/sync-compose.yml
 ( cd "$STACK_DIR" && tar -czf /tmp/sync-files.tgz $SYNC_FILES )
 $SSH "mkdir -p $REMOTE_DIR && tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env && echo synced" < /tmp/sync-files.tgz
 put /tmp/sync-compose.yml "$REMOTE_DIR/compose.yml"
-put "$STACK_DIR/canary-run.sh" /tmp/canary-run.sh
-put "$STACK_DIR/canary-probe.sh" /tmp/canary-probe.sh
+# 三件套共用脚本从 scripts/ 走 stdin，同时留 /tmp 同名副本供排障/跨仓复用；
+# 靶机只留本栈参数表（deploy.manifest）。
+put scripts/canary-run.sh /tmp/canary-run.sh
+put scripts/canary-probe.sh /tmp/canary-probe.sh
+put scripts/canary-drop.sh /tmp/canary-drop.sh
+put "$STACK_DIR/deploy.manifest" "$REMOTE_DIR/deploy.manifest"
 
 # goss 二进制：CI 侧下载后与 canary 脚本同一条 tar 路上靶机（不烘镜像，版本由 manifest 钉死）。
 GOSS_REMOTE=""
@@ -192,8 +197,8 @@ export CANARY_PORT CANARY_BROWSER_PORT 2>/dev/null || true
 # 探针级别：preflight 恒 boot（装上+启动自测）；up 看栈 manifest 的 UP_PROBE_LEVEL（网关/opencode 生产均 full）
 if [ "$ACTION_MODE" = "preflight" ]; then PROBE_LEVEL=boot; else PROBE_LEVEL="${UP_PROBE_LEVEL:-boot}"; fi
 export PROBE_LEVEL
-$SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' SWR_USER='${SWR_USER:-}' SWR_PASS='${SWR_PASS:-}' bash -s" < "$STACK_DIR/canary-run.sh"
-if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' PROBE_LEVEL='$PROBE_LEVEL' OPENCODE_API_KEY='${OPENCODE_API_KEY:-}' GOSS_BIN='$GOSS_REMOTE' CANARY_CONTAINER='${CANARY_CONTAINER:-}' GOSS_FILE='${GOSS_FILE:-}' MIN_GOSS_CASES='${MIN_GOSS_CASES:-}' bash -s" < "$STACK_DIR/canary-probe.sh"; then
+$SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' SWR_USER='${SWR_USER:-}' SWR_PASS='${SWR_PASS:-}' bash -s" < scripts/canary-run.sh
+if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' PROBE_LEVEL='$PROBE_LEVEL' OPENCODE_API_KEY='${OPENCODE_API_KEY:-}' GOSS_BIN='$GOSS_REMOTE' CANARY_CONTAINER='${CANARY_CONTAINER:-}' GOSS_FILE='${GOSS_FILE:-}' MIN_GOSS_CASES='${MIN_GOSS_CASES:-}' bash -s" < scripts/canary-probe.sh; then
   echo "探针通过"
   if [ "$ACTION_MODE" = "preflight" ]; then
     echo "PREFLIGHT-OK（canary 留给调用方处置）"
@@ -201,10 +206,10 @@ if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_P
     echo "切流（与 canary 同镜像同 env，复用同一把随机 master）"
     # shellcheck disable=SC2086
     $SSH "cd $REMOTE_DIR && export LITELLM_MASTER_KEY=\"\$(cat .canary_master 2>/dev/null || true)\" && docker compose up -d --force-recreate $CUTOVER_SERVICES && echo CUTOVER-OK"
-    $SSH "REMOTE_DIR='$REMOTE_DIR' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' bash -s" < "$STACK_DIR/canary-drop.sh" >/dev/null 2>&1 || true
+    $SSH "REMOTE_DIR='$REMOTE_DIR' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' bash -s" < scripts/canary-drop.sh >/dev/null 2>&1 || true
   fi
 else
   echo "探针失败，丢弃 canary，旧容器不动"
-  $SSH "REMOTE_DIR='$REMOTE_DIR' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' bash -s" < "$STACK_DIR/canary-drop.sh" || true
+  $SSH "REMOTE_DIR='$REMOTE_DIR' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' bash -s" < scripts/canary-drop.sh || true
   exit 1
 fi

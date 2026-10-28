@@ -1,27 +1,45 @@
-#!/bin/bash
-# canary-probe.sh — goss runner：拉齐二进制/用例，跑 goss（junit 落盘）+ probe-cases + 宿主设备表，统一表与底线断言。任一红即非零退出。
-# 输入 env：REMOTE_DIR、CANDIDATE_DIGEST、CANARY_PORT、PROBE_LEVEL（boot=轻链路/full=再加 drain，默认 full）、GOSS_BIN。
+#!/usr/bin/env bash
+# canary-probe.sh — 共用 goss runner（唯一真相）：goss（junit 落盘）+ 可选宿主 tailnet 设备表
+# + probe-cases hooks，统一表与底线断言。栈差异只来自 deploy.manifest 参数；任一红即非零退出。
+# 输入 env：REMOTE_DIR、OPENCODE_API_KEY（真 key）、PROBE_LEVEL（boot/full，默认 full）、GOSS_BIN。
+# 主要参数（manifest）：CANARY_CONTAINER、GOSS_FILE、MIN_GOSS_CASES、PROBE_PIN_VARS、
+#   PROBE_BLACKLIST_PATH、PROBE_DRAIN/PROBE_GATEWAY_URL、PROBE_TS_PEER、
+#   PROBE_REQUIRE_BLACKLIST/PROBE_REQUIRE_DRAIN。
 set -uo pipefail
 : "${REMOTE_DIR:?REMOTE_DIR required}"
+REQUESTED_REMOTE_DIR="$REMOTE_DIR"
+# shellcheck disable=SC1090,SC1091
+source "$REMOTE_DIR/deploy.manifest"
+REMOTE_DIR="$REQUESTED_REMOTE_DIR"
 cd "$REMOTE_DIR" || exit 1
+
 PROBE_LEVEL="${PROBE_LEVEL:-full}"
-CANARY_PORT="${CANARY_PORT:-14097}"
-CANARY_CONTAINER="${CANARY_CONTAINER:-opencode-prod-canary}"
-CANARY_BROWSER_CONTAINER="${CANARY_BROWSER_CONTAINER:-opencode-browser-canary}"
+CANARY_CONTAINER="${CANARY_CONTAINER:?manifest 缺 CANARY_CONTAINER}"
+CANARY_BROWSER_CONTAINER="${CANARY_BROWSER_CONTAINER:-}"
+CANARY_PORT="${CANARY_PORT:-}"
+CANARY_IP_REQUIRED="${PROBE_NEEDS_IP:-1}"
 GOSS_BIN="${GOSS_BIN:-$REMOTE_DIR/.probe/goss}"
-GOSS_FILE="${GOSS_FILE:-$REMOTE_DIR/goss-trial.yaml}"
+GOSS_FILE="${GOSS_FILE:-goss.yaml}"
+case "$GOSS_FILE" in /*) ;; *) GOSS_FILE="$REMOTE_DIR/$GOSS_FILE" ;; esac
 PROBE_CASES_DIR="${PROBE_CASES_DIR:-$REMOTE_DIR/probe-cases}"
 RESULT_DIR="${PROBE_RESULT_DIR:-$REMOTE_DIR/.probe-results}"
 GOSS_TIMEOUT="${GOSS_TIMEOUT:-600}"
-GOSS_RETRY_TIMEOUT="${GOSS_RETRY_TIMEOUT:-120s}"
+GOSS_RETRY_TIMEOUT="${GOSS_RETRY_TIMEOUT:-180s}"
 GOSS_RETRY_SLEEP="${GOSS_RETRY_SLEEP:-5s}"
 PEER_TIMEOUT="${PEER_TIMEOUT:-240}"
 PROBE_CASE_TIMEOUT="${PROBE_CASE_TIMEOUT:-300}"
-MIN_GOSS_CASES="${MIN_GOSS_CASES:-10}" # 现 13 条（http1+command10+file1+process1）；防删门禁，drain 存在性另有专断
+MIN_GOSS_CASES="${MIN_GOSS_CASES:-1}"
+OPENCODE_API_KEY="${OPENCODE_API_KEY:-}"
 JUNIT="$RESULT_DIR/goss-junit.xml"
 VARS_FILE="$RESULT_DIR/goss-vars.yaml"
 RESULTS_TSV="$RESULT_DIR/results.tsv"
+DENIED_FILE="$RESULT_DIR/models-denied.json"
 PASS=1
+GATEWAY=0
+DENIED_MODEL=""
+SKIP_BLACKLIST=true
+SKIP_DRAIN=true
+declare -A PIN_VALUES=()
 
 mkdir -p "$RESULT_DIR"
 : > "$RESULTS_TSV"
@@ -30,32 +48,79 @@ now_ms() { date +%s%3N; }
 fmt_ms() { local ms="$1"; printf '%d.%03ds' $((ms / 1000)) $((ms % 1000)); }
 
 echo "probe level: $PROBE_LEVEL"
-PIN_TOOLS="$(grep -oP 'image:\s*\K\S*opencode-tools@\S+' compose.yml | head -n1 || true)"
-PIN_BROWSER="$(grep -oP 'image:\s*\K\S*chrome-cjk@\S+' compose.yml | head -n1 || true)"
-if [ -z "$PIN_TOOLS" ] || [ -z "$PIN_BROWSER" ]; then
-  echo "FAIL: compose.yml 里没解出双 pin（tools=$PIN_TOOLS browser=$PIN_BROWSER）"; PASS=0
+
+CANARY_IP=""
+if [ "$CANARY_IP_REQUIRED" = "1" ]; then
+  for i in $(seq 1 12); do
+    CANARY_IP="$(docker inspect "$CANARY_CONTAINER" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)"
+    [ -n "$CANARY_IP" ] && break
+    echo "canary-ip#$i -> 未就绪（5s 后再试）"
+    sleep 5
+  done
+  if [ -z "$CANARY_IP" ]; then
+    echo "FAIL: 拿不到 canary 容器 IP（$CANARY_CONTAINER）"
+    docker logs "$CANARY_CONTAINER" --tail 60 2>/dev/null || true
+    exit 1
+  fi
+  echo "canary ip: $CANARY_IP (container=$CANARY_CONTAINER)"
 fi
 
-GATEWAY=0
-if [ "$PROBE_LEVEL" = "full" ] && timeout 10 curl -s -m 5 -o /dev/null http://127.0.0.1:4000/v1/models; then
-  GATEWAY=1
+# 镜像 pin 变量：manifest 用 "VAR=repo 子串" 声明，runner 固定从 compose.yml 解出。
+PIN_PAIRS=()
+read -r -a PIN_PAIRS <<< "${PROBE_PIN_VARS:-}"
+for pair in "${PIN_PAIRS[@]}"; do
+  pin_var="${pair%%=*}"
+  pin_repo="${pair#*=}"
+  pin="$(grep -E 'image:[[:space:]]*[^[:space:]]+@sha256:[0-9a-f]+' compose.yml | grep -F "$pin_repo" | head -n1 | sed 's/.*image: *//' || true)"
+  if [ -z "$pin" ]; then
+    echo "FAIL: compose.yml 里没解出 $pin_var（repo=$pin_repo）"
+    PASS=0
+  fi
+  PIN_VALUES["$pin_var"]="$pin"
+done
+
+# 黑名单来源：从运行中的 canary 现场取（gateway 类栈）；空名单 = 全放行。
+if [ -n "${PROBE_BLACKLIST_PATH:-}" ]; then
+  if ! docker cp "$CANARY_CONTAINER:$PROBE_BLACKLIST_PATH" "$DENIED_FILE" >/dev/null 2>&1; then
+    echo "FAIL: 无法从 canary 读取 $PROBE_BLACKLIST_PATH"
+    PASS=0
+  elif ! DENIED_MODEL="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d[0] if d else "")' "$DENIED_FILE")"; then
+    echo "FAIL: $PROBE_BLACKLIST_PATH 解析失败"
+    PASS=0
+  fi
 fi
-SKIP_DRAIN=true
+if [ -n "$DENIED_MODEL" ]; then SKIP_BLACKLIST=false; fi
+if [ -n "${PROBE_BLACKLIST_PATH:-}" ]; then
+  echo "blacklist: denied=$DENIED_MODEL skip=$SKIP_BLACKLIST"
+fi
+
+# drain 活证明：仅 full 且本机确有网关时强制执行（img 预检场景无网关则跳过）。
+if [ "${PROBE_DRAIN:-0}" = "1" ]; then
+  if [ "$PROBE_LEVEL" = "full" ] && timeout 10 curl -s -m 5 -o /dev/null "${PROBE_GATEWAY_URL:?manifest 缺 PROBE_GATEWAY_URL}"; then
+    GATEWAY=1
+  fi
+  if [ "$GATEWAY" = "1" ]; then
+    echo "gateway present -> drain 强制执行"
+  elif [ "$PROBE_LEVEL" = "full" ]; then
+    echo "SKIP drain: 本机无网关（img 预检场景），prod 机恒强制执行"
+  else
+    echo "SKIP drain: boot 轻链路不跑 drain（细测才跑）"
+  fi
+fi
 if [ "$GATEWAY" = "1" ]; then SKIP_DRAIN=false; fi
-if [ "$GATEWAY" = "1" ]; then
-  echo "gateway present -> drain 强制执行"
-elif [ "$PROBE_LEVEL" = "full" ]; then
-  echo "SKIP drain: 本机无网关（img 预检场景），prod 机恒强制执行"
-else
-  echo "SKIP drain: boot 轻链路不跑 drain（细测才跑）"
-fi
 
 {
+  printf 'CANARY_IP: "%s"\n' "$CANARY_IP"
   printf 'CANARY_PORT: "%s"\n' "$CANARY_PORT"
   printf 'CANARY_CONTAINER: "%s"\n' "$CANARY_CONTAINER"
   printf 'CANARY_BROWSER_CONTAINER: "%s"\n' "$CANARY_BROWSER_CONTAINER"
-  printf 'PIN_TOOLS: "%s"\n' "$PIN_TOOLS"
-  printf 'PIN_BROWSER: "%s"\n' "$PIN_BROWSER"
+  if [ "${#PIN_VALUES[@]}" -gt 0 ]; then
+    for k in "${!PIN_VALUES[@]}"; do
+      printf '%s: "%s"\n' "$k" "${PIN_VALUES[$k]}"
+    done
+  fi
+  printf 'DENIED_MODEL: "%s"\n' "$DENIED_MODEL"
+  printf 'SKIP_BLACKLIST: %s\n' "$SKIP_BLACKLIST"
   printf 'SKIP_DRAIN: %s\n' "$SKIP_DRAIN"
 } > "$VARS_FILE"
 
@@ -151,10 +216,11 @@ PY
   echo "goss: rc=$GOSS_RC tests=$GOSS_TESTS failed=$GOSS_FAILED skipped=$GOSS_SKIPPED duration=$(fmt_ms "$GOSS_MS") junit=$JUNIT"
 fi
 
-echo "=== host tailnet peer ==="
-export TS_CONTAINER="$CANARY_CONTAINER"
-PEER_START=$(now_ms)
-timeout "$PEER_TIMEOUT" bash -s > "$RESULT_DIR/host-peer.log" 2>&1 <<'PEER'
+if [ "${PROBE_TS_PEER:-0}" = "1" ]; then
+  echo "=== host tailnet peer ==="
+  export TS_CONTAINER="$CANARY_CONTAINER"
+  PEER_START=$(now_ms)
+  timeout "$PEER_TIMEOUT" bash -s > "$RESULT_DIR/host-peer.log" 2>&1 <<'PEER'
 set -uo pipefail
 TS_IP="$(timeout 30 docker exec "$TS_CONTAINER" tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("Self") or {}; print((s.get("TailscaleIPs") or [""])[0])' || true)"
 if [ -z "$TS_IP" ]; then echo "FAIL: 容器内 tailscale status 无 IP（binary 缺失 / tailscaled 未起）"; exit 1; fi
@@ -167,15 +233,16 @@ done
 if [ -z "$PEER" ]; then echo "FAIL: 宿主 tailnet 设备表看不到容器 $TS_IP（12 次/约 3min）"; exit 1; fi
 echo "tailnet peer: $PEER ($TS_IP)"
 PEER
-PEER_RC=$?
-PEER_MS=$(( $(now_ms) - PEER_START ))
-cat "$RESULT_DIR/host-peer.log"
-if [ "$PEER_RC" -eq 0 ]; then
-  record runner host-tailnet-peer PASS "$(fmt_ms "$PEER_MS")"
-else
-  record runner host-tailnet-peer FAIL "$(fmt_ms "$PEER_MS")"
-  PASS=0
-  if [ "$PEER_RC" -eq 124 ]; then echo "FAIL: host peer 段 timeout ${PEER_TIMEOUT}s"; fi
+  PEER_RC=$?
+  PEER_MS=$(( $(now_ms) - PEER_START ))
+  cat "$RESULT_DIR/host-peer.log"
+  if [ "$PEER_RC" -eq 0 ]; then
+    record runner host-tailnet-peer PASS "$(fmt_ms "$PEER_MS")"
+  else
+    record runner host-tailnet-peer FAIL "$(fmt_ms "$PEER_MS")"
+    PASS=0
+    if [ "$PEER_RC" -eq 124 ]; then echo "FAIL: host peer 段 timeout ${PEER_TIMEOUT}s"; fi
+  fi
 fi
 
 echo "=== probe-cases ==="
@@ -183,9 +250,9 @@ shopt -s nullglob
 CASES=("$PROBE_CASES_DIR"/*.sh)
 shopt -u nullglob
 if [ "${#CASES[@]}" -eq 0 ]; then
-  echo "SKIP probe-cases: 无 *.sh（空目录先留位，等 #29 跨会话编排）"
+  echo "SKIP probe-cases: 无 *.sh"
 else
-  export REMOTE_DIR CANARY_PORT CANARY_CONTAINER CANARY_BROWSER_CONTAINER PROBE_LEVEL
+  export REMOTE_DIR CANARY_IP CANARY_PORT CANARY_CONTAINER CANARY_BROWSER_CONTAINER PROBE_LEVEL OPENCODE_API_KEY
   for f in "${CASES[@]}"; do
     base="$(basename "$f" .sh)"
     CASE_START=$(now_ms)
@@ -211,15 +278,29 @@ if [ "$GOSS_TESTS" -lt "$MIN_GOSS_CASES" ]; then
 else
   echo "OK: goss 用例数 $GOSS_TESTS >= 下限 $MIN_GOSS_CASES"
 fi
-DRAIN_COUNT="$(awk -F'\t' '$1 == "goss" && $2 ~ /drain/ {n++} END {print n+0}' "$RESULTS_TSV")"
-if [ "$PROBE_LEVEL" = "full" ] && [ "$GATEWAY" = "1" ]; then
-  if [ "$DRAIN_COUNT" -eq 0 ]; then
-    echo "FAIL: goss 结果缺 drain 条目（40-drain 底线）"; PASS=0
+if [ "${PROBE_REQUIRE_BLACKLIST:-0}" = "1" ]; then
+  BL_PASS_COUNT="$(awk -F'\t' '$1 == "goss" && $2 ~ /blacklist/ && $3 == "PASS" {n++} END {print n+0}' "$RESULTS_TSV")"
+  if [ "$SKIP_BLACKLIST" = "false" ]; then
+    if [ "$BL_PASS_COUNT" -eq 0 ]; then
+      echo "FAIL: goss 结果缺黑名单 PASS 条目"; PASS=0
+    else
+      echo "OK: goss 结果含黑名单 PASS 条目 $BL_PASS_COUNT 条"
+    fi
   else
-    echo "OK: goss 结果含 drain 条目 $DRAIN_COUNT 条"
+    echo "SKIP 黑名单底线: denied 名单为空（全放行）"
   fi
-else
-  echo "SKIP drain 底线: level=$PROBE_LEVEL gateway=$GATEWAY"
+fi
+if [ "${PROBE_REQUIRE_DRAIN:-0}" = "1" ]; then
+  DRAIN_COUNT="$(awk -F'\t' '$1 == "goss" && $2 ~ /drain/ {n++} END {print n+0}' "$RESULTS_TSV")"
+  if [ "$PROBE_LEVEL" = "full" ] && [ "$GATEWAY" = "1" ]; then
+    if [ "$DRAIN_COUNT" -eq 0 ]; then
+      echo "FAIL: goss 结果缺 drain 条目（40-drain 底线）"; PASS=0
+    else
+      echo "OK: goss 结果含 drain 条目 $DRAIN_COUNT 条"
+    fi
+  else
+    echo "SKIP drain 底线: level=$PROBE_LEVEL gateway=$GATEWAY"
+  fi
 fi
 
 echo "=== probe table ==="
