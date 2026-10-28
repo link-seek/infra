@@ -38,13 +38,14 @@ else
     echo "FAIL: 容器未进 tailnet（state=$TS_STATE ip=$TS_IP）"; PASS=0
   else
     PEER=""
-    for i in $(seq 1 6); do
+    # 新节点进 netmap 要等（eventual consistency；keyscan 12×15s 教训，30s 太急）。
+    for i in $(seq 1 12); do
       PEER="$(tailscale status --json 2>/dev/null | TS_IP="$TS_IP" python3 -c 'import json,os,sys; ip=os.environ["TS_IP"]; d=json.load(sys.stdin); print(next((p.get("HostName","") for p in d.get("Peer",{}).values() if ip in (p.get("TailscaleIPs") or [])), ""))' || true)"
       [ -n "$PEER" ] && break
-      sleep 5
+      sleep 15
     done
     if [ -z "$PEER" ]; then
-      echo "FAIL: 宿主 tailnet 设备表看不到容器 $TS_IP（6 次/30s）"; PASS=0
+      echo "FAIL: 宿主 tailnet 设备表看不到容器 $TS_IP（12 次/约 3min）"; PASS=0
     else
       echo "tailnet peer: $PEER ($TS_IP)"
     fi
