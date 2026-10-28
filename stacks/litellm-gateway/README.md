@@ -37,8 +37,7 @@
   `.env` 更新走 render-dotenv（workflow 永不手写 `.env`）。
 * 黑名单增减：改 `guard/models-denied.json`（数组）后必须走 bake 重打才生效
   （guard 烘进镜像，infra 这份只是 bake 的来源；bake 构建时从 main 拉取）。
-  流程：改本文件合 PR → 手动 dispatch `bake-gateway`（docker 仓）→ promote 打 tag 并开 pin PR（reason 必填）→
-  合 pin PR → 手动 dispatch `deliver-litellm-gateway`。直接合本仓只会触发一次空跑部署，新名单不会生效。
+  流程：改本文件合 PR → 手动 dispatch `bake-gateway`（docker 仓）→ promote 打 tag（reason 必填，审计进 run 日志）→ 手动 dispatch `deliver-litellm-gateway`。直接合本仓只会触发一次空跑部署，新名单不会生效。
   空数组 = 全放行；文件坏掉 = 全拦（fail-closed）。
 * 验证（现网 4000，master key 见 sops）：
 ```bash
