@@ -14,8 +14,12 @@ Internet
 
 ## hw21 本机（/root/stacks/opencode-prod）
 
-- `opencode-prod`：tools 镜像 v2.0.27（browser sidecar PR#6 已含），`0.0.0.0:4097`
+- `opencode-prod`：tools 镜像（browser sidecar PR#6 已含），`0.0.0.0:4097`
   （公网有暴露但实测零流量；加固项：收紧到 127.0.0.1 + tailnet）。
+- `opencode-prod` 容器自己跑 userspace `tailscaled`（无 tun / NET_ADMIN），
+  hostname `opencode-prod`，tag `tag:opencode`；入网 key 由 deliver 现场 mint 成
+  `.env` 的 `TS_JOIN_KEY`（reusable+ephemeral+90d），启动时 `tailscale up --ssh`。
+  `tailscale-state` 卷持久化 node key，重建不改名；canary 用 `opencode-prod-canary`。
 - `opencode-browser`：chrome-cjk，`BROWSER_CDP_URL=http://172.17.0.1:9222`（静态网桥 IP，
   headless-shell 拒非 IP Host 头，服务名直连不可用）。
 - `opencode-net`：bridge 172.19.0.0/16。注意：重建导致子网变化时同步改 litellm publish。
@@ -27,11 +31,26 @@ Internet
 
 `SMTP_*`（163，465 隐式 TLS）、`MAIL_DEFAULT_TO=xieyucheng@outlook.com`、
 `OPENCODE_SERVER_PASSWORD`、`GH_TOKEN`、`HCLOUD_AK/SK`、`LITELLM_API_KEY`、
-`CLOUDFLARE_API_TOKEN`（管 DNS）、`SSH_PRIVATE_KEY_B64`（容器钥匙，
-SSH_TARGETS 四台：.21/.41/0001 EIP/0002 EIP；001/002 非常驻开机）。
+`CLOUDFLARE_API_TOKEN`（管 DNS）、`TS_JOIN_KEY`（deliver 现场 mint 的容器入网 key）。
+容器不再持有静态 SSH 私钥；`SSH_TARGETS` 仅作文档/排障提示，语义为 tailnet hostname
+（`mesh-hw-21 mesh-hw-41`）。
+
+## 容器 SSH（TS-only）
+
+```sh
+# 人进容器排障（tag:mesh -> tag:opencode）
+tailscale ssh root@opencode-prod
+
+# 容器出去（tag:opencode -> .21/.41）
+docker exec opencode-prod tailscale ssh root@mesh-hw-21 'hostname'
+docker exec opencode-prod tailscale ssh root@mesh-hw-41 'hostname'
+```
+
+旧 `ssh`/`ssh-keyscan`/authorized_keys 通路已退役；出站请用 `tailscale ssh`。
 
 ## 待办
 
+- [ ] 验证双向 TS SSH 后：删 `PROD_SSH_PRIVATE_KEY_B64` secret，清 `.21/.41` 旧 key `authorized_keys`（#43）
 - [ ] `opencode.xieyucheng.top` 上线：Caddy 加新块 + 旧名 301（本仓 workflow 落地）
 - [ ] DNS：`opencode` A → 120，删 WAF 死 CNAME
 - [ ] 4097 监听收紧（127.0.0.1 + tailnet）

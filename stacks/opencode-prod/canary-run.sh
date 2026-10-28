@@ -18,6 +18,10 @@ cat > /tmp/canary-override.yml <<EOF
 services:
   opencode-prod:
     container_name: opencode-prod-canary
+    # canary 先上线：TS_HOSTNAME 必须错开，否则正式容器会被命名成 opencode-prod-1。
+    hostname: opencode-prod-canary
+    environment:
+      TS_HOSTNAME: opencode-prod-canary
     # !override：ports 默认是累加合并，不加这个底包的宿主绑定会漏进 canary，
     # 生产机上直接撞车（hw-21 Compose v2.27.1，门槛 2.24.4，2026-10-26 实测）。
     # canary 仍走 compose up，真源仍是 compose.yml，不分叉。

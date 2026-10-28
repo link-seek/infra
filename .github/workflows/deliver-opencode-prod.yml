@@ -37,5 +37,4 @@ jobs:
       ENV_CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
       ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
       ENV_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
-      ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.PROD_SSH_PRIVATE_KEY_B64 }}
       ENV_SMTP_PASS: ${{ secrets.PROD_SMTP_PASS }}

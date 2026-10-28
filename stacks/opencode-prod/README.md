@@ -37,10 +37,23 @@
   以 agent 内 memory 调用 / 会话触发后 API 为准（试用期实证，见 docker-images#2）。
 - `4097:4097` 仍绑全接口（历史状态）；收紧到回环 + tailnet 是待办，不管本次。
 
+## 容器独立进网（2026-10-27）
+
+- 容器自带 userspace `tailscaled`（无 tun / NET_ADMIN），hostname `opencode-prod`，
+  tag `tag:opencode`；状态卷 `tailscale-state` 持久化 node key，重建不改名。canary 用
+  `TS_HOSTNAME=opencode-prod-canary` 先上线，避免抢正式节点名。不再安装静态 SSH 私钥、
+  不再 ssh-keyscan。
+- 每次 deploy 由 `deliver-remote-core.sh` 现场 mint 一把
+  reusable+ephemeral+90 天、`tag:opencode` 的 auth key，经 render 写入 `.env` 的
+  `TS_JOIN_KEY`；容器启动时 `tailscale up --ssh`。
+- 验活：`canary-probe.sh` 会断言容器 tailscaled Running 且宿主 tailnet 设备表可见此节点；
+  生产上再验双向：`tailscale ssh root@opencode-prod` 进去，
+  `docker exec opencode-prod tailscale ssh root@mesh-hw-21 hostname` 出去。
+- ACL 见 `tailscale/policy.hujson`：`tag:opencode` 只放行 .21/.41，`tag:mesh` 可登容器。
+
 ## 进仓红线
 
 - `.env` 真值永不上机经 workflow（只活在目标机 + sops）；workflow 缺 `.env`
   直接 abort。
-- `config/home/.{aliyun,oci}/`、`container-ssh/` 是目标机本地文件，workflow
-  不下发、不删除、不覆盖。
-- 卷数据（`prod-*`）workflow 永不 `down -v`。
+- `config/home/.{aliyun,oci}/` 是目标机本地文件，workflow 不下发、不删除、不覆盖。
+- 卷数据（`prod-*`、`tailscale-state`）workflow 永不 `down -v`。

@@ -5,6 +5,7 @@
 #       SSH_TRANSPORT=key（默认）→ 还需 SSH_KEY_FILE/SSH_PORT；=tailscale → 走 TS SSH，不用钥匙
 # 可选：CANDIDATE_DIGEST（digest 门禁已在外层冻好；为空则只读 compose 现有 pin，不改）
 #       REMOTE_DIR 缺省 /root/<stack>；ENV_* 由调用方 export 进来；OPENCODE_API_KEY 供探针。
+#       TS_API_KEY：栈点名 TS_JOIN_KEY 时，现场 mint reusable+ephemeral+90d 的 tag:opencode key。
 set -euo pipefail
 echo "CORE-START stack=${STACK_DIR:-?} target=${TARGET_IP:-?} action=${ACTION_MODE:-?} digest=${CANDIDATE_DIGEST:-none} transport=${SSH_TRANSPORT:-key}"
 set -x
@@ -50,7 +51,7 @@ else
   cp "$STACK_DIR/compose.yml" /tmp/compose.deploy.yml
 fi
 
-for v in ENV_GH_TOKEN ENV_LITELLM_API_KEY ENV_OPENCODE_SERVER_PASSWORD ENV_CLOUDFLARE_API_TOKEN ENV_CF_AI_TOKEN ENV_HCLOUD_AK ENV_HCLOUD_SK ENV_SSH_PRIVATE_KEY_B64 ENV_SMTP_PASS; do
+for v in ENV_GH_TOKEN ENV_LITELLM_API_KEY ENV_OPENCODE_SERVER_PASSWORD ENV_CLOUDFLARE_API_TOKEN ENV_CF_AI_TOKEN ENV_HCLOUD_AK ENV_HCLOUD_SK ENV_SMTP_PASS; do
   export "$v"="${!v:-}"
   # render-dotenv.sh 只认 S_<SUFFIX>；调用方负责桥接（脚本头注释约定的调用方义务）
   export "S_$v"="${!v:-}"
@@ -117,6 +118,36 @@ PY
   export ENV_CLOUDFLARE_API_TOKEN="$CHILD"
   export S_ENV_CLOUDFLARE_API_TOKEN="$CHILD"
   echo "CF 现签 OK（90 天，值已进 render）"
+  set -x # 敏感段结束
+fi
+# TS join key 现签：栈点名 TS_JOIN_KEY → 每次 deploy mint 一把 reusable+ephemeral+90d、
+# 带 tag:opencode 的 auth key，render 进 .env 供容器 userspace tailscaled 启动时 join。
+# 旧静态 SSH 私钥（ENV_SSH_PRIVATE_KEY_B64）已退役，本线不再触碰任何 SSH 私钥。
+if grep -q '^TS_JOIN_KEY=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
+  set +x # 敏感段：关 trace，key 只走 mask 通道
+  : "${TS_API_KEY:?FAIL: 栈要点 TS_JOIN_KEY 但没给 TS_API_KEY（现签不了）}"
+  TSKEY="$(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')"
+  MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["tag:opencode"]}}},"expirySeconds":7776000}'
+  MINT_RESP="$(mktemp)"
+  MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+    -d "$MINT_BODY" \
+    https://api.tailscale.com/api/v2/tailnet/-/keys 2>/tmp/ts-mint.err || true)"
+  JOIN_KEY="$(python3 -c "import json; print(json.load(open('$MINT_RESP')).get('key',''))" 2>/dev/null || true)"
+  if [ -z "$JOIN_KEY" ]; then
+    MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -u "$TSKEY:" -H 'Content-Type: application/json' \
+      -d "$MINT_BODY" \
+      https://api.tailscale.com/api/v2/tailnet/-/keys 2>/tmp/ts-mint.err || true)"
+    JOIN_KEY="$(python3 -c "import json; print(json.load(open('$MINT_RESP')).get('key',''))" 2>/dev/null || true)"
+  fi
+  if [ -z "$JOIN_KEY" ]; then
+    echo "FAIL: TS join key 现签失败（HTTP $MINT_CODE）: $(head -c 400 "$MINT_RESP")" >&2
+    rm -f "$MINT_RESP"
+    exit 1
+  fi
+  rm -f "$MINT_RESP"
+  echo "::add-mask::$JOIN_KEY"
+  export S_ENV_TS_JOIN_KEY="$JOIN_KEY"
+  echo "TS join key minted（reusable+ephemeral+90d, tag:opencode, HTTP $MINT_CODE）"
   set -x # 敏感段结束
 fi
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
