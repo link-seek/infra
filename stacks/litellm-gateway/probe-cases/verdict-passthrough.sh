@@ -20,7 +20,7 @@ fail() { echo "FAIL: $1"; PASS=0; }
 probe_chat() { # $1=key $2=outfile -> http code
   curl -s -m 30 -o "$2" -w '%{http_code}' \
     -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
-    -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+    -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hi"}],"max_tokens":32}' \
     "$BASE_URL/v1/chat/completions" || echo 000
 }
 
