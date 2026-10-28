@@ -9,5 +9,25 @@ GOSS_VERSION="v0.4.10"
 CUTOVER_SERVICES="opencode-prod browser"
 # 生产 up 探针级别：full（含 drain 活证明；网关在 prod 机恒在故恒强制执行）
 UP_PROBE_LEVEL="full"
+
+# ---- 共用 canary 三件套参数（scripts/canary-run/probe/drop.sh 固定函数）----
 # canary 宿主端口（生产 4097，避免冲突）
 CANARY_PORT=14097
+CANARY_PROJECT=opencode-prod-canary
+CANARY_CONTAINER=opencode-prod-canary
+CANARY_BROWSER_CONTAINER=opencode-browser-canary
+# service|container_name|宿主端口(逗号分隔)|hostname|env(K=V;...)|network
+# canary 先上线：TS_HOSTNAME 必须错开，否则正式容器会被命名成 opencode-prod-1。
+CANARY_SERVICE_SPECS="opencode-prod|opencode-prod-canary|${CANARY_PORT}:4097|opencode-prod-canary|TS_HOSTNAME=opencode-prod-canary|
+browser|opencode-browser-canary|127.0.0.1:19228:9222|||"
+CANARY_UP_SERVICES="opencode-prod browser"
+CANARY_IMAGE_MATCH=linkseed/opencode-tools
+CANARY_PINS="PIN_TOOLS=linkseed/opencode-tools PIN_BROWSER=chrome-cjk"
+# 网关在 prod 机恒在：full 时强制 drain；宿主 tailnet 设备表也要能看到 canary。
+CANARY_DRAIN_ENABLED=1
+CANARY_GATEWAY_PROBE_URL=http://127.0.0.1:4000/v1/models
+CANARY_HOST_PEER=1
+GOSS_FILE=goss-trial.yaml
+GOSS_RETRY_TIMEOUT=120s
+# goss 用例下限（现 13 条：http1+command10+file1+process1）；防删门禁
+MIN_GOSS_CASES=10

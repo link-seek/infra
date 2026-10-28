@@ -9,12 +9,24 @@ PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway"
 SYNC_FILES="compose.yml README.md .env.example goss-gateway.yaml probe-cases"
 # 探针 goss 版本（deliver-remote-core.sh 在 CI 下载后按同一条 tar 路送上靶机，不烘镜像）
 GOSS_VERSION="v0.4.10"
-# canary 容器名 / goss 文件名（runner 同名 env 覆盖，默认值与栈一致）
-CANARY_CONTAINER=litellm-guard-canary
-GOSS_FILE=goss-gateway.yaml
-# goss 用例下限（现 3 条：http1+command2）；防删门禁
-MIN_GOSS_CASES=3
 # 切流时重建的服务（canary 已验过，留下同样内容）
 CUTOVER_SERVICES="litellm-guard"
 # 生产 up 探针级别：full（就绪+黑名单+goss pin/verdict 透传全套）
 UP_PROBE_LEVEL="full"
+
+# ---- 共用 canary 三件套参数（scripts/canary-run/probe/drop.sh 固定函数）----
+CANARY_PROJECT=litellm-guard-canary
+CANARY_CONTAINER=litellm-guard-canary
+# service|container_name|宿主端口(逗号分隔)|hostname|env(K=V;...)|network
+# 网关不暴露宿主端口，并切到 canary 自有网络（避免挂生产具名网络）。
+CANARY_SERVICE_SPECS="litellm-guard|litellm-guard-canary||||canary-net"
+CANARY_UP_SERVICES="litellm-guard"
+CANARY_IMAGE_MATCH=linkseed/litellm-gateway
+CANARY_MASTER_FILE=.canary_master
+# 真/假 key 探针模型留在 probe-cases/goss；黑名单从运行中的 canary 现场取。
+CANARY_PINS="PIN_GATEWAY=linkseed/litellm-gateway"
+CANARY_BLACKLIST_PATH=/app/models-denied.json
+GOSS_FILE=goss-gateway.yaml
+GOSS_RETRY_TIMEOUT=180s
+# goss 用例下限（现 3 条：http1+command2）；防删门禁
+MIN_GOSS_CASES=3
