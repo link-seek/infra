@@ -42,7 +42,11 @@
 		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]},
 		// opencode-prod 容器只登 .21/.41 两个等价节点；人（tag:mesh）可登容器排障。
 		{"src": ["tag:opencode"], "dst": ["100.91.222.51", "100.111.231.85"], "ip": ["22"]},
-		{"src": ["tag:mesh"],     "dst": ["tag:opencode"], "ip": ["22"]}
+		{"src": ["tag:mesh"],     "dst": ["tag:opencode"], "ip": ["22"]},
+		// CI 看 canary：trial 靶机/runner 都是 tag:ci，netmap 按 ACL 过滤，
+		// 无此条则探针在宿主设备表永远看不到 canary（40616506188/40617554410 实锤）。
+		// 只给网络可见性，不给 ssh 规则（探针用 docker exec），CI 不能 SSH 进 canary。
+		{"src": ["tag:ci"],       "dst": ["tag:opencode"], "ip": ["22"]}
 	],
 	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
 		"name":       "opencode-ai",
