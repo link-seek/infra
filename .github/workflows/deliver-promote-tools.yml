@@ -1,7 +1,7 @@
 name: deliver-promote-tools
 # 快递手续（deliver-promote）：只办 tag 晋升手续（retag 不 rebuild），不管镜像内容，不管目标机。
 # 薄调用 promote-stack.yml；tools 双 registry（GHCR + SWR）两边都打 tag。
-# stable 可覆盖（reason 必填），pin 走 PR（只 pin SWR 那条，chrome-cjk 不动），合入后再手动 dispatch deliver。
+# stable 可覆盖（reason 必填），审计进 run 日志；发版手动 dispatch deliver。
 
 on:
   workflow_dispatch:
@@ -24,13 +24,11 @@ concurrency:
 jobs:
   promote:
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       packages: write
     uses: ./.github/workflows/promote-stack.yml
     with:
       images: ghcr.io/link-seek/opencode-tools swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools
-      pin_file: stacks/opencode-prod/compose.yml
       digest: ${{ inputs.digest }}
       tag: ${{ inputs.tag }}
       reason: ${{ inputs.reason }}
