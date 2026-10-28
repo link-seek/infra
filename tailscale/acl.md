@@ -28,6 +28,7 @@
   - `tag:ci` → `tag:ci`   : 22, 2244
   - `tag:opencode` → `.21/.41`（100.91.222.51 / 100.111.231.85）: 22
   - `tag:mesh` → `tag:opencode` : 22
+  - `tag:ci` → `tag:opencode` : 22（仅 trial 可见性：netmap 按 ACL 过滤，无此条探针看不到 canary；不配 ssh 规则，CI 不能 SSH 进 canary，探针走 docker exec）
 - Tailscale SSH（ssh 段）：
   - `tag:ci` → `tag:prod` root：生产部署
   - `tag:ci` → `tag:ci` root：部署到临时靶子（靶子 join 时带 `--ssh`）
