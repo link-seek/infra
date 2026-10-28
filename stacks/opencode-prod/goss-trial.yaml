@@ -1,0 +1,62 @@
+http:
+  http://127.0.0.1:{{ .Vars.CANARY_PORT }}/:
+    status: 200
+    timeout: 5000
+    no-follow-redirects: false
+
+command:
+  tools-image-pin:
+    exec: 'test "$(docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Image"])'')" = "$(docker inspect {{ .Vars.PIN_TOOLS }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Id"])'')"'
+    exit-status: 0
+    timeout: 30000
+  browser-image-pin:
+    exec: 'test "$(docker inspect {{ .Vars.CANARY_BROWSER_CONTAINER }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Image"])'')" = "$(docker inspect {{ .Vars.PIN_BROWSER }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Id"])'')"'
+    exit-status: 0
+    timeout: 30000
+  canary-volume-mounts:
+    exec: 'docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c ''import json,sys; mounts={m["Destination"] for m in json.load(sys.stdin)[0]["Mounts"]}; need={"/workspace","/root/.local/share/opencode","/var/lib/tailscale"}; missing=need-mounts; assert not missing, "missing mounts: %s" % sorted(missing)'''
+    exit-status: 0
+    timeout: 30000
+  canary-tailscaled-socket:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} test -S /var/run/tailscale/tailscaled.sock'
+    exit-status: 0
+    timeout: 30000
+  canary-tailscale-status:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} tailscale --socket=/var/run/tailscale/tailscaled.sock status --json | python3 -c ''import json,sys; d=json.load(sys.stdin); s=d.get("Self") or {}; ip=(s.get("TailscaleIPs") or [""])[0]; assert d.get("BackendState")=="Running" and ip, "state=%s ip=%s" % (d.get("BackendState"), ip); print("tailscale-self="+ip)'''
+    exit-status: 0
+    timeout: 30000
+  gh-auth-status:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} gh auth status'
+    exit-status: 0
+    timeout: 60000
+  wrangler-whoami:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} wrangler whoami'
+    exit-status: 0
+    timeout: 60000
+  send-mail-probe:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} send-mail "" "[PROBE] canary goss trial" "canary probe: goss send-mail ok"'
+    exit-status: 0
+    timeout: 120000
+  40-drain-fixed-1:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} opencode run "reply with exactly: DRAIN-OK"'
+    exit-status: 0
+    stdout:
+      - DRAIN-OK
+    timeout: 180000
+    skip: {{ .Vars.SKIP_DRAIN }}
+  40-drain-fixed-2:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} opencode run "reply with exactly: DRAIN-OK"'
+    exit-status: 0
+    stdout:
+      - DRAIN-OK
+    timeout: 180000
+    skip: {{ .Vars.SKIP_DRAIN }}
+
+file:
+  /var/run/tailscale/tailscaled.sock:
+    exists: true
+    filetype: socket
+
+process:
+  tailscaled:
+    running: true
