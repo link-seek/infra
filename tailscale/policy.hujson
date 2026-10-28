@@ -6,7 +6,9 @@
 		// CI 起的每一个节点（部署方 + 临时靶子）都带这个 tag。
 		"tag:ci":        ["autogroup:admin"],
 		// 常驻生产机（hw-21）。
-		"tag:prod":      ["autogroup:admin"]
+		"tag:prod":      ["autogroup:admin"],
+		// opencode-prod 容器（userspace tailscaled），独立 tailnet 节点。
+		"tag:opencode":  ["autogroup:admin"]
 	},
 	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
 	"grants": [
@@ -37,7 +39,10 @@
 		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4098"]},
 		// 过渡期 2244 保留：旧 key 通路还在，切完 TS SSH 并验证后删掉 2244。
 		{"src": ["tag:ci"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
-		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]}
+		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]},
+		// opencode-prod 容器只登 .21/.41 两个等价节点；人（tag:mesh）可登容器排障。
+		{"src": ["tag:opencode"], "dst": ["100.91.222.51", "100.111.231.85"], "ip": ["22"]},
+		{"src": ["tag:mesh"],     "dst": ["tag:opencode"], "ip": ["22"]}
 	],
 	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
 		"name":       "opencode-ai",
@@ -103,6 +108,18 @@
 		"dst":    ["tag:ci"],
 		"users":  ["root"]
 	}, {
+		// opencode-prod 容器：SSH dst 不能用 IP，用 tag:mesh；上面的网络 grant
+		// 只放行 .21/.41:22，二者交集才是真正可达的两台等价节点。
+		"action": "accept",
+		"src":    ["tag:opencode"],
+		"dst":    ["tag:mesh"],
+		"users":  ["root"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:mesh"],
+		"dst":    ["tag:opencode"],
+		"users":  ["root"]
+	}, {
 		// 已删 autogroup:member → tag:mesh / tag:connector：
 		// 那是"任何未打 tag 的成员设备都能 root 进所有机器"，包括随便起的 CI 节点。
 		// 人的设备都是 tag:mesh，走下面这条，能力不受影响。
@@ -135,6 +152,8 @@
 		{"src": "tag:ci", "allow": ["100.91.222.51:22"]},
 		{"src": "tag:ci", "deny": ["100.111.231.85:22"]},
 		{"src": "tag:ci", "deny": ["100.69.220.112:22"]},
-		{"src": "tag:ci", "deny": ["100.85.128.116:22"]}
+		{"src": "tag:ci", "deny": ["100.85.128.116:22"]},
+		{"src": "tag:opencode", "allow": ["100.91.222.51:22", "100.111.231.85:22"]},
+		{"src": "tag:opencode", "deny": ["100.85.128.116:22", "100.69.220.112:22"]}
 	]
 }

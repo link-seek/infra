@@ -59,8 +59,6 @@ on:
         required: false
       ENV_HCLOUD_SK:
         required: false
-      ENV_SSH_PRIVATE_KEY_B64:
-        required: false
       ENV_SMTP_PASS:
         required: false
       CF_PARENT_TOKEN:
@@ -220,6 +218,7 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SSH_KEY_B64: ${{ inputs.ssh_key_b64 }}
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
           SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
           SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
@@ -230,7 +229,6 @@ jobs:
           ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
           ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
           ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
-          ENV_SSH_PRIVATE_KEY_B64: ${{ secrets.ENV_SSH_PRIVATE_KEY_B64 }}
           ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
           CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
         run: |

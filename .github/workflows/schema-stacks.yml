@@ -44,7 +44,7 @@ jobs:
               },
               "stacks/opencode-prod": {
                   "project": "opencode-prod",
-                  "volumes": {"prod-data": None, "prod-work": None},
+                  "volumes": {"prod-data": None, "prod-work": None, "tailscale-state": None},
                   "networks": {"opencode-net": None},
                   "manifest": True,
                   "env_example_keys": (),
