@@ -40,7 +40,7 @@ stacks/<system>/          # 各系统 topology 级引用，不搬业务仓代码
 | `deliver-caddy.yml` | 同上 | ephemeral runner → tailnet → 目标节点 reload + 验证 |
 | `deliver-cloudflared.yml` | 同上（挑空闲时间，有十几秒闪断） | 备份 → 只换 ingress 段 → restart → 验证，失败回滚 |
 | `dns-apply.yml` | 同上（默认 dry-run 只打印） | 按 `records.yaml` 对账 Cloudflare（二期启用） |
-| `deliver-promote-*.yml` | 同上（输已测 digest + 覆盖原因 reason，stable 可覆盖） | 只打 tag + 开 pin PR，不发货；合入后再手动点上面对应项 |
+| `deliver-promote-*.yml` | 同上（输已测 digest + 覆盖原因 reason，stable 可覆盖） | 只打 tag（审计进 run 日志），不发货；手动点上面对应项 |
 
 ## 规整专项
 

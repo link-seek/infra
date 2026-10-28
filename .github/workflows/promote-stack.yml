@@ -1,7 +1,8 @@
 name: promote-stack
 # 晋升共用线（promote）：只办 tag 晋升手续（retag 不 rebuild），不管镜像内容，不管目标机。
 # 调用方 = deliver-promote-* 薄调用（手动 dispatch 传参）。
-# stable 是可移动指针：允许覆盖，但每次覆盖必须写原因；pin 改动走 PR，绝不直推 main。
+# stable 是可移动指针：允许覆盖，但每次覆盖必须写原因；审计靠本 run 日志（digest/tag/原因/来源）。
+# compose pin 不再跟（deliver 进门按 tag 现冻覆盖 pin；90 天外历史以 registry tag 为准）。
 # 认证（bake-*）保内容 → 本线保手续 → 快递（deliver-*）保目标机实测。
 
 on:
@@ -9,10 +10,6 @@ on:
     inputs:
       images:
         description: "空格分隔的镜像列表（如单 SWR 或 GHCR+SWR）"
-        required: true
-        type: string
-      pin_file:
-        description: "要改 pin 的 compose 文件，如 stacks/litellm-gateway/compose.yml"
         required: true
         type: string
       digest:
@@ -34,9 +31,8 @@ on:
       SWR_LOGIN_PASS:
         required: true
 
-# 权限由调用方给：contents: write + pull-requests: write（推分支开 PR）；
-# 含 GHCR 镜像的调用方另给 packages: write。
-# GITHUB_TOKEN 走系统自带，用于 GHCR 登录与开 PR。
+# 权限由调用方给：contents: read 足够（含 GHCR 的调用方另给 packages: write）。
+# GITHUB_TOKEN 走系统自带，用于 GHCR 登录。
 
 jobs:
   promote:
@@ -48,7 +44,6 @@ jobs:
       - name: 校验输入（含 reason 非空）
         env:
           IMAGES: ${{ inputs.images }}
-          PIN_FILE: ${{ inputs.pin_file }}
           DIGEST: ${{ inputs.digest }}
           TAG: ${{ inputs.tag }}
           REASON: ${{ inputs.reason }}
@@ -62,14 +57,11 @@ jobs:
               *) echo "FAIL: 镜像必须是 registry/path 形式: $img"; exit 1 ;;
             esac
           done
-          case "$PIN_FILE" in
-            ""|/*|*..*) echo "FAIL: pin_file 非法: $PIN_FILE"; exit 1 ;;
-          esac
           echo "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "FAIL: digest 格式错"; exit 1; }
           echo "$TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$' || { echo "FAIL: tag 格式错"; exit 1; }
           [ -n "${REASON//[[:space:]]/}" ] || { echo "FAIL: reason 必填非空（stable 覆盖必须写原因）"; exit 1; }
           echo "images=$IMAGES"
-          echo "pin_file=$PIN_FILE digest=$DIGEST tag=$TAG"
+          echo "digest=$DIGEST tag=$TAG"
 
       - name: 登录对应 registry
         env:
@@ -131,66 +123,25 @@ jobs:
             echo "OK: $img:$TAG 复核通过（目标 digest 在解析树内）"
           done
 
-      - name: 改 pin_file
+      - name: 晋升记录（审计：digest/tag/原因/来源进日志与 summary）
         env:
-          PIN_FILE: ${{ inputs.pin_file }}
-          IMAGES: ${{ inputs.images }}
-          DIGEST: ${{ inputs.digest }}
-        run: |
-          set -euo pipefail
-          [ -f "$PIN_FILE" ] || { echo "FAIL: pin_file 不存在: $PIN_FILE"; exit 1; }
-          touched=0
-          for img in $IMAGES; do
-            IMG_RE="${img//./\\.}"
-            if grep -qE "^[[:space:]]*image:[[:space:]]*${IMG_RE}@sha256:[0-9a-f]+([[:space:]]|$)" "$PIN_FILE"; then
-              sed -i -E "s#^([[:space:]]*image:[[:space:]]*)${IMG_RE}@sha256:[0-9a-f]+#\1${img}@${DIGEST}#" "$PIN_FILE"
-              grep -qE "^[[:space:]]*image:[[:space:]]*${IMG_RE}@${DIGEST}([[:space:]]|$)" "$PIN_FILE" \
-                || { echo "FAIL: pin 未写入: $img"; exit 1; }
-              touched=1
-            fi
-          done
-          [ "$touched" = 1 ] || { echo "FAIL: pin_file 里没有 images 中的镜像行: $PIN_FILE"; exit 1; }
-          echo "pin 已更新: $PIN_FILE"
-
-      - name: 建分支开 PR（绝不直推 main）
-        env:
-          PIN_FILE: ${{ inputs.pin_file }}
           IMAGES: ${{ inputs.images }}
           DIGEST: ${{ inputs.digest }}
           TAG: ${{ inputs.tag }}
           REASON: ${{ inputs.reason }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.triggering_actor }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- "$PIN_FILE"; then
-            echo "pin 无变化，无需提交/开 PR"
-            exit 0
-          fi
-
-          SHORT="${DIGEST#sha256:}"
-          SHORT="${SHORT:0:12}"
-          BRANCH="promote/${TAG}-${SHORT}"
-          STACK="$(basename "$(dirname "$PIN_FILE")")"
-          TITLE="promote(${STACK}): ${TAG} -> ${SHORT}"
-          BODY="$(cat <<EOF
-          ## promote 晋升手续（retag 不 rebuild）
-
-          - tag：\`${TAG}\`
-          - digest：\`${DIGEST}\`
-          - images：\`${IMAGES}\`
-          - pin_file：\`${PIN_FILE}\`
-          - 原因：${REASON}
-          - 来源 run：${RUN_URL}
-
-          stable 是可移动指针；本 PR 只改 pin，合入后再手动 dispatch 对应 deliver。
-          EOF
-          )"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add "$PIN_FILE"
-          git commit -m "promote(${STACK}): ${TAG} -> ${DIGEST}" -m "原因: ${REASON}" -m "来源: ${RUN_URL}"
-          git push -u origin "$BRANCH"
-          gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY"
+          {
+            echo "## promote 晋升记录（retag 不 rebuild）"
+            echo ""
+            echo "- tag：\`${TAG}\`"
+            echo "- digest：\`${DIGEST}\`"
+            echo "- images：\`${IMAGES}\`"
+            echo "- 原因：${REASON}"
+            echo "- 操作人：${ACTOR}"
+            echo "- 来源 run：${RUN_URL}"
+            echo ""
+            echo "stable 是可移动指针；发版请手动 dispatch 对应 deliver（进门按 tag 现冻）。"
+          } | tee "$GITHUB_STEP_SUMMARY"
