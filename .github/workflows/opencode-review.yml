@@ -31,7 +31,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
         with:
           model: ${{ vars.OPENCODE_REVIEW_MODEL }} # 引擎ID集中在org变量，一改全仓生效
-          variant: high
+          variant: max
           use_github_token: true
           prompt: |
             Review this pull request for the link-seek/infra repo.
