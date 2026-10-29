@@ -11,15 +11,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: 进 tailnet
+      - name: 进 tailnet（mint-only 现场 key，不过期静态 key）
         timeout-minutes: 6
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
-          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-probe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: 临时 key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-probe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
       - name: 诊断 HW21 tunnel（只读）
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
