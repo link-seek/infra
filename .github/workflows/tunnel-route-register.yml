@@ -3,6 +3,7 @@ name: tunnel-route-register
 # Cloudflare Tunnel Public Hostname 的代码化登记（替代 Dashboard 手点）。
 # 本地 config.yml 在这条远程托管隧道上不参与路由，hostname 必须经 API 注册才生效。
 # 默认只读：dispatch 时 apply=true 才写。写前必 GET 打印现状，写后必验 401。
+# 密钥用 org CF_PARENT_TOKEN 现签短效 token。
 on:
   workflow_dispatch:
     inputs:
@@ -19,10 +20,105 @@ jobs:
   route:
     runs-on: ubuntu-latest
     timeout-minutes: 12
-    env:
-      CFTOK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: CF token 现签（DNS+Tunnel 读写，2h，fail-closed）
+        env:
+          CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+        run: |
+          set -euo pipefail
+          PARENT="$(printf '%s' "${CF_PARENT_TOKEN:-}" | tr -d '\r\n ')"
+          [ -n "$PARENT" ] || { echo "FAIL: CF_PARENT_TOKEN 为空"; exit 1; }
+          echo "::add-mask::$PARENT"
+          MINTED="$(CF_PARENT_TOKEN_SANITIZED="$PARENT" \
+            CF_TOKEN_NAME="cf-dns-${{ github.run_id }}" \
+            CF_TOKEN_TTL_HOURS=2 \
+            CF_PERM_GROUPS="dns read,dns write,zone read,cloudflare tunnel read,cloudflare tunnel edit" \
+            python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request, urllib.error
+          from datetime import datetime, timedelta, timezone
+          BASE = "https://api.cloudflare.com/client/v4"
+          TOKEN = os.environ["CF_PARENT_TOKEN_SANITIZED"]
+          print("::add-mask::%s" % TOKEN)
+          def call(method, path, body=None):
+              headers = {"Authorization": "Bearer " + TOKEN}
+              data = None
+              if body is not None:
+                  headers["Content-Type"] = "application/json"
+                  data = json.dumps(body).encode()
+              req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return resp.status, json.loads(resp.read() or b"{}")
+              except urllib.error.HTTPError as exc:
+                  try:
+                      return exc.code, json.loads(exc.read() or b"{}")
+                  except Exception:
+                      return exc.code, {}
+              except Exception as exc:
+                  return 0, {"success": False, "errors": [{"message": str(exc)[:200]}]}
+          zone_name = "xieyucheng.top"
+          st, r = call("GET", "/zones?name=" + urllib.parse.quote(zone_name))
+          if not (isinstance(r, dict) and r.get("success") and r.get("result")):
+              print("FAIL: 取 zone/account 失败 status=%s" % st)
+              raise SystemExit(1)
+          account_id = (r["result"][0].get("account") or {}).get("id")
+          if not account_id:
+              account_id = os.environ.get("CF_ACCOUNT_ID", "47ce24ced58f17c9fb15351adcbe67d4")
+          st, r = call("GET", "/accounts/%s/tokens/permission_groups?per_page=100" % account_id)
+          groups = r.get("result") if isinstance(r.get("result"), list) else []
+          by_name = {str(g.get("name", "")).lower(): g for g in groups}
+          wanted = [x.strip().lower() for x in os.environ["CF_PERM_GROUPS"].split(",") if x.strip()]
+          zone_ids = []
+          acct_ids = []
+          for w in wanted:
+              g = by_name.get(w)
+              if not g:
+                  print("FAIL: permission group 不存在: %s" % w)
+                  raise SystemExit(1)
+              scopes = g.get("scopes") or []
+              if any("account.zone" in str(s) for s in scopes):
+                  zone_ids.append(str(g["id"]))
+              elif any(str(s) == "com.cloudflare.api.account" for s in scopes):
+                  acct_ids.append(str(g["id"]))
+              else:
+                  zone_ids.append(str(g["id"]))
+          policies = []
+          if zone_ids:
+              policies.append({"effect": "allow",
+                  "resources": {"com.cloudflare.api.account.%s" % account_id: {"com.cloudflare.api.account.zone.*": "*"}},
+                  "permission_groups": [{"id": i} for i in zone_ids]})
+          if acct_ids:
+              policies.append({"effect": "allow",
+                  "resources": {"com.cloudflare.api.account.%s" % account_id: "*"},
+                  "permission_groups": [{"id": i} for i in acct_ids]})
+          if not policies:
+              print("FAIL: 无可用 policy")
+              raise SystemExit(1)
+          ttl = int(os.environ.get("CF_TOKEN_TTL_HOURS", "2"))
+          expires = (datetime.now(timezone.utc) + timedelta(hours=ttl)).strftime("%Y-%m-%dT%H:%M:%SZ")
+          st, r = call("POST", "/accounts/%s/tokens" % account_id, {
+              "name": os.environ["CF_TOKEN_NAME"],
+              "policies": policies,
+              "expires_on": expires,
+          })
+          if not (isinstance(r, dict) and r.get("success")):
+              print("FAIL: CF 现签失败 status=%s errors=%s" % (st, json.dumps(r.get("errors"))[:300] if isinstance(r, dict) else ""))
+              raise SystemExit(1)
+          value = str((r.get("result") or {}).get("value") or "")
+          if not value:
+              print("FAIL: CF 现签无值")
+              raise SystemExit(1)
+          print("::add-mask::%s" % value)
+          print("CF_MINTED_VALUE=%s" % value)
+          PY
+          )"
+          CHILD="$(printf '%s' "$MINTED" | grep '^CF_MINTED_VALUE=' | tail -1 | cut -d= -f2-)"
+          [ -n "$CHILD" ] || { echo "FAIL: CF 现签未拿到值"; printf '%s\n' "$MINTED"; exit 1; }
+          echo "::add-mask::$CHILD"
+          echo "CFTOK=$CHILD" >> "$GITHUB_ENV"
+          echo "CF 现签 OK（cf-dns-${{ github.run_id }}，2h）"
 
       - name: 取 account_id（zone 属主）
         id: acct
