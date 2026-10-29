@@ -51,8 +51,6 @@ on:
         required: false
       ENV_OPENCODE_SERVER_PASSWORD:
         required: false
-      ENV_CLOUDFLARE_API_TOKEN:
-        required: false
       ENV_HCLOUD_AK:
         required: false
       ENV_HCLOUD_SK:
@@ -223,7 +221,6 @@ jobs:
           ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
           ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
           ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
-          ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
           ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
           ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
           ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
