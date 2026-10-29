@@ -90,14 +90,10 @@ jobs:
           devices = r.get("devices") or []
           now = datetime.now(timezone.utc)
           print("tailnet 设备总数=%d pattern=%s days>=%d" % (len(devices), pattern, days))
-          if devices:
-              sample = devices[0]
-              print("DEBUG sample keys=%s" % sorted(str(k) for k in sample.keys()))
-              print("DEBUG sample id fields: nodeId=%s id=%s" % (sample.get("nodeId"), sample.get("id")))
           victims = []
           for d in devices:
               name = str(d.get("hostname") or "")
-              node_id = str(d.get("nodeId") or d.get("id") or "")
+              node_id = str(d.get("id") or "")  # DELETE 只认数字 id；nodeId 会 404
               last = str(d.get("lastSeen") or "")
               try:
                   seen = datetime.fromisoformat(last.replace("Z", "+00:00"))
