@@ -199,8 +199,9 @@ fi
 DIGEST_FOR_CANARY="${CANDIDATE_DIGEST:-$(grep -oP '(?<=@)sha256:[0-9a-f]+' /tmp/compose.deploy.yml | head -n1)}"
 export REMOTE_DIR CANDIDATE_DIGEST="$DIGEST_FOR_CANARY"
 export CANARY_PORT CANARY_BROWSER_PORT 2>/dev/null || true
-# 探针级别：preflight 恒 boot（装上+启动自测）；up 看栈 manifest 的 UP_PROBE_LEVEL（网关/opencode 生产均 full）
-if [ "$ACTION_MODE" = "preflight" ]; then PROBE_LEVEL=boot; else PROBE_LEVEL="${UP_PROBE_LEVEL:-boot}"; fi
+# 探针级别：preflight 与 up 一样全跑 full（trial 经网关 override 也能真问答；贵几分钟，值）。
+# UP_PROBE_LEVEL 保留兼容（未设置时默认 full）。
+if [ "$ACTION_MODE" = "preflight" ]; then PROBE_LEVEL=full; else PROBE_LEVEL="${UP_PROBE_LEVEL:-full}"; fi
 export PROBE_LEVEL
 $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' SWR_USER='${SWR_USER:-}' SWR_PASS='${SWR_PASS:-}' bash -s" < scripts/canary-run.sh
 if $SSH "REMOTE_DIR='$REMOTE_DIR' CANDIDATE_DIGEST='$DIGEST_FOR_CANARY' CANARY_PORT='${CANARY_PORT:-}' CANARY_BROWSER_PORT='${CANARY_BROWSER_PORT:-}' PROBE_LEVEL='$PROBE_LEVEL' OPENCODE_API_KEY='${OPENCODE_API_KEY:-}' GOSS_BIN='$GOSS_REMOTE' CANARY_CONTAINER='${CANARY_CONTAINER:-}' GOSS_FILE='${GOSS_FILE:-}' MIN_GOSS_CASES='${MIN_GOSS_CASES:-}' bash -s" < scripts/canary-probe.sh; then
