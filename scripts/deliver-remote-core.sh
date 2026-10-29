@@ -121,6 +121,73 @@ PY
   echo "CF 现签 OK（90 天，值已进 render）"
   set -x # 敏感段结束
 fi
+# Workers AI deploy 现签：栈点名要 CF_AI_TOKEN（记忆 embedding 直连）但没给静态值、却给了
+# CF_PARENT_TOKEN → 现签 90 天 Workers AI Read+Write 子 key。不存 secret、不续期，发版即续。
+# 同 CLOUDFLARE 段：网关栈无此点名，不受影响。
+if grep -q "CF_AI_TOKEN" "$STACK_DIR/$ENV_CONF" 2>/dev/null && [ -z "${ENV_CF_AI_TOKEN:-}" ]; then
+  set +x # 敏感段：关 trace，值只走 mask 通道
+  : "${CF_PARENT_TOKEN:?FAIL: 栈要点 CF_AI_TOKEN 但没给值也没给 CF_PARENT_TOKEN（现签不了）}"
+  echo "Workers AI deploy 签发（90 天读写，audit 见 Cloudflare 侧 cf-ai-deploy- 前缀 token）"
+  MINTED_AI="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-47ce24ced58f17c9fb15351adcbe67d4}" python3 - <<'PY'
+import json
+import os
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
+BASE = "https://api.cloudflare.com/client/v4"
+TOKEN = os.environ["CF_PARENT_TOKEN_SANITIZED"]
+ACCOUNT_ID = os.environ["CF_ACCOUNT_ID"]
+print("::add-mask::%s" % TOKEN)
+def call(method, path, body=None):
+    headers = {"Authorization": "Bearer " + TOKEN}
+    data = None
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode()
+    req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read() or b"{}")
+        except Exception:
+            return exc.code, {}
+st, r = call("GET", "/accounts/%s/tokens/permission_groups?per_page=100" % ACCOUNT_ID)
+groups = r.get("result") if isinstance(r.get("result"), list) else []
+by_name = {str(g.get("name", "")).lower(): str(g.get("id") or "") for g in groups}
+read_id = by_name.get("workers ai read", "")
+write_id = by_name.get("workers ai write", "")
+if not read_id or not write_id:
+    print("FAIL: Workers AI Read/Write group 不在 permission_groups 里")
+    raise SystemExit(1)
+expires = (datetime.now(timezone.utc) + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+st, r = call("POST", "/accounts/%s/tokens" % ACCOUNT_ID, {
+    "name": "cf-ai-deploy-%s" % datetime.now(timezone.utc).strftime("%Y%m%d"),
+    "policies": [{"effect": "allow",
+                  "resources": {("com.cloudflare.api.account.%s" % ACCOUNT_ID): "*"},
+                  "permission_groups": [{"id": read_id}, {"id": write_id}]}],
+    "expires_on": expires,
+})
+if not r.get("success"):
+    print("FAIL: Workers AI 现签 status=%s" % st)
+    raise SystemExit(1)
+value = str((r.get("result") or {}).get("value") or "")
+if not value:
+    print("FAIL: Workers AI 现签无值")
+    raise SystemExit(1)
+print("::add-mask::%s" % value)
+print("CF_MINTED_VALUE=%s" % value)
+PY
+)"
+  CHILD_AI="$(printf '%s' "$MINTED_AI" | grep '^CF_MINTED_VALUE=' | cut -d= -f2-)"
+  [ -n "$CHILD_AI" ] || { echo "FAIL: Workers AI 现签没拿到值"; exit 1; }
+  echo "::add-mask::$CHILD_AI"
+  export ENV_CF_AI_TOKEN="$CHILD_AI"
+  export S_ENV_CF_AI_TOKEN="$CHILD_AI"
+  echo "Workers AI 现签 OK（90 天，值已进 render）"
+  set -x # 敏感段结束
+fi
 # TS join key 现签：栈点名 TS_JOIN_KEY → 每次 deploy mint 一把 reusable+ephemeral+90d、
 # 带 tag:opencode 的 auth key，render 进 .env 供容器 userspace tailscaled 启动时 join。
 # 旧静态 SSH 私钥（ENV_SSH_PRIVATE_KEY_B64）已退役，本线不再触碰任何 SSH 私钥。
