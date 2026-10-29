@@ -67,6 +67,7 @@ if grep -q "CLOUDFLARE_API_TOKEN" "$STACK_DIR/$ENV_CONF" 2>/dev/null && [ -z "${
   MINTED="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-47ce24ced58f17c9fb15351adcbe67d4}" python3 - <<'PY'
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -151,6 +152,7 @@ if grep -q "CF_AI_TOKEN" "$STACK_DIR/$ENV_CONF" 2>/dev/null && [ -z "${ENV_CF_AI
   MINTED_AI="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-47ce24ced58f17c9fb15351adcbe67d4}" python3 - <<'PY'
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
