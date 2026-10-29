@@ -1,0 +1,126 @@
+name: ts-cleanup（tailnet 僵尸节点清理，手动单次）
+
+# 手动清理离线临时节点（ci-infra-*/img-*）。默认 dry-run 只列清单；
+# confirm=yes 才真删。mesh 系列/个人设备/opencode-prod 写死永不删。
+# key 只活 CI（org TS_API_KEY），容器不持 tailnet-admin。
+
+on:
+  workflow_dispatch:
+    inputs:
+      pattern:
+        description: "hostname 正则白名单（默认只含临机前缀）"
+        required: false
+        default: "^(ci-infra-|img-)"
+      days_offline:
+        description: "离线超过多少天才删"
+        required: false
+        default: "3"
+      confirm:
+        description: "填 yes 才真删，否则只列清单"
+        required: false
+        default: ""
+
+concurrency:
+  group: ts-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: 列候选 + dry-run（删前必看）
+        env:
+          PATTERN: ${{ inputs.pattern }}
+          DAYS: ${{ inputs.days_offline }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          export TSKEY PATTERN DAYS CONFIRM
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timezone
+
+          BASE = "https://api.tailscale.com/api/v2"
+          TOKEN = os.environ["TSKEY"]
+          # 永不删（精确 hostname，pattern 对上也不删）
+          NEVER = {
+              "mesh-hw-21", "mesh-hw-41", "mesh-ali-gz", "mesh-oci-vpn",
+              "mesh-xyc-pc", "mesh-yx-mac", "opencode-prod", "opencode-prod-canary",
+          }
+          try:
+              days = int(os.environ.get("DAYS", "3"))
+          except ValueError:
+              print("FAIL: days_offline 非法")
+              raise SystemExit(1)
+          pattern = os.environ.get("PATTERN", "")
+
+
+          def call(method, path):
+              req = urllib.request.Request(
+                  BASE + path, headers={"Authorization": "Bearer " + TOKEN},
+                  method=method,
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return resp.status, json.loads(resp.read() or b"{}")
+              except urllib.error.HTTPError as exc:
+                  try:
+                      return exc.code, json.loads(exc.read() or b"{}")
+                  except Exception:
+                      return exc.code, {}
+
+
+          st, r = call("GET", "/tailnet/-/devices")
+          if st != 200:
+              print("FAIL: 列设备 status=%s" % st)
+              raise SystemExit(1)
+          devices = r.get("devices") or []
+          now = datetime.now(timezone.utc)
+          print("tailnet 设备总数=%d pattern=%s days>=%d" % (len(devices), pattern, days))
+          victims = []
+          for d in devices:
+              name = str(d.get("hostname") or "")
+              node_id = str(d.get("nodeId") or d.get("id") or "")
+              last = str(d.get("lastSeen") or "")
+              try:
+                  seen = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                  offline_days = (now - seen).days
+              except Exception:
+                  offline_days = -1
+              tag = []
+              if name in NEVER:
+                  tag.append("NEVER-keep")
+              elif not re.match(pattern, name):
+                  tag.append("pattern-mismatch")
+              elif offline_days < 0:
+                  tag.append("lastSeen-unknown")
+              elif offline_days < days:
+                  tag.append("online-recent(%dd)" % offline_days)
+              else:
+                  tag.append("CANDIDATE(%dd)" % offline_days)
+                  victims.append((node_id, name, offline_days))
+              print("  %-28s lastSeen=%s %s" % (name, last[:16], ",".join(tag)))
+          print("候选=%d（NEVER/pattern 不符/在线的都没进）" % len(victims))
+          if os.environ.get("CONFIRM", "") != "yes":
+              print("dry-run 结束（confirm 非 yes，不删）。要删重跑并填 confirm=yes。")
+              return
+          for node_id, name, offline_days in victims:
+              st, _ = call("DELETE", "/tailnet/-/devices/%s" % node_id)
+              print("delete %s (%s, %dd) -> %s" % (name, node_id[:8], offline_days, st))
+              if st not in (200, 204):
+                  print("FAIL: 删 %s 失败" % name)
+                  raise SystemExit(1)
+          print("删除完成，共 %d 台；请到控制台复核设备表" % len(victims))
+          PY
