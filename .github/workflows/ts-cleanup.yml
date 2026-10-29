@@ -48,6 +48,7 @@ jobs:
           import json
           import os
           import re
+          import sys
           import urllib.error
           import urllib.request
           from datetime import datetime, timezone
@@ -115,7 +116,7 @@ jobs:
           print("候选=%d（NEVER/pattern 不符/在线的都没进）" % len(victims))
           if os.environ.get("CONFIRM", "") != "yes":
               print("dry-run 结束（confirm 非 yes，不删）。要删重跑并填 confirm=yes。")
-              return
+              sys.exit(0)
           for node_id, name, offline_days in victims:
               st, _ = call("DELETE", "/tailnet/-/devices/%s" % node_id)
               print("delete %s (%s, %dd) -> %s" % (name, node_id[:8], offline_days, st))
