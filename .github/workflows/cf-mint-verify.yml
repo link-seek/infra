@@ -1,0 +1,128 @@
+name: cf-mint-verify（写 scope 组装验证，一次性）
+
+# 一次性验证，不常驻。验证 deliver 现签的写权限组装（scope 分流）在真 API 下能签出：
+# 列组 → 按 scope 分流组装 policy → 签 1h 测试 token → 删 → 复核 404。
+# 值只走 mask 通道；测试 token 当场删除，无残留。验证完即删本文件。
+# 背景：400 实锤过一次（account 级组塞 zone），别名/分流逻辑必须真调验证。
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cf-mint-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+    steps:
+      - name: Mask parent token
+        run: |
+          set -euo pipefail
+          TOKEN="$(printf '%s' "${CF_PARENT_TOKEN:-}" | tr -d '\r\n ')"
+          echo "::add-mask::$TOKEN"
+          [ -n "$TOKEN" ] || { echo "PARENT_TOKEN_MISSING"; exit 1; }
+          echo "parent_token_present=true"
+
+      - name: 组装＋试签＋删（与 deliver-remote-core.sh 现签块同逻辑）
+        run: |
+          set -euo pipefail
+          TOKEN="$(printf '%s' "${CF_PARENT_TOKEN:-}" | tr -d '\r\n ')"
+          CF_PARENT_TOKEN_SANITIZED="$TOKEN" CF_ACCOUNT_ID="47ce24ced58f17c9fb15351adcbe67d4" python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timedelta, timezone
+          BASE = "https://api.cloudflare.com/client/v4"
+          TOKEN = os.environ["CF_PARENT_TOKEN_SANITIZED"]
+          ACCOUNT_ID = os.environ["CF_ACCOUNT_ID"]
+          print("::add-mask::%s" % TOKEN)
+
+
+          def call(method, path, body=None):
+              headers = {"Authorization": "Bearer " + TOKEN}
+              data = None
+              if body is not None:
+                  headers["Content-Type"] = "application/json"
+                  data = json.dumps(body).encode()
+              req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return resp.status, json.loads(resp.read() or b"{}")
+              except urllib.error.HTTPError as exc:
+                  try:
+                      return exc.code, json.loads(exc.read() or b"{}")
+                  except Exception:
+                      return exc.code, {}
+
+
+          st, r = call("GET", "/accounts/%s/tokens/permission_groups?per_page=100" % ACCOUNT_ID)
+          groups = r.get("result") if isinstance(r.get("result"), list) else []
+          by_name = {str(g.get("name", "")).lower(): g for g in groups}
+          by_id = {str(g.get("id") or ""): g for g in groups}
+          print("permission_groups status=%s count=%d" % (st, len(groups)))
+
+          WRITE_ALIASES = {
+              "zone edit": ["zone edit", "zone write"],
+              "dns edit": ["dns edit", "dns write"],
+              "workers edit": ["workers scripts edit", "workers scripts write", "workers edit", "workers write"],
+              "pages edit": ["pages edit", "pages write"],
+          }
+          zone_gids, acct_gids = [], []
+          # 读组（沿用 deliver 逻辑，docs 公开 ID 兜底）
+          dns_id = (by_name.get("dns read") or {}).get("id") or "c8fed203ed3043cba015a93ad1616f1f"
+          zone_id = (by_name.get("zone read") or {}).get("id") or "82e64a83756745bbbb1c9c2701bf816b"
+          for gid_ in [dns_id, zone_id]:
+              g = by_id.get(gid_, {})
+              if any("account.zone" in str(s) for s in (g.get("scopes") or [])):
+                  zone_gids.append(gid_)
+              else:
+                  acct_gids.append(gid_)
+          for want, aliases in WRITE_ALIASES.items():
+              got = ""
+              for a in aliases:
+                  if by_name.get(a) and by_name[a].get("id"):
+                      got = str(by_name[a]["id"])
+                      break
+              if not got:
+                  print("FAIL: 写权限组缺失: %s" % want, file=sys.stderr)
+                  raise SystemExit(1)
+              g = by_id.get(got, {})
+              if any("account.zone" in str(s) for s in (g.get("scopes") or [])):
+                  zone_gids.append(got)
+              else:
+                  acct_gids.append(got)
+          print("zone-scope=%d account-scope=%d" % (len(zone_gids), len(acct_gids)))
+          policies = []
+          if zone_gids:
+              policies.append({"effect": "allow",
+                               "resources": {("com.cloudflare.api.account.%s" % ACCOUNT_ID): {"com.cloudflare.api.account.zone.*": "*"}},
+                               "permission_groups": [{"id": i} for i in zone_gids]})
+          if acct_gids:
+              policies.append({"effect": "allow",
+                               "resources": {("com.cloudflare.api.account.%s" % ACCOUNT_ID): "*"},
+                               "permission_groups": [{"id": i} for i in acct_gids]})
+          expires = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+          st, r = call("POST", "/accounts/%s/tokens" % ACCOUNT_ID, {
+              "name": "cf-verify-write-%s" % datetime.now(timezone.utc).strftime("%Y%m%d%H%M"),
+              "policies": policies,
+              "expires_on": expires,
+          })
+          if not r.get("success"):
+              print("FAIL: 试签 status=%s" % st, file=sys.stderr)
+              raise SystemExit(1)
+          token_id = str((r.get("result") or {}).get("id") or "")
+          print("sign status=%s token_id_prefix=%s (1h TTL)" % (st, token_id[:8]))
+          st, _ = call("DELETE", "/accounts/%s/tokens/%s" % (ACCOUNT_ID, token_id))
+          print("delete status=%s" % st)
+          st, _ = call("GET", "/accounts/%s/tokens/%s" % (ACCOUNT_ID, token_id))
+          print("verify_after_delete status=%s (404 即删干净)" % st)
+          print("VERIFY OK: 写 scope 组装可签可删")
+          PY
