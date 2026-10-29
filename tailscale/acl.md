@@ -26,6 +26,7 @@
 - 可达性（grants；过渡期保留 2244 给旧 key 通路，切完 TS SSH 验证后删）：
   - `tag:ci` → `tag:prod` : 22, 2244
   - `tag:ci` → `tag:ci`   : 22, 2244
+  - `tag:ci` → `100.91.222.51` : 4000（trial 直调生产网关；不开 ssh）
   - `tag:opencode` → `.21/.41`（100.91.222.51 / 100.111.231.85）: 22
   - `tag:mesh` → `tag:opencode` : 22
   - `tag:ci` → `tag:opencode` : 22（仅 trial 可见性：netmap 按 ACL 过滤，无此条探针看不到 canary；不配 ssh 规则，CI 不能 SSH 进 canary，探针走 docker exec）

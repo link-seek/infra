@@ -151,6 +151,11 @@ if grep -q '^TS_JOIN_KEY=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
   echo "TS join key minted（reusable+ephemeral+90d, tag:opencode, HTTP $MINT_CODE）"
   set -x # 敏感段结束
 fi
+# trial（preflight）分支：LITELLM_BASE_URL 改道生产网关 tailnet 地址（生产 up 不动）。
+if [ "${ACTION_MODE:-}" = "preflight" ] && grep -q '^LITELLM_BASE_URL=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
+  export S_LITELLM_BASE_URL="http://100.91.222.51:4000"
+  echo "trial override: LITELLM_BASE_URL -> $S_LITELLM_BASE_URL"
+fi
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
 $SSH "mkdir -p $REMOTE_DIR" # 干净机（如 img 预检）上目录尚不存在，先建
 put /tmp/ci-dotenv "$REMOTE_DIR/.env"

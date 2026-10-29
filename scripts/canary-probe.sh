@@ -94,20 +94,16 @@ if [ -n "${PROBE_BLACKLIST_PATH:-}" ]; then
   echo "blacklist: denied=$DENIED_MODEL skip=$SKIP_BLACKLIST"
 fi
 
-# drain 活证明：仅 full 且本机确有网关时强制执行（img 预检场景无网关则跳过）。
+# drain 活证明：boot 轻链路跳过；full 全跑（网关可达性由 .env/PROBE_GATEWAY_URL 兜底，失败即红不静默跳过）。
 if [ "${PROBE_DRAIN:-0}" = "1" ]; then
-  if [ "$PROBE_LEVEL" = "full" ] && timeout 10 curl -s -m 5 -o /dev/null "${PROBE_GATEWAY_URL:?manifest 缺 PROBE_GATEWAY_URL}"; then
+  if [ "$PROBE_LEVEL" = "full" ]; then
     GATEWAY=1
-  fi
-  if [ "$GATEWAY" = "1" ]; then
-    echo "gateway present -> drain 强制执行"
-  elif [ "$PROBE_LEVEL" = "full" ]; then
-    echo "SKIP drain: 本机无网关（img 预检场景），prod 机恒强制执行"
+    echo "full -> drain 强制执行"
   else
     echo "SKIP drain: boot 轻链路不跑 drain（细测才跑）"
   fi
 fi
-if [ "$GATEWAY" = "1" ]; then SKIP_DRAIN=false; fi
+if [ "$PROBE_LEVEL" = "full" ]; then SKIP_DRAIN=false; fi
 
 {
   printf 'CANARY_IP: "%s"\n' "$CANARY_IP"
@@ -292,7 +288,7 @@ if [ "${PROBE_REQUIRE_BLACKLIST:-0}" = "1" ]; then
 fi
 if [ "${PROBE_REQUIRE_DRAIN:-0}" = "1" ]; then
   DRAIN_COUNT="$(awk -F'\t' '$1 == "goss" && $2 ~ /drain/ {n++} END {print n+0}' "$RESULTS_TSV")"
-  if [ "$PROBE_LEVEL" = "full" ] && [ "$GATEWAY" = "1" ]; then
+  if [ "$PROBE_LEVEL" = "full" ] && [ "$SKIP_DRAIN" = "false" ]; then
     if [ "$DRAIN_COUNT" -eq 0 ]; then
       echo "FAIL: goss 结果缺 drain 条目（40-drain 底线）"; PASS=0
     else

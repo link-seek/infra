@@ -77,8 +77,15 @@ while IFS="$(printf '\t')" read -r k v; do
       echo "rendered $k from secret"
       ;;
     literal:*)
-      printf '%s=%s\n' "$k" "${v#literal:}" >> "$OUT"
-      echo "rendered $k from literal"
+      # 显式 S_<KEY> 覆盖优先于 literal（trial 等分支用）；未提供则用 map 里的字面量。
+      S_KEY_VAR="S_$k"; S_KEY_VAL="${!S_KEY_VAR:-}"
+      if [ -n "$S_KEY_VAL" ]; then
+        printf '%s=%s\n' "$k" "$S_KEY_VAL" >> "$OUT"
+        echo "rendered $k from S_ override"
+      else
+        printf '%s=%s\n' "$k" "${v#literal:}" >> "$OUT"
+        echo "rendered $k from literal"
+      fi
       ;;
     *)
       echo "BAD_SOURCE(need secret:/literal:): $k" >&2; exit 1;;
