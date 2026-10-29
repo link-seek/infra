@@ -28,11 +28,8 @@ if ! docker inspect "$CANARY_CONTAINER" >/dev/null 2>&1; then
   exit 1
 fi
 
-# 模型调用要网关：本机 :4000 不通则 SKIP（img trial 无网关，opencode run 必 hang；
-# 同 drain 条件）。生产 canary 有网关，必跑；marker 命名空间隔离生产记忆。
-if ! timeout 10 curl -s -m 5 -o /dev/null http://127.0.0.1:4000/v1/models; then
-  skip_case "本机无网关（opencode run 必 hang；同 drain 条件，生产 canary 必跑）" "no-gateway"
-fi
+# 模型调用走 .env 里的网关（trial 直调生产网关）；boot 级已在上方跳过。
+# 网关不可达时 opencode run 直接失败（fail-closed），不再静默 SKIP。
 
 RUN_REF="${GITHUB_RUN_ID:-${GITHUB_RUN_NUMBER:-}}"
 RUN_SHORT="$(printf '%s' "$RUN_REF" | tr -cd '0-9A-Za-z' | tail -c 9)"
