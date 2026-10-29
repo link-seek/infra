@@ -39,17 +39,15 @@ if [ -z "$RUN_SHORT" ]; then
 fi
 RUN_SHORT_L="$(printf '%s' "$RUN_SHORT" | tr '[:upper:]' '[:lower:]')"
 MARKER="MEM-$RUN_SHORT"
+MARKER_SUFFIX="$(printf '%s' "$RUN_SHORT" | tr -cd '0-9' | tail -c 4)"
+[ -n "$MARKER_SUFFIX" ] || MARKER_SUFFIX="0717"
 echo "marker: $MARKER"
 
 echo "=== session A（写） ==="
 if timeout 90 docker exec "$CANARY_CONTAINER" opencode run \
-    "记住探针标记 ${MARKER}，收到只回复：记住了" >"$TMP_DIR/a.out" 2>&1; then
+    "我养了一只猫叫阿灰${MARKER_SUFFIX}，记一下它的名字" >"$TMP_DIR/a.out" 2>&1; then
   tail -n 20 "$TMP_DIR/a.out"
-  if grep -q '记住了' "$TMP_DIR/a.out"; then
-    echo "OK: session A 回「记住了」"
-  else
-    fail "session A 未回「记住了」"
-  fi
+  echo "OK: session A 结束（存否由插件判断，不强求回执）"
 else
   RC=$?
   tail -n 20 "$TMP_DIR/a.out"
@@ -65,10 +63,10 @@ if [ "$PASS" = "1" ]; then
     B_SID="ses_mem${RUN_SHORT_L}${B_SEQ}${attempt}"
     echo "=== session B（新会话 $B_SID，第 $attempt 次） ==="
     if timeout 70 docker exec "$CANARY_CONTAINER" opencode run --session "$B_SID" \
-        "探针标记 ${MARKER}是什么？只回复标记" >"$TMP_DIR/b.out" 2>&1; then
+        "我养的猫叫什么名字？" >"$TMP_DIR/b.out" 2>&1; then
       tail -n 20 "$TMP_DIR/b.out"
-      if grep -Fqi "$MARKER" "$TMP_DIR/b.out"; then
-        echo "OK: 新会话召回 $MARKER"
+      if grep -Fqi "阿灰${MARKER_SUFFIX}" "$TMP_DIR/b.out"; then
+        echo "OK: 新会话召回阿灰${MARKER_SUFFIX}"
         B_OK=1
         break
       fi
