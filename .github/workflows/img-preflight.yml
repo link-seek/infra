@@ -68,10 +68,6 @@ on:
         required: false
       ENV_OPENCODE_SERVER_PASSWORD:
         required: false
-      ENV_CLOUDFLARE_API_TOKEN:
-        required: false
-      ENV_CF_AI_TOKEN:
-        required: false
       ENV_HCLOUD_AK:
         required: false
       ENV_HCLOUD_SK:
