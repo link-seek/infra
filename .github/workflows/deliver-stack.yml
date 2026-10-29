@@ -169,10 +169,11 @@ jobs:
           set -x
           TAG="${{ inputs.node_tag }}"
           if [[ "$TAG" == host:* ]]; then
-            HN="${TAG#host:}"; IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=[p['TailscaleIPs'][0] for p in ps.values() if p.get('HostName')=='$HN']; print(ms[0] if ms else 'NO-MATCH')")"
+            # 同名多节点时取 lastSeen 最新的（取消的上次靶机尸体未散时，旧名会撞车；见 40888234721）。
+            HN="${TAG#host:}"; IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if p.get('HostName')=='$HN'], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
           else
             TG="${TAG#tag:}"; [ "$TG" = "$TAG" ] && TG="$TAG"; TG="${TG#tag:}"
-            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=[p['TailscaleIPs'][0] for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])]; print(ms[0] if ms else 'NO-MATCH')")"
+            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
           fi
           [ "$IP" != "NO-MATCH" ] || { echo "FAIL: 标签/主机 $TAG 在 tailnet 无匹配（tag 需后台先贴好）"; tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('self:', d.get('Self',{}).get('HostName')); [print(p.get('HostName'), p.get('Tags')) for p in d['Peer'].values()]"; exit 1; }
           echo "target $TAG -> $IP"
