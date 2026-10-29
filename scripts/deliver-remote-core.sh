@@ -58,12 +58,12 @@ for v in ENV_GH_TOKEN ENV_LITELLM_API_KEY ENV_OPENCODE_SERVER_PASSWORD ENV_CLOUD
   export "S_$v"="${!v:-}"
 done
 # CF deploy 现签：栈点名要 CLOUDFLARE_API_TOKEN（env-sources）但没给静态值、却给了
-# CF_PARENT_TOKEN → 现签 90 天 DNS/Zone Read 只读子 key。不存 secret、不续期，发版即续。
-# 栈要点名却两样都没有 → 大声死（fail-closed）。网关栈无此点名，不受影响。
+# CF_PARENT_TOKEN → 现签 90 天子 key（读：DNS/Zone；写：Zone/DNS/Workers/Pages，供容器 wrangler 自助）。
+# 不存 secret、不续期，发版即续。栈要点名却两样都没有 → 大声死（fail-closed）。网关栈无此点名，不受影响。
 if grep -q "CLOUDFLARE_API_TOKEN" "$STACK_DIR/$ENV_CONF" 2>/dev/null && [ -z "${ENV_CLOUDFLARE_API_TOKEN:-}" ]; then
   set +x # 敏感段：关 trace，值只走 mask 通道
   : "${CF_PARENT_TOKEN:?FAIL: 栈要点 CLOUDFLARE_API_TOKEN 但没给值也没给 CF_PARENT_TOKEN（现签不了）}"
-  echo "CF deploy 签发（90 天只读，audit 见 Cloudflare 侧 cf-deploy- 前缀 token）"
+  echo "CF deploy 签发（90 天读写，audit 见 Cloudflare 侧 cf-deploy- 前缀 token）"
   MINTED="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-47ce24ced58f17c9fb15351adcbe67d4}" python3 - <<'PY'
 import json
 import os
@@ -94,12 +94,32 @@ groups = r.get("result") if isinstance(r.get("result"), list) else []
 by_name = {str(g.get("name", "")).lower(): str(g.get("id") or "") for g in groups}
 dns_id = by_name.get("dns read", "c8fed203ed3043cba015a93ad1616f1f")
 zone_id = by_name.get("zone read", "82e64a83756745bbbb1c9c2701bf816b")
+# 写权限（容器 wrangler/DNS/Workers 自助，owner 已批）：别名全试，缺一即 fail-closed。
+# 注意：Cloudflare 组名以列表返回为准，下面的候选只是常见写法。
+WRITE_ALIASES = {
+    "zone edit": ["zone edit", "zone write"],
+    "dns edit": ["dns edit", "dns write"],
+    "workers edit": ["workers scripts edit", "workers scripts write", "workers edit", "workers write"],
+    "pages edit": ["pages edit", "pages write"],
+}
+write_ids = []
+for want, aliases in WRITE_ALIASES.items():
+    got = ""
+    for a in aliases:
+        if by_name.get(a):
+            got = by_name[a]
+            break
+    if not got:
+        print("FAIL: 写权限组缺失（要 %s，试过 %s）；现有组名前 10：%s" % (
+            want, aliases, sorted(by_name.keys())[:10]))
+        raise SystemExit(1)
+    write_ids.append(got)
 expires = (datetime.now(timezone.utc) + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
 st, r = call("POST", "/accounts/%s/tokens" % ACCOUNT_ID, {
     "name": "cf-deploy-%s" % datetime.now(timezone.utc).strftime("%Y%m%d"),
     "policies": [{"effect": "allow",
                   "resources": {("com.cloudflare.api.account.%s" % ACCOUNT_ID): {"com.cloudflare.api.account.zone.*": "*"}},
-                  "permission_groups": [{"id": dns_id}, {"id": zone_id}]}],
+                  "permission_groups": [{"id": dns_id}, {"id": zone_id}] + [{"id": i} for i in write_ids]}],
     "expires_on": expires,
 })
 if not r.get("success"):
