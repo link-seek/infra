@@ -1,8 +1,9 @@
 #!/bin/bash
-# probe-cases/50-memory-recall.sh — trial 跨会话记忆召回（写 → 新会话 → 断言）。
+# probe-cases/50-memory-recall.sh — 跨会话记忆召回（写 → 新会话 → 断言）。
 # runner 契约：REMOTE_DIR/CANARY_CONTAINER/PROBE_LEVEL…；boot 级跳过（参 drain）。
 # 门 = 会话 B 是否回显 marker；DB 行数只打日志，warn 不拦（防 infra 抖动误杀）。
-# 只在 disposable trial 靶机跑：本机已有生产容器 opencode-prod 时跳过，不碰生产记忆。
+# 模型调用要网关：无网关（img trial）则 SKIP，同 drain 条件；生产 canary 有网关必跑。
+# marker 带 run 短号命名空间，可辨认；忘删靠批量清（忘 API 不稳定，不做自动删）。
 set -uo pipefail
 
 CASE=memory-recall
@@ -27,10 +28,10 @@ if ! docker inspect "$CANARY_CONTAINER" >/dev/null 2>&1; then
   exit 1
 fi
 
-# trial 专用：生产容器在跑说明本机不是一次性靶机，记忆卷可能是生产卷。
-if [ "$CANARY_CONTAINER" != "opencode-prod" ] \
-  && timeout 10 docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'opencode-prod'; then
-  skip_case "本机已有生产容器 opencode-prod（只跑 disposable trial，不碰生产记忆）" "production-present"
+# 模型调用要网关：本机 :4000 不通则 SKIP（img trial 无网关，opencode run 必 hang；
+# 同 drain 条件）。生产 canary 有网关，必跑；marker 命名空间隔离生产记忆。
+if ! timeout 10 curl -s -m 5 -o /dev/null http://127.0.0.1:4000/v1/models; then
+  skip_case "本机无网关（opencode run 必 hang；同 drain 条件，生产 canary 必跑）" "no-gateway"
 fi
 
 RUN_REF="${GITHUB_RUN_ID:-${GITHUB_RUN_NUMBER:-}}"
