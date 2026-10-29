@@ -111,7 +111,7 @@ for want, aliases in WRITE_ALIASES.items():
             break
     if not got:
         print("FAIL: 写权限组缺失（要 %s，试过 %s）；现有组名前 10：%s" % (
-            want, aliases, sorted(by_name.keys())[:10]))
+            want, aliases, sorted(by_name.keys())[:10]), file=sys.stderr)
         raise SystemExit(1)
     write_ids.append(got)
 expires = (datetime.now(timezone.utc) + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -123,11 +123,11 @@ st, r = call("POST", "/accounts/%s/tokens" % ACCOUNT_ID, {
     "expires_on": expires,
 })
 if not r.get("success"):
-    print("FAIL: CF 现签 status=%s" % st)
+    print("FAIL: CF 现签 status=%s" % st, file=sys.stderr)
     raise SystemExit(1)
 value = str((r.get("result") or {}).get("value") or "")
 if not value:
-    print("FAIL: CF 现签无值")
+    print("FAIL: CF 现签无值", file=sys.stderr)
     raise SystemExit(1)
 print("::add-mask::%s" % value)
 print("CF_MINTED_VALUE=%s" % value)
@@ -179,7 +179,7 @@ by_name = {str(g.get("name", "")).lower(): str(g.get("id") or "") for g in group
 read_id = by_name.get("workers ai read", "")
 write_id = by_name.get("workers ai write", "")
 if not read_id or not write_id:
-    print("FAIL: Workers AI Read/Write group 不在 permission_groups 里")
+    print("FAIL: Workers AI Read/Write group 不在 permission_groups 里", file=sys.stderr)
     raise SystemExit(1)
 expires = (datetime.now(timezone.utc) + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
 st, r = call("POST", "/accounts/%s/tokens" % ACCOUNT_ID, {
@@ -190,11 +190,11 @@ st, r = call("POST", "/accounts/%s/tokens" % ACCOUNT_ID, {
     "expires_on": expires,
 })
 if not r.get("success"):
-    print("FAIL: Workers AI 现签 status=%s" % st)
+    print("FAIL: Workers AI 现签 status=%s" % st, file=sys.stderr)
     raise SystemExit(1)
 value = str((r.get("result") or {}).get("value") or "")
 if not value:
-    print("FAIL: Workers AI 现签无值")
+    print("FAIL: Workers AI 现签无值", file=sys.stderr)
     raise SystemExit(1)
 print("::add-mask::%s" % value)
 print("CF_MINTED_VALUE=%s" % value)
