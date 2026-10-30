@@ -27,7 +27,7 @@ tailnet 域名后缀：`*.tail137c40.ts.net`。
 
 | 域名 | 类型 | 内容 | 状态 |
 |---|---|---|---|
-| `opencode.yingxin.net.cn` | A | 120.77.76.20 | 新增：mesh-ali-gz Caddy → 本机 opencode-prod-ali-gz:4097（DNS-only） |
+| `opencode.yingxin.net.cn` | A | 120.77.76.20 | 新增：mesh-ali-gz Caddy → tailnet → hw41:4097（容器在 hw41，DNS-only） |
 
 ## 入口证书
 
