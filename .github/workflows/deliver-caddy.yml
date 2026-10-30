@@ -63,6 +63,9 @@ jobs:
           NODE=100.85.128.116  # mesh-ali-gz（权威值见 docs/topology.md）
           scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key \
             edge/caddy/mesh-ali-gz/Caddyfile root@$NODE:/etc/caddy/Caddyfile
+          # 确保 tailnet MagicDNS 首选，保证反代到容器 MagicDNS 名可解析；保留原有 fallback（只动 ali-gz 本机）
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
+            "grep -q '^nameserver 100.100.100.100' /etc/resolv.conf || sed -i '1i nameserver 100.100.100.100' /etc/resolv.conf; getent hosts opencode-prod-ali-gz || { echo 'MAGICDNS-NOT-READY'; exit 1; }"
           ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
             'caddy reload --config /etc/caddy/Caddyfile && sleep 3 && caddy list-modules >/dev/null && echo RELOAD-OK'
           curl -s -m 15 -o /dev/null -w 'hw21-opencode http=%{http_code}\n' https://hw21-opencode.xieyucheng.top/
