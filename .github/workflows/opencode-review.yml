@@ -27,7 +27,7 @@ jobs:
       - name: Run OpenCode review
         uses: link-seek/opencode-github-bot@v0.2.1
         with:
-          model: ${{ vars.OPENCODE_REVIEW_MODEL }}
+          model: opencode-go/beam-free
           github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
           mode: review
           pr-number: ${{ github.event.pull_request.number }}
