@@ -15,7 +15,7 @@ opencode.xieyucheng.top {
 
 # mesh-ali-gz 入口 opencode.yingxin.net.cn：Caddy → tailnet → hw41:4097（容器在 hw41）
 opencode.yingxin.net.cn {
-	reverse_proxy 100.111.231.85:4097
+	reverse_proxy opencode-prod-ali-gz:4097
 	log {
 		output file /var/log/caddy/opencode-yingxin.log
 	}
