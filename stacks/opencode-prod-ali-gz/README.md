@@ -1,6 +1,6 @@
-# opencode-prod-ali-gz（mesh-ali-gz 生产栈，opencode.yingxin.net.cn）
+# opencode-prod-ali-gz（入口 mesh-ali-gz / 容器落点 hw41，opencode.yingxin.net.cn）
 
-目标机：`100.85.128.116`（mesh-ali-gz），目录 `/root/stacks/opencode-prod-ali-gz/`。
+入口 Caddy：mesh-ali-gz（120.77.76.20，tailnet 100.85.128.116）；容器实际落点：hw41（tailnet 100.111.231.85），目录 `/root/stacks/opencode-prod-ali-gz/`。
 网关依赖：tailnet `mesh-hw-21` :4000（本机无 litellm-guard；挂了生产跟挂）。
 
 ## 为什么进仓（2026-10-15 之前的状态）
