@@ -8,7 +8,6 @@ name: opencode
 # 注：issues.assigned 发起人调 API 时平台已要求 push 权限，故不验 sender association。
 # 构建流水线全是 schedule/手动触发，合 PR 不会自动打镜像。
 # 前提：repo settings 需有 OPENCODE_API_KEY（Go 订阅 key）。
-# 现使用 link-seek/opencode-github-bot@v0.2.3（OpenCode v2 自包含 plugin）。
 
 on:
   issue_comment:
@@ -24,6 +23,8 @@ jobs:
     # 一次性 runner，操作面全放（permission allow 含 external_directory），40 分钟硬超时；
     # secret 面保持最小（只 OPENCODE_API_KEY/GITHUB_TOKEN，绝不加料），毒代码由 PR 人审拦。
     timeout-minutes: 40
+    env:
+      OPENCODE_CONFIG_CONTENT: '{"permission":"allow"}'
     if: |
       ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
        (contains(github.event.comment.body, '/oc') ||
@@ -40,30 +41,38 @@ jobs:
       issues: write
     steps:
       - name: Checkout repository
+        # push 改 workflow 文件的分支走 Xyc PAT（classic repo+workflow，带 workflows 写权；
+        # GITHUB_TOKEN 推会被拒，且文件里声明不了 workflows 权）。
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
           token: ${{ secrets.AGENT_GITHUB_TOKEN }}
 
-      - name: Run OpenCode (PR review / comment)
-        if: github.event_name != 'issues'
-        uses: link-seek/opencode-github-bot@v0.2.3
-        with:
-          model: ${{ vars.OPENCODE_REVIEW_MODEL }}
-          github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
-          llm-api-key: ${{ secrets.OPENCODE_API_KEY }}
-          mode: review
-          pr-number: ${{ github.event.issue.number || github.event.pull_request.number }}
-          require-evidence: "false"
-          require-pinned-actions: "true"
-          collect-feedback: "true"
+      - name: Set git identity for opencode commits
+        run: |
+          git config --global user.name "jennifer95929-svgs"
+          git config --global user.email "272089793+jennifer95929-svgs@users.noreply.github.com"
 
-      - name: Run OpenCode (issue fix)
-        if: github.event_name == 'issues'
-        uses: link-seek/opencode-github-bot@v0.2.3
+      - name: Run OpenCode
+        if: github.event_name != 'issues'
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
         with:
-          model: ${{ vars.OPENCODE_REVIEW_MODEL }}
-          github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
-          llm-api-key: ${{ secrets.OPENCODE_API_KEY }}
-          mode: fix-issue
-          issue-number: ${{ github.event.issue.number }}
+          model: ${{ vars.OPENCODE_REVIEW_MODEL }} # 引擎ID走org变量，一改全仓所有流水线生效
+          use_github_token: true
+
+      - name: Run OpenCode for assigned issue
+        if: github.event_name == 'issues'
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        with:
+          model: ${{ vars.OPENCODE_REVIEW_MODEL }} # 引擎ID走org变量，一改全仓所有流水线生效
+          use_github_token: true
+          prompt: |
+            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+
+            ${{ github.event.issue.body }}
