@@ -1,0 +1,40 @@
+name: test-opencode-v2-bot-issue
+
+on:
+  issues:
+    types: [assigned]
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: 'Issue number to fix'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  fix:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(format(',{0},', vars.AI_ASSIGNEES), format(',{0},', github.event.assignee.login))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.AGENT_GITHUB_TOKEN }}
+
+      - name: Run OpenCode v2 bot (fix-issue)
+        uses: link-seek/opencode-github-bot@v0.1.4
+        with:
+          model: ${{ vars.OPENCODE_REVIEW_MODEL }}
+          github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          mode: fix-issue
+          issue-number: ${{ github.event.inputs.issue-number || github.event.issue.number }}
+        env:
+          GIT_AUTHOR_NAME: opencode-bot
+          GIT_AUTHOR_EMAIL: opencode-bot@users.noreply.github.com
