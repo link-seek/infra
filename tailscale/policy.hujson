@@ -8,7 +8,9 @@
 		// 常驻生产机（hw-21）。
 		"tag:prod":      ["autogroup:admin"],
 		// opencode-prod 容器（userspace tailscaled），独立 tailnet 节点。
-		"tag:opencode":  ["autogroup:admin"]
+		"tag:opencode":  ["autogroup:admin"],
+		// CI 用旧 prod auth key（tag:ci-prod）加入 tailnet 的节点身份。
+		"tag:ci-prod":   ["autogroup:admin"]
 	},
 	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
 	"grants": [
