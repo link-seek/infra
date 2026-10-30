@@ -1,0 +1,61 @@
+# opencode-prod-ali-gz（入口 mesh-ali-gz / 容器落点 hw41，opencode.yingxin.net.cn）
+
+入口 Caddy：mesh-ali-gz（120.77.76.20，tailnet 100.85.128.116）；容器实际落点：hw41（tailnet 100.111.231.85），目录 `/root/stacks/opencode-prod-ali-gz/`。
+网关依赖：tailnet `mesh-hw-21` :4000（本机无 litellm-guard；挂了生产跟挂）。
+
+## 为什么进仓（2026-10-15 之前的状态）
+
+生产 compose 用 `${TOOLS_IMAGE:-...:latest}` + `pull_policy: always`，而 `.env`
+里根本没写 pin——每次 up 拉什么全凭 registry 当时指向谁。**无审计、无回退**。
+本目录终结它：两个镜像 digest pin 死在 compose 里，版本 = git 历史。
+
+## 发版（只手动 dispatch，合 PR 不自动发）
+
+1. 改 `compose.yml` 里 pin（tools / chrome-cjk 二选一或都改）→ 提 PR → 合。
+2. Actions 里手动点 `deliver-opencode-prod` 跑：CI 绿门（docker-images 主分支
+   test-memory 必须 success，否则 fail-closed）→ tailnet 上机 → 备份线上
+   compose → 下发 → pull → up → 验活（4097 通 + 运行中 digest == pin）。
+3. 验活失败自动回滚：恢复备份 compose + up（旧镜像留本地，不 prune）。
+
+回退 = revert 上次 pin 的 PR → 合 → 手动再发一次。`git log -- compose.yml`
+即全部发版审计。
+
+## 首次灰度（一次性，从旧 Alpine 迁 glibc 2.0.29）
+
+- 线上现跑旧 Alpine（`866128bf…`，2026-10-13 起）；本 pin 是 glibc 新线
+  （与 1.41 试用同一 digest，已验证 add→search 闭环）。
+- 条件：CI 转绿（docker-images#3）之后。workflow 的绿门会硬拦，在此之前
+  合了也只会 abort，不会动线上。
+- 数据：卷名不变（`prod-work`/`prod-data`）→ L1 文件记忆保留；L2 插件是
+  新增（旧镜像没有），首启空库，属预期。
+- 手动兜底（workflow 万一失手）：目标机上
+  `cd /root/stacks/opencode-prod && cp compose.yml.prev-<ts> compose.yml && docker compose up -d`。
+
+## 监控注意
+
+- `:4747` 是会话激活式的（无会话时掉，有会话回）——不要对它做裸轮询告警。
+  以 agent 内 memory 调用 / 会话触发后 API 为准（试用期实证，见 docker-images#2）。
+- `4097:4097` 仍绑全接口（历史状态）；收紧到回环 + tailnet 是待办，不管本次。
+
+## 容器独立进网（2026-10-27）
+
+- 容器自带 userspace `tailscaled`（无 tun / NET_ADMIN），hostname `opencode-prod`，
+  tag `tag:opencode`；状态卷 `tailscale-state` 持久化 node key，重建不改名。canary 用
+  `TS_HOSTNAME=opencode-prod-canary` 先上线，避免抢正式节点名。不再安装静态 SSH 私钥、
+  不再 ssh-keyscan。
+- 每次 deploy 由 `deliver-remote-core.sh` 现场 mint 一把
+  reusable+ephemeral+90 天、`tag:opencode` 的 auth key，经 render 写入 `.env` 的
+  `TS_JOIN_KEY`；容器启动时 `tailscale up --ssh`。
+- 验活：共用 `scripts/canary-probe.sh` 是 goss runner（本栈只在 `deploy.manifest` 留参数）。`goss-trial.yaml` 断言就绪、双镜像 pin、卷挂载点、
+  容器 tailscaled（Running+IP）、gh/wrangler/send-mail、drain 固定问答；junit 落靶机
+  `.probe-results/`，宿主 tailnet 设备表与 `probe-cases/*.sh` 仍由 runner 跑，统一表＋底线断言。
+  生产上再验双向：`tailscale ssh root@opencode-prod` 进去，
+  `docker exec opencode-prod tailscale ssh root@mesh-hw-21 hostname` 出去。
+- ACL 见 `tailscale/policy.hujson`：`tag:opencode` 只放行 .21/.41，`tag:mesh` 可登容器。
+
+## 进仓红线
+
+- `.env` 真值永不上机经 workflow（只活在目标机 + sops）；workflow 缺 `.env`
+  直接 abort。
+- `config/home/.{aliyun,oci}/` 是目标机本地文件，workflow 不下发、不删除、不覆盖。
+- 卷数据（`prod-*`、`tailscale-state`）workflow 永不 `down -v`。

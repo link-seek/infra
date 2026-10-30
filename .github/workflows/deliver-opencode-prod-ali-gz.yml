@@ -1,0 +1,59 @@
+name: deliver-opencode-prod-ali-gz
+# 快递线（deliver）：入口 mesh-ali-gz、容器落点 hw41（opencode.yingxin.net.cn），复用 deliver-stack。
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest_or_tag:
+        description: "tools 镜像 digest（sha256:…）或 tag，默认 stable"
+        required: false
+        default: stable
+      action:
+        description: "up 部署 / down 下线"
+        required: false
+        default: up
+        type: choice
+        options: [up, down]
+
+jobs:
+  check-secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: PROD_* secrets 非空（fail-closed，hw41 目标机沿用 org prod 密钥集）
+        env:
+          GH: ${{ secrets.PROD_GH_TOKEN }}
+          PWD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
+          AK: ${{ secrets.PROD_HCLOUD_AK }}
+          SK: ${{ secrets.PROD_HCLOUD_SK }}
+          SMTP: ${{ secrets.PROD_SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          [ -n "${GH:-}" ] || { echo "FAIL: secret PROD_GH_TOKEN (ENV_GH_TOKEN) 为空/缺失"; exit 1; }
+          [ -n "${PWD:-}" ] || { echo "FAIL: secret PROD_OPENCODE_SERVER_PASSWORD (ENV_OPENCODE_SERVER_PASSWORD) 为空/缺失"; exit 1; }
+          [ -n "${AK:-}" ] || { echo "FAIL: secret PROD_HCLOUD_AK (ENV_HCLOUD_AK) 为空/缺失"; exit 1; }
+          [ -n "${SK:-}" ] || { echo "FAIL: secret PROD_HCLOUD_SK (ENV_HCLOUD_SK) 为空/缺失"; exit 1; }
+          [ -n "${SMTP:-}" ] || { echo "FAIL: secret PROD_SMTP_PASS (ENV_SMTP_PASS) 为空/缺失"; exit 1; }
+          echo "OK: PROD_* secrets present"
+  deploy:
+    needs: check-secrets
+    uses: ./.github/workflows/deliver-stack.yml
+    with:
+      node_tag: host:mesh-hw-41
+      digest_or_tag: ${{ inputs.digest_or_tag || 'stable' }}
+      stack_dir: stacks/opencode-prod-ali-gz
+      action: ${{ inputs.action || 'up' }}
+      ssh_transport: tailscale
+    secrets:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
+      ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
+      CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+      ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
+      ENV_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
+      ENV_SMTP_PASS: ${{ secrets.PROD_SMTP_PASS }}

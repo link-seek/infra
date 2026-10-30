@@ -23,6 +23,12 @@ tailnet 域名后缀：`*.tail137c40.ts.net`。
 | `hw21-opencode.xieyucheng.top` | A | 120.77.76.20 | 在用：经 120 Caddy → tailnet → hw21:4097 |
 | `opencode.xieyucheng.top` | CNAME | `*.w.kunlunaq.com`（华为 WAF）→ 116.117.158.55 | **死的**（2026-09-21 建后未动，后端无响应）：待改 A → 120 并上 Caddy |
 
+## 域名（Cloudflare 托管，zone：`yingxin.net.cn`）
+
+| 域名 | 类型 | 内容 | 状态 |
+|---|---|---|---|
+| `opencode.yingxin.net.cn` | A | 120.77.76.20 | 新增：mesh-ali-gz Caddy → tailnet → hw41:4097（容器在 hw41，DNS-only） |
+
 ## 入口证书
 
 | 域名 | 签发 | 到期 | 位置 |

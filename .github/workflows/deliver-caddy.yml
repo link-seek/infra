@@ -74,6 +74,14 @@ jobs:
             sleep 30
           done
           [ "$CODE" = '200' ] || { echo OPENCODE-DOMAIN-NOT-READY; exit 1; }
+          # 新域名（mesh-ali-gz 本机栈）证书签发+解析可能延迟，重试 5 分钟
+          for i in $(seq 1 10); do
+            CODE2=$(curl -s -m 15 -o /dev/null -w '%{http_code}' https://opencode.yingxin.net.cn/ || true)
+            echo "yingxin try$i http=$CODE2"
+            [ "$CODE2" = '200' ] && break
+            sleep 30
+          done
+          [ "$CODE2" = '200' ] || { echo OPENCODE-YINGXIN-NOT-READY; exit 1; }
           rm -f ~/.ssh/ci_key
 
       - name: 部署摘要

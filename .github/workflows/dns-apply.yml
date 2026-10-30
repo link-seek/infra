@@ -9,6 +9,10 @@ on:
         description: 只打印计划不执行（true/false）
         required: false
         default: 'true'
+      records_file:
+        description: "DNS 声明文件（默认 dns/records.json）"
+        required: false
+        default: 'dns/records.json'
 
 concurrency:
   group: dns-apply
@@ -124,8 +128,10 @@ jobs:
           echo "CFTOK=$CHILD" >> "$GITHUB_ENV"
           echo "CF 现签 OK（cf-dns-${{ github.run_id }}，2h）"
 
-      - name: records.json 语法检查
-        run: python3 -c "import json; d=json.load(open('dns/records.json')); print('records:', len(d['records']), 'zone:', d['zone'])"
+      - name: records 语法检查
+        env:
+          RECORDS_FILE: ${{ inputs.records_file || 'dns/records.json' }}
+        run: python3 -c "import json,os; f=os.environ['RECORDS_FILE']; d=json.load(open(f)); print('records:', len(d['records']), 'zone:', d['zone'])"
 
       - name: secret 预检（只验长度，不打值）
         run: |
@@ -134,11 +140,13 @@ jobs:
           [ "${#C}" -ge 20 ] || { echo CFTOKEN_TOO_SHORT; exit 1; }
 
       - name: DNS 对账
+        env:
+          RECORDS_FILE: ${{ inputs.records_file || 'dns/records.json' }}
         run: |
           if [ "${{ github.event_name }}" = 'workflow_dispatch' ] && [ "${{ inputs.dry_run }}" = 'true' ]; then
-            DRY_RUN=1 python3 scripts/cf-dns-apply.py
+            DRY_RUN=1 RECORDS_FILE="${RECORDS_FILE}" python3 scripts/cf-dns-apply.py
           else
-            python3 scripts/cf-dns-apply.py
+            RECORDS_FILE="${RECORDS_FILE}" python3 scripts/cf-dns-apply.py
           fi
 
       - name: 解析验证（新记录全球生效可能延迟，重试 5 分钟）

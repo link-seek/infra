@@ -8,7 +8,11 @@
 		// 常驻生产机（hw-21）。
 		"tag:prod":      ["autogroup:admin"],
 		// opencode-prod 容器（userspace tailscaled），独立 tailnet 节点。
-		"tag:opencode":  ["autogroup:admin"]
+		"tag:opencode":  ["autogroup:admin"],
+		// CI 用旧 prod auth key（tag:ci-prod）加入 tailnet 的节点身份。
+		"tag:ci-prod":   ["autogroup:admin"],
+		// 公网入口机 ali-gz 专用。
+		"tag:entry":     ["autogroup:admin"]
 	},
 	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
 	"grants": [
@@ -48,7 +52,9 @@
 		// CI 看 canary：trial 靶机/runner 都是 tag:ci，netmap 按 ACL 过滤，
 		// 无此条则探针在宿主设备表永远看不到 canary（40616506188/40617554410 实锤）。
 		// 只给网络可见性，不给 ssh 规则（探针用 docker exec），CI 不能 SSH 进 canary。
-		{"src": ["tag:ci"],       "dst": ["tag:opencode"], "ip": ["22"]}
+		{"src": ["tag:ci"],       "dst": ["tag:opencode"], "ip": ["22"]},
+		// deliver-caddy 一次性节点到 ali-gz:22 下发 Caddy，与 tag:ci（现场 mint）分开审计。
+		{"src": ["tag:ci-prod"], "dst": ["100.85.128.116"], "ip": ["22"]}
 	],
 	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
 		"name":       "opencode-ai",
@@ -142,6 +148,12 @@
 		"action": "accept",
 		"src":    ["tag:mesh"],
 		"dst":    ["tag:connector"],
+		"users":  ["root"]
+	}, {
+		// deliver-caddy 用 tailscale ssh 上 ali-gz（100.85.128.116）下发 Caddy；grants 已放 22，SSH 段还需 accept。
+		"action": "accept",
+		"src":    ["tag:ci-prod"],
+		"dst":    ["tag:entry"],
 		"users":  ["root"]
 	}],
 	"tests": [
