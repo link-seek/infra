@@ -8,7 +8,7 @@ name: opencode
 # 注：issues.assigned 发起人调 API 时平台已要求 push 权限，故不验 sender association。
 # 构建流水线全是 schedule/手动触发，合 PR 不会自动打镜像。
 # 前提：repo settings 需有 OPENCODE_API_KEY（Go 订阅 key）。
-# 现使用 link-seek/opencode-github-bot@v0.2.2（OpenCode v2 自包含 plugin）。
+# 现使用 link-seek/opencode-github-bot@v0.2.3（OpenCode v2 自包含 plugin）。
 
 on:
   issue_comment:
@@ -47,7 +47,7 @@ jobs:
 
       - name: Run OpenCode (PR review / comment)
         if: github.event_name != 'issues'
-        uses: link-seek/opencode-github-bot@v0.2.2
+        uses: link-seek/opencode-github-bot@v0.2.3
         with:
           model: ${{ vars.OPENCODE_REVIEW_MODEL }}
           github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
@@ -60,7 +60,7 @@ jobs:
 
       - name: Run OpenCode (issue fix)
         if: github.event_name == 'issues'
-        uses: link-seek/opencode-github-bot@v0.2.2
+        uses: link-seek/opencode-github-bot@v0.2.3
         with:
           model: ${{ vars.OPENCODE_REVIEW_MODEL }}
           github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
