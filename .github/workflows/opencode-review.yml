@@ -25,10 +25,11 @@ jobs:
           fetch-depth: 1
 
       - name: Run OpenCode review
-        uses: link-seek/opencode-github-bot@v0.2.1
+        uses: link-seek/opencode-github-bot@v0.2.2
         with:
-          model: opencode-go/beam-free
+          model: ${{ vars.OPENCODE_REVIEW_MODEL }}
           github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          llm-api-key: ${{ secrets.OPENCODE_API_KEY }}
           mode: review
           pr-number: ${{ github.event.pull_request.number }}
           require-evidence: "false"
