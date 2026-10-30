@@ -1,0 +1,15 @@
+{
+  "_doc": "yingxin.net.cn zone DNS 声明（opencode.yingxin.net.cn 入口）。",
+  "zone": "yingxin.net.cn",
+  "records": [
+    {
+      "name": "opencode.yingxin.net.cn",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "mesh-ali-gz Caddy 入口（DNS-only，TLS 由 Caddy 终结）"
+    }
+  ]
+}
