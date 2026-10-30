@@ -116,17 +116,14 @@ jobs:
                       if v is not None and f"name: {v}" not in blk:
                           fail(f"{s}: {kind}.{k} 必须显式 name: {v}")
 
-              # 6. manifest 探针级别（有 manifest 的栈）
+              # 6. manifest 存在性（探针级别已统一 full，不再校验 UP_PROBE_LEVEL）
               if want["manifest"]:
                   try:
                       mf = open(f"{s}/deploy.manifest").read()
                   except FileNotFoundError:
                       fail(f"{s}: 缺 deploy.manifest"); mf = ""
-                  m2 = re.search(r'(?m)^UP_PROBE_LEVEL="(\w+)"', mf)
-                  if not m2 or m2.group(1) not in ("boot", "full"):
-                      fail(f"{s}: UP_PROBE_LEVEL 只能是 boot/full")
-                  else:
-                      print(f"OK {s}: UP_PROBE_LEVEL={m2.group(1)}")
+                  if 'UP_PROBE_LEVEL' in mf:
+                      fail(f"{s}: UP_PROBE_LEVEL 已退役（trial/prod 统一 full），请删除该行")
 
               # 7. .env.example 键齐且无真值模式
               try:

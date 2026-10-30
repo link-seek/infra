@@ -4,7 +4,7 @@ name: deliver-stack
 # 复用快递线：唯一会动目标机的线。调用方=各栈薄调用 / img-preflight / 人类 dispatch。
 # 输入只有：节点标签、digest-or-tag（默认 stable，进门即冻结为 digest）、栈目录、up/down/preflight。
 # 铁律：正常发走 stable（已祝福）；指名 digest 只用于回滚/救火，且必须在记录里写清原因。
-# action=preflight 只到探针（img 场景，canary 留给调用方处置）；up 的探针级别看栈 manifest 的 UP_PROBE_LEVEL。
+# action=preflight 只到探针（img 场景，canary 留给调用方处置）；trial/prod 探针统一全跑 full。
 # TS-only：远端一律经 Tailscale SSH；无 local 执行器、无 role、无 bypass、无审批、无 teardown。
 # 蓝绿：同 env 同网络起 canary 探针，绿才切流（留下 canary），红删 canary 旧容器不动。
 

@@ -35,7 +35,7 @@
   起 canary、跑 goss runner（本栈只在 `deploy.manifest` 留参数）：
   `goss-gateway.yaml` 断言就绪（容器 IP:4000）、镜像 pin、黑名单 400；真/假 key verdict 透传（要解析 JSON 回包）
   留在 `probe-cases/verdict-passthrough.sh`。junit 与统一表落靶机 `.probe-results/`；任一红即丢 canary，旧容器全程在线，
-  绿才 `force-recreate` 正式容器。生产 `UP_PROBE_LEVEL=full`，手动发一次即跑全套。
+  绿才 `force-recreate` 正式容器（trial/prod 统一全跑 full）。手动发一次即跑全套。
   goss 二进制版本由 `deploy.manifest` 的 `GOSS_VERSION` 钉死，复用线下载后与栈文件同路送上靶机。
 * 镜像构建 + 行为门在 `link-seek/docker-images` 仓 `bake-gateway.yml`（测试归镜像构建）。
   `.env` 更新走 render-dotenv（workflow 永不手写 `.env`）。
