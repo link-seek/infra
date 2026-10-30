@@ -14,13 +14,16 @@ CANARY_PROJECT=litellm-guard-canary
 CANARY_SERVICE=litellm-guard
 CANARY_SERVICES="litellm-guard"
 CANARY_CONTAINER=litellm-guard-canary
+# canary 必须用独立 tailnet hostname 进网，否则抢正式节点名 litellm-gateway（link-seek/infra#181）
+CANARY_TS_HOSTNAME=1
+CANARY_HOSTNAME=litellm-guard-canary
 # 网关 canary 用独立网络，避免挂生产网 / down 时误删生产网络
 CANARY_NETWORK=canary-net
 # 随机 master 存 .canary_master，切流复用同一把
 CANARY_MASTER=1
-# goss 文件 / 用例下限（现 3 条：http1+command2）；防删门禁
+# goss 文件 / 用例下限（现 4 条：http1+command3）；防删门禁
 GOSS_FILE=goss-gateway.yaml
-MIN_GOSS_CASES=3
+MIN_GOSS_CASES=4
 # 探针参数：需要容器 IP；从 canary 现场取黑名单；校验镜像 pin 与黑名单底线
 PROBE_NEEDS_IP=1
 PROBE_PIN_VARS="PIN_GATEWAY=litellm-gateway"

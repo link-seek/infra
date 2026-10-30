@@ -10,8 +10,58 @@ services:
     image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:73c080970ef96794f0148da18c397d7d9afb50641bb0febe64ca9742751c0736
     pull_policy: always
     container_name: litellm-guard
+    hostname: litellm-gateway
     # PID 1 僵尸回收：与 opencode-prod 同一解法（旧栈 380+ 僵尸教训）。
     init: true
+    # 容器独立入网（link-seek/infra#181）：自带 userspace tailscaled，是独立 tailnet 节点，
+    # 与 opencode 栈同模式（TS_JOIN_KEY 现场 mint，状态卷持久化 node key，MagicDNS 名稳定）。
+    # 不开 --ssh：网关不需要人进容器排障（宿主机 SSH 足够），最小面。
+    # 注意：entrypoint 里 shell 变量必须写 $$（单个 $ 会被 compose 当插值吃掉）。
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        if [ "$$PIPELINE_MANAGED" != "true" ]; then
+          echo "FATAL: .env not pipeline-managed (PIPELINE_MANAGED!=true). Refusing to start." >&2
+          exit 1
+        fi
+        mkdir -p /var/lib/tailscale /var/run/tailscale
+        tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/var/log/tailscaled.log 2>&1 &
+        i=0
+        while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ $$i -lt 30 ]; do
+          i=$$((i+1))
+          sleep 1
+        done
+        if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
+          echo "FATAL: tailscaled did not start" >&2
+          tail -n 50 /var/log/tailscaled.log >&2 || true
+          exit 1
+        fi
+        # 持久化 node key 已进网（Running 且有 IP）时跳过 up：join key 90 天过期后重启仍能起。
+        # 状态查不到/不完整则按老逻辑 up（fail-closed）。
+        ts_status="$$(tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null || true)"
+        ts_ip="$$(tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null | head -n 1 || true)"
+        if printf '%s' "$$ts_status" | grep -q '"BackendState"[[:space:]]*:[[:space:]]*"Running"' && [ -n "$$ts_ip" ]; then
+          echo "tailscale already Running ($$ts_ip), skip up"
+        else
+          if [ -z "$${TS_JOIN_KEY:-}" ]; then
+            echo "FATAL: TS_JOIN_KEY missing (.env must be rendered by deliver line)." >&2
+            exit 1
+          fi
+          # TS_HOSTNAME 默认 litellm-gateway；canary 覆盖成 litellm-guard-canary，避免先占正式节点名。
+          if ! timeout 120 tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$$TS_JOIN_KEY" --hostname="$${TS_HOSTNAME:-litellm-gateway}" --accept-routes=false --accept-dns=false; then
+            echo "FATAL: tailscale up failed" >&2
+            tail -n 50 /var/log/tailscaled.log >&2 || true
+            exit 1
+          fi
+          echo "tailscale up: $$(tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip)"
+        fi
+        unset TS_JOIN_KEY # key 只在启动 join 时需要，不留在 litellm 进程环境里
+        exec litellm "$$@"
+    volumes:
+      # 持久化 tailscaled 状态：容器重建仍复用同一 node key，避免常驻节点被改名。
+      - tailscale-state:/var/lib/tailscale
     # 4000 绑宿主机回环 + docker 网桥 IP：opencode-prod 等容器经 host.docker.internal
     # （→172.17.0.1）可达；172.19.0.1 覆盖自定义网段。LAN 经 tailscale serve，公网经隧道。
     ports:
@@ -35,3 +85,5 @@ services:
 networks:
   gw-net:
     name: litellm-guard_default   # 与现网同网：容器名解析不变（按 litellm-guard 名可达）
+volumes:
+  tailscale-state:

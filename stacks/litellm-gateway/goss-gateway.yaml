@@ -12,6 +12,12 @@ command:
       test -n "$img" && test "$img" = "$pin"
     exit-status: 0
     timeout: 30000
+  canary-tailscale-joined:
+    exec: |
+      out="$(docker exec {{ .Vars.CANARY_CONTAINER }} tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null)" || exit 1
+      echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'Running' in json.dumps(d.get('Self',{})), 'not Running'; ip=d.get('Self',{}).get('TailscaleIPs',[]); assert ip, 'no IP'; print('tailnet ok:', ip)"
+    exit-status: 0
+    timeout: 30000
   gateway-blacklist-400:
     exec: |
       code="$(curl -s -m 30 -o /dev/null -w '%{http_code}' \
