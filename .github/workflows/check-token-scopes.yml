@@ -1,0 +1,17 @@
+name: check-token-scopes
+
+on: workflow_dispatch
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check AGENT_GITHUB_TOKEN scopes
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        run: |
+          echo "=== Token scopes ==="
+          curl -sI -H "Authorization: token $GH_TOKEN" https://api.github.com/user | grep -i "x-oauth-scopes"
+          echo ""
+          echo "=== Test project access ==="
+          gh api graphql -f query='{ viewer { login } }' 2>&1 | head -5
