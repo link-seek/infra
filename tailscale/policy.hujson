@@ -54,7 +54,9 @@
 		// 只给网络可见性，不给 ssh 规则（探针用 docker exec），CI 不能 SSH 进 canary。
 		{"src": ["tag:ci"],       "dst": ["tag:opencode"], "ip": ["22"]},
 		// deliver-caddy 一次性节点到 ali-gz:22 下发 Caddy，与 tag:ci（现场 mint）分开审计。
-		{"src": ["tag:ci-prod"], "dst": ["100.85.128.116"], "ip": ["22"]}
+		{"src": ["tag:ci-prod"], "dst": ["100.85.128.116"], "ip": ["22"]},
+		// deliver-stack 一次性节点（tag:ci）上 hw41 部署，2244 上机 + 22 备用。
+		{"src": ["tag:ci"], "dst": ["100.111.231.85"], "ip": ["22", "2244"]}
 	],
 	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
 		"name":       "opencode-ai",
