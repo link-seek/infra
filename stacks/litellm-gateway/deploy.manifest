@@ -30,4 +30,3 @@ GOSS_RETRY_TIMEOUT=180s
 # 切流时重建的服务（canary 已验过，留下同样内容）
 CUTOVER_SERVICES="litellm-guard"
 # 生产 up 探针级别：full（就绪+黑名单+goss pin/verdict 透传全套）
-UP_PROBE_LEVEL="full"

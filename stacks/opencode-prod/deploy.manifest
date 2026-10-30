@@ -34,4 +34,3 @@ PROBE_REQUIRE_DRAIN=1
 GOSS_RETRY_TIMEOUT=120s
 CUTOVER_SERVICES="opencode-prod browser"
 # 生产 up 探针级别：full（含 drain 活证明；网关在 prod 机恒在故恒强制执行）
-UP_PROBE_LEVEL="full"
