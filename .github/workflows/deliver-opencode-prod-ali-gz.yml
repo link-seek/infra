@@ -20,21 +20,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: ALI_GZ_* secrets 非空（fail-closed，hw41 目标机沿用 ali-gz 栈密钥集）
+      - name: PROD_* secrets 非空（fail-closed，hw41 目标机沿用 org prod 密钥集）
         env:
-          GH: ${{ secrets.ALI_GZ_GH_TOKEN }}
-          PWD: ${{ secrets.ALI_GZ_OPENCODE_SERVER_PASSWORD }}
-          AK: ${{ secrets.ALI_GZ_HCLOUD_AK }}
-          SK: ${{ secrets.ALI_GZ_HCLOUD_SK }}
-          SMTP: ${{ secrets.ALI_GZ_SMTP_PASS }}
+          GH: ${{ secrets.PROD_GH_TOKEN }}
+          PWD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
+          AK: ${{ secrets.PROD_HCLOUD_AK }}
+          SK: ${{ secrets.PROD_HCLOUD_SK }}
+          SMTP: ${{ secrets.PROD_SMTP_PASS }}
         run: |
           set -euo pipefail
-          [ -n "${GH:-}" ] || { echo "FAIL: secret ALI_GZ_GH_TOKEN (ENV_GH_TOKEN) 为空/缺失"; exit 1; }
-          [ -n "${PWD:-}" ] || { echo "FAIL: secret ALI_GZ_OPENCODE_SERVER_PASSWORD (ENV_OPENCODE_SERVER_PASSWORD) 为空/缺失"; exit 1; }
-          [ -n "${AK:-}" ] || { echo "FAIL: secret ALI_GZ_HCLOUD_AK (ENV_HCLOUD_AK) 为空/缺失"; exit 1; }
-          [ -n "${SK:-}" ] || { echo "FAIL: secret ALI_GZ_HCLOUD_SK (ENV_HCLOUD_SK) 为空/缺失"; exit 1; }
-          [ -n "${SMTP:-}" ] || { echo "FAIL: secret ALI_GZ_SMTP_PASS (ENV_SMTP_PASS) 为空/缺失"; exit 1; }
-          echo "OK: ALI_GZ_* secrets present"
+          [ -n "${GH:-}" ] || { echo "FAIL: secret PROD_GH_TOKEN (ENV_GH_TOKEN) 为空/缺失"; exit 1; }
+          [ -n "${PWD:-}" ] || { echo "FAIL: secret PROD_OPENCODE_SERVER_PASSWORD (ENV_OPENCODE_SERVER_PASSWORD) 为空/缺失"; exit 1; }
+          [ -n "${AK:-}" ] || { echo "FAIL: secret PROD_HCLOUD_AK (ENV_HCLOUD_AK) 为空/缺失"; exit 1; }
+          [ -n "${SK:-}" ] || { echo "FAIL: secret PROD_HCLOUD_SK (ENV_HCLOUD_SK) 为空/缺失"; exit 1; }
+          [ -n "${SMTP:-}" ] || { echo "FAIL: secret PROD_SMTP_PASS (ENV_SMTP_PASS) 为空/缺失"; exit 1; }
+          echo "OK: PROD_* secrets present"
   deploy:
     needs: check-secrets
     uses: ./.github/workflows/deliver-stack.yml
@@ -50,10 +50,10 @@ jobs:
       SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
       SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-      ENV_GH_TOKEN: ${{ secrets.ALI_GZ_GH_TOKEN }}
+      ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
       ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-      ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ALI_GZ_OPENCODE_SERVER_PASSWORD }}
+      ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
       CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
-      ENV_HCLOUD_AK: ${{ secrets.ALI_GZ_HCLOUD_AK }}
-      ENV_HCLOUD_SK: ${{ secrets.ALI_GZ_HCLOUD_SK }}
-      ENV_SMTP_PASS: ${{ secrets.ALI_GZ_SMTP_PASS }}
+      ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
+      ENV_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
+      ENV_SMTP_PASS: ${{ secrets.PROD_SMTP_PASS }}
