@@ -2,7 +2,7 @@ name: ts-cleanup（tailnet 僵尸节点清理，手动单次）
 
 # 手动清理离线临时节点（ci-infra-*/img-*）。默认 dry-run 只列清单；
 # confirm=yes 才真删。mesh 系列/个人设备/opencode-prod 写死永不删。
-# key 只活 CI（org TS_API_KEY），容器不持 tailnet-admin。
+# key 只活 CI：优先 org TS_OAUTH_CREDENTIALS 配对（换 1h token），缺失回落 TS_API_KEY；容器不持 tailnet-admin。
 
 on:
   workflow_dispatch:
@@ -32,6 +32,7 @@ jobs:
       contents: read
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      TS_OAUTH_CREDENTIALS: ${{ secrets.TS_OAUTH_CREDENTIALS }}
     steps:
       - name: 列候选 + dry-run（删前必看）
         env:
@@ -40,8 +41,39 @@ jobs:
           CONFIRM: ${{ inputs.confirm }}
         run: |
           set -euo pipefail
-          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
-          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          # 取 token 顺序：OAuth 配对（1h access token，现换）> 直连 TS_API_KEY（旧）。
+          TSKEY=""
+          OAUTH_JSON="$(printf '%s' "${TS_OAUTH_CREDENTIALS:-}")"
+          if [ -n "$OAUTH_JSON" ]; then
+            TSKEY="$(TS_OAUTH_JSON="$OAUTH_JSON" python3 - <<'PY'
+          import json, os, sys, urllib.parse, urllib.request, urllib.error
+          try:
+              cred = json.loads(os.environ["TS_OAUTH_JSON"])
+              cid, csec = cred["client_id"], cred["client_secret"]
+          except Exception:
+              print("FAIL: TS_OAUTH_CREDENTIALS 不是合法 JSON{client_id,client_secret}", file=sys.stderr)
+              raise SystemExit(1)
+          data = urllib.parse.urlencode(
+              {"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"}).encode()
+          req = urllib.request.Request("https://api.tailscale.com/api/v2/oauth/token", data=data, method="POST")
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  r = json.loads(resp.read() or b"{}")
+          except urllib.error.HTTPError as exc:
+              print("FAIL: OAuth 换 token status=%s" % exc.code, file=sys.stderr)
+              raise SystemExit(1)
+          tok = str(r.get("access_token") or "")
+          if not tok:
+              print("FAIL: OAuth 无 access_token", file=sys.stderr)
+              raise SystemExit(1)
+          print(tok)
+          PY
+          )"
+          fi
+          if [ -z "$TSKEY" ]; then
+            TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          fi
+          [ -n "$TSKEY" ] || { echo "FAIL: 无可用 TS 凭证（OAuth 配对与 TS_API_KEY 都空）"; exit 1; }
           echo "::add-mask::$TSKEY"
           export TSKEY PATTERN DAYS CONFIRM
           python3 - <<'PY'
