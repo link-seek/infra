@@ -150,10 +150,15 @@ jobs:
               print("dry-run 结束（confirm 非 yes，不删）。要删重跑并填 confirm=yes。")
               sys.exit(0)
           for node_id, name, offline_days in victims:
-              st, _ = call("DELETE", "/tailnet/-/devices/%s" % node_id)
+              # 官方路径：DELETE /device/{deviceId}（顶级；列表路径无 DELETE，必 404）。
+              st, _ = call("DELETE", "/device/%s" % node_id)
               print("delete %s (%s, %dd) -> %s" % (name, node_id[:8], offline_days, st))
               if st not in (200, 204):
                   print("FAIL: 删 %s 失败" % name)
+                  raise SystemExit(1)
+              st, _ = call("GET", "/device/%s" % node_id)
+              if st != 404:
+                  print("FAIL: %s 删除后仍在（GET=%s）" % (name, st))
                   raise SystemExit(1)
           print("删除完成，共 %d 台；请到控制台复核设备表" % len(victims))
           PY
