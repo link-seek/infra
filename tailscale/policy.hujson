@@ -147,6 +147,12 @@
 		"src":    ["tag:mesh"],
 		"dst":    ["tag:connector"],
 		"users":  ["root"]
+	}, {
+		// deliver-caddy 用 tailscale ssh 上 ali-gz（100.85.128.116）下发 Caddy；grants 已放 22，SSH 段还需 accept。
+		"action": "accept",
+		"src":    ["tag:ci-prod"],
+		"dst":    ["100.85.128.116"],
+		"users":  ["root"]
 	}],
 	"tests": [
 		{"src": "tag:mesh", "allow": ["100.85.128.116:22"]},
