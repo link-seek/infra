@@ -1,11 +1,14 @@
 name: test-opencode-v2-bot-issue
 
-# Temporary test workflow for issue-fix mode.
-# Triggered when an issue is assigned to AI_ASSIGNEES.
-
 on:
   issues:
     types: [assigned]
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: 'Issue number to fix'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -14,7 +17,9 @@ permissions:
 
 jobs:
   fix:
-    if: contains(format(',{0},', vars.AI_ASSIGNEES), format(',{0},', github.event.assignee.login))
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(format(',{0},', vars.AI_ASSIGNEES), format(',{0},', github.event.assignee.login))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -29,7 +34,7 @@ jobs:
           model: ${{ vars.OPENCODE_REVIEW_MODEL }}
           github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
           mode: fix-issue
-          issue-number: ${{ github.event.issue.number }}
+          issue-number: ${{ github.event.inputs.issue-number || github.event.issue.number }}
         env:
           GIT_AUTHOR_NAME: opencode-bot
           GIT_AUTHOR_EMAIL: opencode-bot@users.noreply.github.com
