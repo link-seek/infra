@@ -47,3 +47,4 @@ stacks/<system>/          # 各系统 topology 级引用，不搬业务仓代码
 组织仓库偏多、边界靠人脑记的问题，跟踪见
 [Discussions：组织仓库规整](https://github.com/link-seek/infra/discussions)，
 清单模板见 `docs/repo-inventory.md`。
+# v0.2.0 test
