@@ -32,5 +32,3 @@ jobs:
           require-evidence: "false"
           require-pinned-actions: "true"
           collect-feedback: "true"
-        env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
