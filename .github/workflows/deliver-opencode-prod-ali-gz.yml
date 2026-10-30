@@ -1,5 +1,5 @@
 name: deliver-opencode-prod-ali-gz
-# 快递线（deliver）：mesh-ali-gz 上 opencode 栈（opencode.yingxin.net.cn），复用 deliver-stack。
+# 快递线（deliver）：入口 mesh-ali-gz、容器落点 hw41（opencode.yingxin.net.cn），复用 deliver-stack。
 
 on:
   workflow_dispatch:
@@ -16,10 +16,30 @@ on:
         options: [up, down]
 
 jobs:
+  check-secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: ALI_GZ_* secrets 非空（fail-closed，hw41 目标机沿用 ali-gz 栈密钥集）
+        env:
+          GH: ${{ secrets.ALI_GZ_GH_TOKEN }}
+          PWD: ${{ secrets.ALI_GZ_OPENCODE_SERVER_PASSWORD }}
+          AK: ${{ secrets.ALI_GZ_HCLOUD_AK }}
+          SK: ${{ secrets.ALI_GZ_HCLOUD_SK }}
+          SMTP: ${{ secrets.ALI_GZ_SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          [ -n "${GH:-}" ] || { echo "FAIL: secret ALI_GZ_GH_TOKEN (ENV_GH_TOKEN) 为空/缺失"; exit 1; }
+          [ -n "${PWD:-}" ] || { echo "FAIL: secret ALI_GZ_OPENCODE_SERVER_PASSWORD (ENV_OPENCODE_SERVER_PASSWORD) 为空/缺失"; exit 1; }
+          [ -n "${AK:-}" ] || { echo "FAIL: secret ALI_GZ_HCLOUD_AK (ENV_HCLOUD_AK) 为空/缺失"; exit 1; }
+          [ -n "${SK:-}" ] || { echo "FAIL: secret ALI_GZ_HCLOUD_SK (ENV_HCLOUD_SK) 为空/缺失"; exit 1; }
+          [ -n "${SMTP:-}" ] || { echo "FAIL: secret ALI_GZ_SMTP_PASS (ENV_SMTP_PASS) 为空/缺失"; exit 1; }
+          echo "OK: ALI_GZ_* secrets present"
   deploy:
+    needs: check-secrets
     uses: ./.github/workflows/deliver-stack.yml
     with:
-      node_tag: host:mesh-ali-gz
+      node_tag: host:mesh-hw-41
       digest_or_tag: ${{ inputs.digest_or_tag || 'stable' }}
       stack_dir: stacks/opencode-prod-ali-gz
       action: ${{ inputs.action || 'up' }}
