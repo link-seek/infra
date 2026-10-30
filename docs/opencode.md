@@ -54,3 +54,9 @@ docker exec opencode-prod tailscale ssh root@mesh-hw-41 'hostname'
 - [ ] `opencode.xieyucheng.top` 上线：Caddy 加新块 + 旧名 301（本仓 workflow 落地）
 - [ ] DNS：`opencode` A → 120，删 WAF 死 CNAME
 - [ ] 4097 监听收紧（127.0.0.1 + tailnet）
+
+## mesh-ali-gz 本机栈（opencode.yingxin.net.cn）
+
+- 入口：`opencode.yingxin.net.cn` → mesh-ali-gz Caddy → `127.0.0.1:4097`（本机 opencode-prod-ali-gz）。
+- 栈目录：`stacks/opencode-prod-ali-gz/`（复用 opencode-prod 模板，卷/命名独立）。
+- 网关：tailnet `mesh-hw-21:4000`（本机无 litellm-guard）。

@@ -49,6 +49,13 @@ jobs:
                   "manifest": True,
                   "env_example_keys": (),
               },
+              "stacks/opencode-prod-ali-gz": {
+                  "project": "opencode-prod-ali-gz",
+                  "volumes": {"prod-data": None, "prod-work": None, "tailscale-state": None},
+                  "networks": {"opencode-net": None},
+                  "manifest": True,
+                  "env_example_keys": (),
+              },
           }
           SECRET_PAT = re.compile(
               r"^[\s\-]*[A-Z_0-9]*(KEY|TOKEN|SECRET|PASSWD|PASSWORD)[A-Z_0-9_]*\s*[:=]\s*(\S)", re.M)

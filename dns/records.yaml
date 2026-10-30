@@ -19,3 +19,9 @@ records:
   #   purpose: opencode 主域名（hw21-opencode 301 至此）
   # - delete: opencode.xieyucheng.top CNAME *.w.kunlunaq.com（2026-09-21 死记录）
 ```
+
+# yingxin.net.cn zone（mesh-ali-gz opencode 入口）
+# - name: opencode.yingxin.net.cn
+#   type: A
+#   content: 120.77.76.20
+#   proxied: false

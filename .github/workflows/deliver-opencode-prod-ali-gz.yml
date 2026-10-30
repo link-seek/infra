@@ -1,0 +1,39 @@
+name: deliver-opencode-prod-ali-gz
+# 快递线（deliver）：mesh-ali-gz 上 opencode 栈（opencode.yingxin.net.cn），复用 deliver-stack。
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest_or_tag:
+        description: "tools 镜像 digest（sha256:…）或 tag，默认 stable"
+        required: false
+        default: stable
+      action:
+        description: "up 部署 / down 下线"
+        required: false
+        default: up
+        type: choice
+        options: [up, down]
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deliver-stack.yml
+    with:
+      node_tag: host:mesh-ali-gz
+      digest_or_tag: ${{ inputs.digest_or_tag || 'stable' }}
+      stack_dir: stacks/opencode-prod-ali-gz
+      action: ${{ inputs.action || 'up' }}
+      ssh_transport: tailscale
+    secrets:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      ENV_GH_TOKEN: ${{ secrets.ALI_GZ_GH_TOKEN }}
+      ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ALI_GZ_OPENCODE_SERVER_PASSWORD }}
+      CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+      ENV_HCLOUD_AK: ${{ secrets.ALI_GZ_HCLOUD_AK }}
+      ENV_HCLOUD_SK: ${{ secrets.ALI_GZ_HCLOUD_SK }}
+      ENV_SMTP_PASS: ${{ secrets.ALI_GZ_SMTP_PASS }}

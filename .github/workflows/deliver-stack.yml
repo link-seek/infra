@@ -76,6 +76,7 @@ on:
         options:
           - stacks/litellm-gateway
           - stacks/opencode-prod
+          - stacks/opencode-prod-ali-gz
       action:
         description: "up 部署 / down 下线 / preflight 只到探针（img 场景）"
         required: false
