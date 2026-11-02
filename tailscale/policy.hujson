@@ -151,6 +151,12 @@
 		"dst":    ["tag:guest"],
 		"users":  ["root"]
 	}, {
+		// deliver-caddy：user 需登 mesh-ali-gz（tag:mesh，非 prod）；生效范围靠 grants 交集收窄到 ali-gz＋点名生产机。
+		"action": "accept",
+		"src":    ["tag:user"],
+		"dst":    ["tag:mesh"],
+		"users":  ["root"]
+	}, {
 		"action": "accept",
 		"src":    ["tag:admin"],
 		"dst":    ["tag:mesh"],
