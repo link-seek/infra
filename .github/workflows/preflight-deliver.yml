@@ -57,14 +57,14 @@ jobs:
           echo "::add-mask::$TSKEY"
           curl -fsSL https://tailscale.com/install.sh | sh
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci"]}}},"expirySeconds":7200}' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":7200}' \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: 临时 key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
-          # --ssh：既是 tag:ci 靶子（供部署方 tailscale ssh 进来），也为去掉 sshd/单次钥匙做准备
+          # --ssh：guest 靶子（供部署方 tailscale ssh 进来），也为去掉 sshd/单次钥匙做准备
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="$HN" --ssh --accept-routes=false --accept-dns=false
           tailscale ip -4
-          # 靶子以 tag:ci + --ssh 入网：部署方（同为 tag:ci）直接 tailscale ssh，无需 sshd/单次钥匙
+          # 靶子以 tag:guest + --ssh 入网：部署方（user 身份，经 canary 可见性 grant 看到靶机）直接 tailscale ssh，无需 sshd/单次钥匙
           tailscale status --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print("target tags:",d["Self"].get("Tags"))'
 
       - name: 试送（dispatch deliver-stack 跑 PR 版代码，全量 up，靶子随节点焚毁）

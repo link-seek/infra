@@ -48,7 +48,7 @@ jobs:
 
       - name: 加入 tailnet（一次性节点，用完即焚）
         # 注：tailscale/github-action v2/v3 均已强制 OAuth（authkey 不可用），
-        # 此处直调 CLI：up 用 TS_API_KEY 现场 mint 的 tag:ci 临时 key，结尾 logout 焚毁节点。
+        # 此处直调 CLI：up 用 TS_API_KEY 现场 mint 的 tag:user 临时 key，结尾 logout 焚毁节点。
         # OAuth 迁移（MIGRATE-TS-OAUTH）仍有效，待 Tailscale 侧建 OAuth client 后切回 action。
         timeout-minutes: 10
         env:
@@ -60,7 +60,7 @@ jobs:
           [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
           echo "::add-mask::$TSKEY"
           MINTED=""
-          MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci"]}}},"expirySeconds":21600}'
+          MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":21600}'
           MINT_RESP="$(mktemp)"
           MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' -d "$MINT_BODY" https://api.tailscale.com/api/v2/tailnet/-/keys 2>/tmp/mint.err || true)"
           if [ "$MINT_CODE" = "200" ] || [ "$MINT_CODE" = "201" ]; then
@@ -82,7 +82,7 @@ jobs:
           fi
           rm -f "$MINT_RESP"
           if [ -n "$MINTED" ]; then
-            echo "ephemeral key minted（tag:ci，有效期 21600s）"
+            echo "ephemeral key minted（tag:user，有效期 21600s）"
           else
             echo "FAIL: 现场 mint 未成功（无 TS_API_KEY 或 Bearer/Basic 双试皆拒）；本线 mint-only，不回退任何直连 key（含已退役的 TAILSCALE_AUTH_KEY_PROD）"
             exit 1

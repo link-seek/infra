@@ -22,7 +22,7 @@ jobs:
           [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
           echo "::add-mask::$TSKEY"
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci"]}}},"expirySeconds":21600}' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: 临时 key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
