@@ -50,7 +50,7 @@ jobs:
         # 注：tailscale/github-action v2/v3 均已强制 OAuth（authkey 不可用），
         # 此处直调 CLI：up 用 TS_API_KEY 现场 mint 的 tag:ci 临时 key，结尾 logout 焚毁节点。
         # OAuth 迁移（MIGRATE-TS-OAUTH）仍有效，待 Tailscale 侧建 OAuth client 后切回 action。
-        timeout-minutes: 6
+        timeout-minutes: 10
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
@@ -90,7 +90,27 @@ jobs:
           TS_AUTHKEY="$(printf '%s' "$MINTED" | tr -d '\r\n ')"
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-infra-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           tailscale ip -4
-          timeout 90 tailscale ping --timeout=30s --c=2 ${{ inputs.node_ip || '100.85.128.116' }}  # 目标节点（默认 mesh-ali-gz，权威值见 docs/topology.md）
+          TARGET_IP="${{ inputs.node_ip || '100.85.128.116' }}"
+          echo "等待目标 IP $TARGET_IP 进入 netmap/Peer ..."
+          PEER_OK=0
+          for i in $(seq 1 12); do
+            if tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); peers=d.get("Peer") or {}; flat=[ip for p in peers.values() for ip in (p.get("TailscaleIPs") or [])]; sys.exit(0 if sys.argv[1] in flat else 1)' "$TARGET_IP"; then
+              echo "peer ready: $TARGET_IP (try $i)"
+              PEER_OK=1
+              break
+            fi
+            echo "peer not ready yet (try $i/12)"
+            sleep 15
+          done
+          if [ "$PEER_OK" != "1" ]; then
+            echo "FAIL: 目标 $TARGET_IP 始终不在 netmap（no matching peer）"
+            echo "=== Self ==="
+            tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get("Self",{}),indent=2,ensure_ascii=False))'
+            echo "=== Peers ==="
+            tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); peers=d.get("Peer") or {}; [print(k, v.get("HostName"), v.get("TailscaleIPs")) for k,v in peers.items()]'
+            exit 1
+          fi
+          timeout 90 tailscale ping --timeout=30s --c=2 "$TARGET_IP" || { echo "FAIL: 目标 $TARGET_IP ping 不通"; exit 1; }  # 目标节点（默认 mesh-ali-gz，权威值见 docs/topology.md）
 
       - name: 下发 + reload + 验证（经 tailnet，不走公网）
         timeout-minutes: 8
