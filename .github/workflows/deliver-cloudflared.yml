@@ -77,15 +77,15 @@ jobs:
           PYEOF
           systemctl restart cloudflared && echo "restarted"
           sleep 20
-          # 验证：旧域名回温＋新域名 TLS 通（401 无 key 即通，签的是 Cloudflare 边缘证书）
+          # 验证：新域名回温＋ trial 域名 TLS 通（401 无 key 即通，签的是 Cloudflare 边缘证书）
           PASS=1
-          # 主域硬门：hw21-opencode 必须回温（隧道健康探针）
+          # 主域硬门：opencode 必须回温（隧道健康探针；hw21-opencode 已下线）
           for i in $(seq 1 10); do
-            CODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "https://hw21-opencode.xieyucheng.top/" || echo 000)"
+            CODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "https://opencode.xieyucheng.top/" || echo 000)"
             [ "$CODE" = "200" ] && break
             sleep 15
           done
-          echo "old-domain hw21-opencode -> $CODE"
+          echo "main-domain opencode -> $CODE"
           [ "$CODE" = "200" ] || PASS=0
           # 新域名等 tunnel 边界到 Cloudflare 生效（边缘握手最长 ~4 分钟）：不早判 fail
           TCODE="000"

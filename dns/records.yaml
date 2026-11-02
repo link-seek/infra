@@ -5,18 +5,13 @@
 
 ```yaml
 records:
-  - name: hw21-opencode.xieyucheng.top
-    type: A
-    content: 120.77.76.20
-    proxied: false
-    purpose: opencode 公网入口（120 Caddy → tailnet → hw21:4097）
-
-  # 待办（opencode 新域名上线时执行）：
+  # 2026-11-02：hw21-opencode 已下线（Caddy vhost 删＋records.json 标 absent），本条删除。
+  # opencode.xieyucheng.top 已上线（A 120.77.76.20，deliver-caddy 已验 200），待回填：
   # - name: opencode.xieyucheng.top
   #   type: A
   #   content: 120.77.76.20
   #   proxied: false
-  #   purpose: opencode 主域名（hw21-opencode 301 至此）
+  #   purpose: opencode 主域名
   # - delete: opencode.xieyucheng.top CNAME *.w.kunlunaq.com（2026-09-21 死记录）
 ```
 
