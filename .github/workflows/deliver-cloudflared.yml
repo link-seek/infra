@@ -22,13 +22,19 @@ jobs:
       - name: 加入 tailnet（一次性节点，用完即焚）
         timeout-minutes: 6
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY_PROD }}
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
-          TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
-          [ -n "$TS_AUTHKEY" ] || { echo "TS key missing"; exit 1; }
-          timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-tunnel-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":21600}'
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' -d "$MINT_BODY" https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))" || true)"
+          [ -n "$MINTED" ] || { echo "FAIL: 现场 mint 未成功"; exit 1; }
+          echo "::add-mask::$MINTED"
+          echo "ephemeral key minted（tag:user）"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-tunnel-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           timeout 15 bash -c "</dev/tcp/100.91.222.51/2244" || { echo "target unreachable"; exit 1; }
           echo "target reachable"
           for f in 100.111.231.85:trial 100.85.128.116:entry; do
