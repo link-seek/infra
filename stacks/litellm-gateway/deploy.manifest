@@ -18,6 +18,7 @@ CANARY_CONTAINER=litellm-guard-canary
 CANARY_NETWORK=canary-net
 # canary 容器名即 hostname（TS_HOSTNAME 由 canary-run 覆盖），避免先占正式节点名 litellm-gateway
 CANARY_HOSTNAME=litellm-guard-canary
+CANARY_TS_HOSTNAME=1
 # 随机 master 存 .canary_master，切流复用同一把
 CANARY_MASTER=1
 # goss 文件 / 用例下限（现 4 条：http1+command3）；防删门禁
