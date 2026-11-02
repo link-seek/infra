@@ -1,11 +1,4 @@
-hw21-opencode.xieyucheng.top {
-	redir https://opencode.xieyucheng.top{uri} permanent
-	log {
-		output file /var/log/caddy/opencode.log
-	}
-}
-
-# 阶段一新增：与 hw21-opencode 同后端；阶段二 hw21-opencode 改 301 到此名
+# 后端 hw21:4097
 opencode.xieyucheng.top {
 	reverse_proxy {
 		dynamic a {
