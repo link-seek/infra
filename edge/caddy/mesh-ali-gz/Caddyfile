@@ -14,8 +14,9 @@ opencode.xieyucheng.top {
 }
 
 # mesh-ali-gz 入口 opencode.yingxin.net.cn：Caddy → tailnet → hw41:4097（容器在 hw41）
+# 后端一律写 tailnet IP 字面量，禁用 MagicDNS 短名（ali-gz 本机无 100.100.100.100，名解析不可靠）。
 opencode.yingxin.net.cn {
-	reverse_proxy opencode-prod-ali-gz:4097
+	reverse_proxy 100.111.231.85:4097
 	log {
 		output file /var/log/caddy/opencode-yingxin.log
 	}
