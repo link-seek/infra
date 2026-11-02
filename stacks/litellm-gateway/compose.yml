@@ -69,12 +69,14 @@ services:
           echo "tailscale up: $$(tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip)"
         fi
         unset TS_JOIN_KEY
-        if ! timeout 60 tailscale --socket=/var/run/tailscale/tailscaled.sock serve --bg tcp:4000; then
+        if ! timeout 60 tailscale --socket=/var/run/tailscale/tailscaled.sock serve --bg --yes tcp:4000; then
           echo "FATAL: tailscale serve failed" >&2
           exit 1
         fi
         echo "tailscale serve: tailnet :4000 -> local :4000"
-        exec litellm "$$@"
+        tailscale --socket=/var/run/tailscale/tailscaled.sock serve status 2>/dev/null || true
+        # 链回上游入口（prisma 迁移＋ddtrace 分流都在里面）：WORKDIR=/app，CMD 由 compose command 传入
+        exec docker/prod_entrypoint.sh "$$@"
       - --
     command: --config /app/config.yaml --port 4000 --host 0.0.0.0
     restart: unless-stopped
