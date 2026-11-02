@@ -327,4 +327,6 @@ if [ "$PASS" -eq 1 ]; then
   exit 0
 fi
 echo "FAIL: canary probe 未通过（junit: $JUNIT）"
+echo "--- canary 日志（最后 80 行，容器删前取证）---"
+docker logs --tail 80 "$CANARY_CONTAINER" 2>&1 | tail -n 80 || true
 exit 1

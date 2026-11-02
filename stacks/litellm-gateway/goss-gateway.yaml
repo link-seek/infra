@@ -24,3 +24,9 @@ command:
     exit-status: 0
     timeout: 60000
     skip: {{ .Vars.SKIP_BLACKLIST }}
+  gateway-tailnet-identity:
+    exec: |
+      if ! docker exec {{ .Vars.CANARY_CONTAINER }} command -v tailscaled >/dev/null 2>&1; then echo "SKIP: old image without tailscaled"; exit 0; fi
+      docker exec {{ .Vars.CANARY_CONTAINER }} tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); s=d.get('Self',{}); assert d.get('BackendState')=='Running', 'not running'; assert 'tag:gateway' in (s.get('Tags') or []), s.get('Tags'); print('identity OK:', s.get('HostName'), s.get('Tags'))" || { echo '--- canary log tail ---'; docker logs --tail 60 {{ .Vars.CANARY_CONTAINER }} 2>&1 | tail -n 40; exit 1; }
+    exit-status: 0
+    timeout: 30000
