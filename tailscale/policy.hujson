@@ -129,7 +129,7 @@
 		"dst":    ["autogroup:self"],
 		"users":  ["autogroup:nonroot", "root"]
 	}, {
-		// S1 三权拆分（#202）：guest 只互登（靶机互访），user 可登点名生产机，admin 全网。
+		// S1 三权拆分（#202）：guest 只互登，user 可登 guest 临时靶机＋点名生产机，admin 全网。
 		"action": "accept",
 		"src":    ["tag:guest"],
 		"dst":    ["tag:guest"],
@@ -143,6 +143,12 @@
 		"action": "accept",
 		"src":    ["tag:user"],
 		"dst":    ["tag:user"],
+		"users":  ["root"]
+	}, {
+		// user 可登 guest 临时测试靶机＋点名生产机。
+		"action": "accept",
+		"src":    ["tag:user"],
+		"dst":    ["tag:guest"],
 		"users":  ["root"]
 	}, {
 		"action": "accept",
