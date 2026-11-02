@@ -27,11 +27,65 @@ services:
       DISABLE_ADMIN_UI: "True"
       RULES_FILE: /app/guard-rules.json
     # guard/config 全 bake 进镜像（行为=digest），不挂载防漂移。
+    # 独立 tailnet 身份（#181）：容器自带 userspace tailscaled（不碰 tun/NET_ADMIN），
+    # TS_HOSTNAME 默认 litellm-gateway（canary 覆盖成 litellm-guard-canary，避免先占正式节点名）；
+    # 不开 --ssh（网关只服务 4000，不登录）；tailscale serve 把本机 :4000 挂到 tailnet :4000。
+    # 注意：entrypoint 里 shell 变量必须写 $$（单个 $ 会被 compose 当插值吃掉）。
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        if [ "$$PIPELINE_MANAGED" != "true" ]; then
+          echo "FATAL: .env not pipeline-managed (PIPELINE_MANAGED!=true). Refusing to start." >&2
+          exit 1
+        fi
+        mkdir -p /var/lib/tailscale /var/run/tailscale
+        tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/var/log/tailscaled.log 2>&1 &
+        i=0
+        while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ $$i -lt 30 ]; do
+          i=$$((i+1))
+          sleep 1
+        done
+        if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
+          echo "FATAL: tailscaled did not start" >&2
+          tail -n 50 /var/log/tailscaled.log >&2 || true
+          exit 1
+        fi
+        ts_status="$$(tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null || true)"
+        ts_ip="$$(tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null | head -n 1 || true)"
+        if printf '%s' "$$ts_status" | grep -q '"BackendState"[[:space:]]*:[[:space:]]*"Running"' && [ -n "$$ts_ip" ]; then
+          echo "tailscale already Running ($$ts_ip), skip up"
+        else
+          if [ -z "$${TS_JOIN_KEY:-}" ]; then
+            echo "FATAL: TS_JOIN_KEY missing (.env must be rendered by deliver line)." >&2
+            exit 1
+          fi
+          if ! timeout 120 tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$$TS_JOIN_KEY" --hostname="$${TS_HOSTNAME:-litellm-gateway}" --accept-routes=false --accept-dns=false; then
+            echo "FATAL: tailscale up failed" >&2
+            tail -n 50 /var/log/tailscaled.log >&2 || true
+            exit 1
+          fi
+          echo "tailscale up: $$(tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip)"
+        fi
+        unset TS_JOIN_KEY
+        if ! timeout 60 tailscale --socket=/var/run/tailscale/tailscaled.sock serve --bg tcp:4000; then
+          echo "FATAL: tailscale serve failed" >&2
+          exit 1
+        fi
+        echo "tailscale serve: tailnet :4000 -> local :4000"
+        exec litellm "$$@"
+      - --
     command: --config /app/config.yaml --port 4000 --host 0.0.0.0
     restart: unless-stopped
+    volumes:
+      # 持久化 tailscaled 状态：容器重建仍复用同一 node key；canary 用独立项目名前缀卷，不抢正式节点。
+      - tailscale-state:/var/lib/tailscale
     networks:
       # 沿用现网网络名：live 容器在 litellm-guard_default 上，换网会让按容器名连它的服务断
       - gw-net
+volumes:
+  tailscale-state:
 networks:
   gw-net:
     name: litellm-guard_default   # 与现网同网：容器名解析不变（按 litellm-guard 名可达）

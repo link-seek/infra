@@ -24,3 +24,8 @@ command:
     exit-status: 0
     timeout: 60000
     skip: {{ .Vars.SKIP_BLACKLIST }}
+  gateway-tailnet-identity:
+    exec: |
+      docker exec {{ .Vars.CANARY_CONTAINER }} tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); s=d.get('Self',{}); assert d.get('BackendState')=='Running', 'not running'; assert 'tag:gateway' in (s.get('Tags') or []), s.get('Tags'); print('identity OK:', s.get('HostName'), s.get('Tags'))"
+    exit-status: 0
+    timeout: 30000

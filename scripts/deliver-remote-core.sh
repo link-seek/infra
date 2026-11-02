@@ -242,13 +242,16 @@ PY
   set -x # 敏感段结束
 fi
 # TS join key 现签：栈点名 TS_JOIN_KEY → 每次 deploy mint 一把 reusable+ephemeral+90d、
-# 带 tag:opencode 的 auth key，render 进 .env 供容器 userspace tailscaled 启动时 join。
+# 带 tag 的 auth key（tag 取栈 TS_JOIN_TAG=literal:tag:xxx，缺省 tag:opencode），
+# render 进 .env 供容器 userspace tailscaled 启动时 join。
 # 旧静态 SSH 私钥（ENV_SSH_PRIVATE_KEY_B64）已退役，本线不再触碰任何 SSH 私钥。
 if grep -q '^TS_JOIN_KEY=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
   set +x # 敏感段：关 trace，key 只走 mask 通道
   : "${TS_API_KEY:?FAIL: 栈要点 TS_JOIN_KEY 但没给 TS_API_KEY（现签不了）}"
+  JOIN_TAG="$(grep -E '^TS_JOIN_TAG=literal:' "$STACK_DIR/$ENV_CONF" 2>/dev/null | head -n 1 | sed 's/^TS_JOIN_TAG=literal://' || true)"
+  [ -n "$JOIN_TAG" ] || JOIN_TAG="tag:opencode"
   TSKEY="$(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')"
-  MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["tag:opencode"]}}},"expirySeconds":7776000}'
+  MINT_BODY="$(printf '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["%s"]}}},"expirySeconds":7776000}' "$JOIN_TAG")"
   MINT_RESP="$(mktemp)"
   MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
     -d "$MINT_BODY" \
@@ -268,7 +271,7 @@ if grep -q '^TS_JOIN_KEY=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
   rm -f "$MINT_RESP"
   echo "::add-mask::$JOIN_KEY"
   export S_ENV_TS_JOIN_KEY="$JOIN_KEY"
-  echo "TS join key minted（reusable+ephemeral+90d, tag:opencode, HTTP $MINT_CODE）"
+  echo "TS join key minted（reusable+ephemeral+90d, $JOIN_TAG, HTTP $MINT_CODE）"
   set -x # 敏感段结束
 fi
 # trial（preflight）分支：LITELLM_BASE_URL 改道生产网关 tailnet 地址（生产 up 不动）。
