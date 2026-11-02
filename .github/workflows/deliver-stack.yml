@@ -170,8 +170,14 @@ jobs:
           set -x
           TAG="${{ inputs.node_tag }}"
           if [[ "$TAG" == host:* ]]; then
+            HN="${TAG#host:}"
+            # 硬拦：host: 只放行临时节点（ci-*/img-*，现建现焚）；真机名一律走 tag:（2026-11-02 hw41 误投教训）。
+            case "$HN" in
+              ci-*|img-*) ;;
+              *) echo "FAIL: host: 只允许临时节点（ci-*/img-*），$HN 疑似常驻机，请改用 tag: 或走正式部署流程"; exit 1 ;;
+            esac
             # 同名多节点时取 lastSeen 最新的（取消的上次靶机尸体未散时，旧名会撞车；见 40888234721）。
-            HN="${TAG#host:}"; IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if p.get('HostName')=='$HN'], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
+            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if p.get('HostName')=='$HN'], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
           else
             TG="${TAG#tag:}"; [ "$TG" = "$TAG" ] && TG="$TAG"; TG="${TG#tag:}"
             IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
