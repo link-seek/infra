@@ -6,6 +6,15 @@ name: deliver-caddy
 
 on:
   workflow_dispatch:
+    inputs:
+      node_ip:
+        description: "目标节点 tailnet IP（默认 mesh-ali-gz：100.85.128.116）"
+        required: false
+        default: "100.85.128.116"
+      node_dir:
+        description: "edge/caddy/<dir>/Caddyfile 对应目录（默认 mesh-ali-gz）"
+        required: false
+        default: "mesh-ali-gz"
 
 concurrency:
   group: deliver-caddy
@@ -34,7 +43,7 @@ jobs:
 
       - name: Caddyfile 一致性检查
         run: |
-          docker run --rm -v "$PWD/edge/caddy:/c" caddy:2 caddy fmt --overwrite /c/mesh-ali-gz/Caddyfile
+          docker run --rm -v "$PWD/edge/caddy:/c" caddy:2 caddy fmt --overwrite /c/${{ inputs.node_dir || 'mesh-ali-gz' }}/Caddyfile
           git diff --exit-code -- edge/caddy/ || { echo 'caddy fmt 有改动，请本地 fmt 后再提交'; exit 1; }
 
       - name: 加入 tailnet（一次性节点，用完即焚）
@@ -50,7 +59,7 @@ jobs:
           TS_AUTHKEY="$(printf '%s' "$TS_AUTHKEY" | tr -d '\r\n ')"
           timeout 120 sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="ci-infra-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           tailscale ip -4
-          timeout 90 tailscale ping --timeout=30s --c=2 100.85.128.116  # mesh-ali-gz（权威值见 docs/topology.md）
+          timeout 90 tailscale ping --timeout=30s --c=2 ${{ inputs.node_ip || '100.85.128.116' }}  # 目标节点（默认 mesh-ali-gz，权威值见 docs/topology.md）
 
       - name: 下发 + reload + 验证（经 tailnet，不走公网）
         timeout-minutes: 8
@@ -60,9 +69,10 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          NODE=100.85.128.116  # mesh-ali-gz（权威值见 docs/topology.md）
+          NODE="${{ inputs.node_ip || '100.85.128.116' }}"  # 目标节点（默认 mesh-ali-gz，权威值见 docs/topology.md）
+          NODE_DIR="${{ inputs.node_dir || 'mesh-ali-gz' }}"
           scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key \
-            edge/caddy/mesh-ali-gz/Caddyfile root@$NODE:/etc/caddy/Caddyfile
+            "edge/caddy/$NODE_DIR/Caddyfile" "root@$NODE:/etc/caddy/Caddyfile"
           # 确保 tailnet MagicDNS 首选，保证反代到容器 MagicDNS 名可解析；保留原有 fallback（只动 ali-gz 本机）
           ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
             "grep -q '^nameserver 100.100.100.100' /etc/resolv.conf || sed -i '1i nameserver 100.100.100.100' /etc/resolv.conf; getent hosts opencode-prod-ali-gz || { echo 'MAGICDNS-NOT-READY'; exit 1; }"
