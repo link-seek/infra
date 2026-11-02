@@ -3,16 +3,17 @@
 	"tagOwners": {
 		"tag:mesh":      ["autogroup:admin"],
 		"tag:connector": ["autogroup:admin"],
-		// CI 起的每一个节点（部署方 + 临时靶子）都带这个 tag。
+		// S1 三权拆分（#202）：guest=访客（bake/preflight/probe 靶机，全网可达不可登录）；
+		// user=配送（deliver/deliver-caddy，可达＋可登点名生产机）；admin=值班（全网，手动）。
+		"tag:guest":     ["autogroup:admin"],
+		"tag:user":      ["autogroup:admin"],
+		"tag:admin":     ["autogroup:admin"],
+		// 兼容：在线 CI 节点仍带 tag:ci，过渡期保留，节点清零后删。
 		"tag:ci":        ["autogroup:admin"],
 		// 常驻生产机（hw-21）。
 		"tag:prod":      ["autogroup:admin"],
 		// opencode-prod 容器（userspace tailscaled），独立 tailnet 节点。
-		"tag:opencode":  ["autogroup:admin"],
-		// CI 用旧 prod auth key（tag:ci-prod）加入 tailnet 的节点身份。
-		"tag:ci-prod":   ["autogroup:admin"],
-		// 公网入口机 ali-gz 专用。
-		"tag:entry":     ["autogroup:admin"]
+		"tag:opencode":  ["autogroup:admin"]
 	},
 	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
 	"grants": [
@@ -42,10 +43,25 @@
 		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4098"]},
 		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4098"]},
 		// 过渡期 2244 保留：旧 key 通路还在，切完 TS SSH 并验证后删掉 2244。
+		// S1 三权拆分（#202）：guest 全网可达（服务/网关/拉包/探端口），不可登录；user 点名生产机。
+		{"src": ["tag:guest"], "dst": ["100.91.222.51", "100.85.128.116", "100.111.231.85", "100.103.182.112", "100.69.220.112", "100.78.144.89"], "ip": ["*"]},
+		{"src": ["tag:guest"], "dst": ["tag:guest"], "ip": ["*"]},
+		{"src": ["tag:guest"], "dst": ["tag:opencode"], "ip": ["22"]},
+		{"src": ["tag:guest"], "dst": ["100.91.222.51"], "ip": ["4000"]},
+		{"src": ["tag:user"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
+		{"src": ["tag:user"], "dst": ["100.91.222.51"], "ip": ["4000"]},
+		{"src": ["tag:user"], "dst": ["tag:user"], "ip": ["22", "2244"]},
+		{"src": ["tag:user"], "dst": ["tag:guest"], "ip": ["22", "2244"]},
+		{"src": ["tag:user"], "dst": ["tag:opencode"], "ip": ["22"]},
+		{"src": ["tag:user"], "dst": ["100.85.128.116"], "ip": ["22"]},
+		{"src": ["tag:user"], "dst": ["100.111.231.85"], "ip": ["22", "2244"]},
+		// 兼容：在线 CI 节点仍带 tag:ci，过渡期保留，节点清零后删。
 		{"src": ["tag:ci"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
-		// trial 直调生产网关（tailnet 内）：只放 4000，不开 22/ssh。
 		{"src": ["tag:ci"], "dst": ["100.91.222.51"], "ip": ["4000"]},
-		{"src": ["tag:ci"], "dst": ["tag:ci"],   "ip": ["22", "2244"]},
+		{"src": ["tag:ci"], "dst": ["tag:ci"], "ip": ["22", "2244"]},
+		{"src": ["tag:ci"], "dst": ["tag:opencode"], "ip": ["22"]},
+		{"src": ["tag:ci"], "dst": ["100.85.128.116"], "ip": ["22"]},
+		{"src": ["tag:ci"], "dst": ["100.111.231.85"], "ip": ["22", "2244"]},
 		// opencode-prod 容器只登 .21/.41 两个等价节点；人（tag:mesh）可登容器排障。
 		{"src": ["tag:opencode"], "dst": ["100.91.222.51", "100.111.231.85"], "ip": ["22"]},
 		{"src": ["tag:mesh"],     "dst": ["tag:opencode"], "ip": ["22"]},
@@ -113,7 +129,34 @@
 		"dst":    ["autogroup:self"],
 		"users":  ["autogroup:nonroot", "root"]
 	}, {
-		// CI 只能登生产机 / 只能登 CI 自己起的临时靶子。
+		// S1 三权拆分（#202）：guest 只互登，user 可登 guest 临时靶机＋点名生产机，admin 全网。
+		"action": "accept",
+		"src":    ["tag:guest"],
+		"dst":    ["tag:guest"],
+		"users":  ["root"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:user"],
+		"dst":    ["tag:prod"],
+		"users":  ["root"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:user"],
+		"dst":    ["tag:user"],
+		"users":  ["root"]
+	}, {
+		// user 可登 guest 临时测试靶机＋点名生产机。
+		"action": "accept",
+		"src":    ["tag:user"],
+		"dst":    ["tag:guest"],
+		"users":  ["root"]
+	}, {
+		"action": "accept",
+		"src":    ["tag:admin"],
+		"dst":    ["tag:mesh"],
+		"users":  ["root"]
+	}, {
+		// 兼容：在线 CI 节点仍带 tag:ci，过渡期保留，节点清零后删。
 		"action": "accept",
 		"src":    ["tag:ci"],
 		"dst":    ["tag:prod"],
@@ -153,13 +196,8 @@
 		"src":    ["tag:mesh"],
 		"dst":    ["tag:connector"],
 		"users":  ["root"]
-	}, {
-		// deliver-caddy 用 tailscale ssh 上 ali-gz（100.85.128.116）下发 Caddy；grants 已放 22，SSH 段还需 accept。
-		"action": "accept",
-		"src":    ["tag:ci-prod"],
-		"dst":    ["tag:entry"],
-		"users":  ["root"]
 	}],
+
 	"tests": [
 		{"src": "tag:mesh", "allow": ["100.85.128.116:22"]},
 		{"src": "tag:mesh", "allow": ["100.69.220.112:22"]},

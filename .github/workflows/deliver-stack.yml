@@ -132,8 +132,8 @@ jobs:
           [ -z "$TSKEY" ] || echo "::add-mask::$TSKEY"
           MINTED=""
           if [ -n "$TSKEY" ]; then
-            MINT_BODY="{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"tag:ci\"]}}},\"expirySeconds\":21600}"
-            # tag:ci 必须在 ACL tagOwners 里先定义（PR #90）；加上后节点身份=taged，不再是 autogroup:member。
+            MINT_BODY="{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"tag:user\"]}}},\"expirySeconds\":21600}"
+            # tag:user 必须在 ACL tagOwners 里先定义；加上后节点身份=taged，不再是 autogroup:member。
             MINT_RESP="$(mktemp)"
             MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
               -d "$MINT_BODY" \
@@ -232,7 +232,7 @@ jobs:
           set -x
           TRANSPORT="${{ inputs.ssh_transport }}"
           if [ "$TRANSPORT" = "tailscale" ]; then
-            # TS SSH：身份=tag:ci，目标侧 tailscaled 接管 22；不需要私钥、不需要 known_hosts、不支持 scp
+            # TS SSH：身份=tag:user，目标侧 tailscaled 接管 22；不需要私钥、不需要 known_hosts、不支持 scp
             echo "transport: tailscale ssh（无 key、无 2244）"
             tailscale status --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print("self tags:",d["Self"].get("Tags"))'
           else
