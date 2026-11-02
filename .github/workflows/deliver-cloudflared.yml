@@ -74,7 +74,9 @@ jobs:
           cfg_path, ingress_path = sys.argv[1], sys.argv[2]
           cfg = yaml.safe_load(open(cfg_path))
           want = yaml.safe_load(open(ingress_path))["ingress"]
-          assert isinstance(want, list) and all("hostname" in r and "service" in r for r in want), "ingress 声明格式错"
+          # 末条允许无 hostname（Cloudflare catch-all 规范）；其余必须 hostname+service 双全
+          assert isinstance(want, list) and all("service" in r for r in want), "ingress 声明格式错"
+          assert all("hostname" in r for r in want[:-1]), "ingress 声明格式错（末条外缺 hostname）"
           cfg["ingress"] = want
           open(cfg_path, "w").write(yaml.safe_dump(cfg, default_flow_style=False))
           print(f"ingress-merged: {len(want)} 条")
