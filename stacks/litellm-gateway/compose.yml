@@ -69,7 +69,7 @@ services:
           echo "tailscale up: $$(tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip)"
         fi
         unset TS_JOIN_KEY
-        if ! timeout 60 tailscale --socket=/var/run/tailscale/tailscaled.sock serve --bg --yes tcp:4000; then
+        if ! timeout 60 tailscale --socket=/var/run/tailscale/tailscaled.sock serve --bg --yes --tcp 4000 localhost:4000; then
           echo "FATAL: tailscale serve failed" >&2
           exit 1
         fi
