@@ -37,7 +37,7 @@ jobs:
               },
               "stacks/litellm-gateway": {
                   "project": "litellm-gateway",
-                  "volumes": {},
+                  "volumes": {"tailscale-state": None},
                   "networks": {"gw-net": "litellm-guard_default"},
                   "manifest": True,
                   "env_example_keys": (),
