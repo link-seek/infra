@@ -122,12 +122,21 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           NODE="${{ inputs.node_ip || '100.85.128.116' }}"  # 目标节点（默认 mesh-ali-gz，权威值见 docs/topology.md）
           NODE_DIR="${{ inputs.node_dir || 'mesh-ali-gz' }}"
-          scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key \
+          # ali-gz 上 tailscaled 接管 22（TS SSH），普通 key 的 scp/ssh 会被 policy 拦截；
+          # 走 2244 OpenSSH 通道（grants 已放 tag:ci→tag:mesh? 不——走 key 通道只看网络层 2244，
+          # 与 deliver-stack key 回退同路）。keyscan 12 次约 3 分钟（preflight-39712410423 教训）。
+          for i in $(seq 1 12); do
+            ssh-keyscan -p 2244 -H "$NODE" >> ~/.ssh/known_hosts 2>/tmp/keyscan.err && break
+            echo "keyscan 第 $i 次失败："; head -c 300 /tmp/keyscan.err; echo
+            [ "$i" = 12 ] && { echo "FAIL: keyscan 12 次连不上 $NODE:2244"; exit 1; }
+            sleep 15
+          done
+          scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key \
             "edge/caddy/$NODE_DIR/Caddyfile" "root@$NODE:/etc/caddy/Caddyfile"
           # 确保 tailnet MagicDNS 首选，保证反代到容器 MagicDNS 名可解析；保留原有 fallback（只动 ali-gz 本机）
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
             "grep -q '^nameserver 100.100.100.100' /etc/resolv.conf || sed -i '1i nameserver 100.100.100.100' /etc/resolv.conf"
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@$NODE \
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@$NODE \
             'caddy reload --config /etc/caddy/Caddyfile && sleep 3 && caddy list-modules >/dev/null && echo RELOAD-OK'
           curl -s -m 15 -o /dev/null -w 'hw21-opencode http=%{http_code}\n' https://hw21-opencode.xieyucheng.top/
           # 新域名证书签发+解析可能延迟，重试 5 分钟；超时则失败（排查 DNS/80 端口）
