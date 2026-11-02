@@ -1,5 +1,15 @@
 hw21-opencode.xieyucheng.top {
-	reverse_proxy 100.91.222.51:4097
+	reverse_proxy {
+		dynamic a {
+			name mesh-hw-21.mackarel-polaris.ts.net.
+			port 4097
+			refresh 5s
+			resolvers 100.100.100.100
+		}
+		fail_duration 30s
+		max_fails 2
+		lb_try_duration 5s
+	}
 	log {
 		output file /var/log/caddy/opencode.log
 	}
@@ -7,16 +17,36 @@ hw21-opencode.xieyucheng.top {
 
 # 阶段一新增：与 hw21-opencode 同后端；阶段二 hw21-opencode 改 301 到此名
 opencode.xieyucheng.top {
-	reverse_proxy 100.91.222.51:4097
+	reverse_proxy {
+		dynamic a {
+			name mesh-hw-21.mackarel-polaris.ts.net.
+			port 4097
+			refresh 5s
+			resolvers 100.100.100.100
+		}
+		fail_duration 30s
+		max_fails 2
+		lb_try_duration 5s
+	}
 	log {
 		output file /var/log/caddy/opencode.log
 	}
 }
 
 # mesh-ali-gz 入口 opencode.yingxin.net.cn：Caddy → tailnet → hw41:4097（容器在 hw41）
-# 后端一律写 tailnet IP 字面量，禁用 MagicDNS 短名（ali-gz 本机无 100.100.100.100，名解析不可靠）。
+# 后端用 MagicDNS 全称＋dynamic a（refresh 5s＋被动健康检查；deliver-caddy 保证本机首选 100.100.100.100）。
 opencode.yingxin.net.cn {
-	reverse_proxy 100.111.231.85:4097
+	reverse_proxy {
+		dynamic a {
+			name mesh-hw-41.mackarel-polaris.ts.net.
+			port 4097
+			refresh 5s
+			resolvers 100.100.100.100
+		}
+		fail_duration 30s
+		max_fails 2
+		lb_try_duration 5s
+	}
 	log {
 		output file /var/log/caddy/opencode-yingxin.log
 	}
