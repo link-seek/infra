@@ -1,15 +1,5 @@
 hw21-opencode.xieyucheng.top {
-	reverse_proxy {
-		dynamic a {
-			name mesh-hw-21.mackarel-polaris.ts.net.
-			port 4097
-			refresh 5s
-			resolvers 100.100.100.100
-		}
-		fail_duration 30s
-		max_fails 2
-		lb_try_duration 5s
-	}
+	redir https://opencode.xieyucheng.top{uri} permanent
 	log {
 		output file /var/log/caddy/opencode.log
 	}
