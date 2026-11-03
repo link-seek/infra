@@ -7,9 +7,9 @@
       "type": "A",
       "content": "120.77.76.20",
       "ttl": 600,
-      "proxied": true,
+      "proxied": false,
       "state": "present",
-      "comment": "2026-11-03 回滚隧道直连：经广州 ali-gz Caddy → tailnet → 网关独立身份（国内直连，无跨洋 hairpin；橙云开，WAF/限流生效）"
+      "comment": "2026-11-03 灰云直连：用户→广州 ali-gz Caddy → tailnet → 网关（无 CF 中转；WAF/限流暂不上，CF 规则休眠保留）"
     },
     {
       "name": "litellm.linkseek.net.cn",
