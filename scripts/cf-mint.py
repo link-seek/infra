@@ -64,6 +64,7 @@ def main():
         g = next((by_name[c] for c in cand if c in by_name), None)
         if not g:
             print("FAIL: permission group 不存在: %s" % w)
+            print("AVAILABLE: %s" % sorted(by_name)[:80])
             return 1
         zone_ids.append(str(g["id"]))
     policies = [{
