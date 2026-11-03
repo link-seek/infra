@@ -105,15 +105,26 @@ def main():
         })
     want_names = set(x["description"] for x in want_rules)
     live_managed = {k: v for k, v in live.items() if k.startswith("managed:")}
+
+    def _same_rl(old, new):
+        if old.get("expression") != new.get("expression"):
+            return False, ["expression"]
+        if old.get("action") != new.get("action"):
+            return False, ["action"]
+        ooo = old.get("ratelimit") or {}
+        nnn = new.get("ratelimit") or {}
+        _diff = [k for k in ("characteristics", "period", "requests_per_period", "mitigation_timeout") if ooo.get(k) != nnn.get(k)]
+        return (len(_diff) == 0), _diff
+
     ops = []
     for w in want_rules:
         cur = live_managed.get(w["description"])
         if not cur:
             ops.append(("create", w["description"], w))
-        else:
-            diff = {k: (cur.get(k), w.get(k)) for k in ("expression", "action", "ratelimit") if cur.get(k) != w.get(k)}
-            if diff:
-                ops.append(("update", w["description"], w, cur.get("id")))
+            continue
+        same, diff = _same_rl(cur, w)
+        if not same:
+            ops.append(("update", w["description"], cur, w))
     for k in live_managed:
         if k not in want_names:
             ops.append(("delete", k, live_managed[k].get("id")))
@@ -141,7 +152,10 @@ def main():
                         return fail("创建规则 %s 失败" % op[1], (st2, r2))
                     print("ratelimit: created %s" % op[1])
                 elif op[0] == "update":
-                    _, name, body, rid = op
+                    _, name, old, want = op
+                    body = dict(old)
+                    body.update({"description": want["description"], "expression": want["expression"], "action": want["action"], "ratelimit": want["ratelimit"], "enabled": True})
+                    rid = old.get("id")
                     st2, r2 = api("PUT", "/zones/%s/rulesets/%s/rules/%s" % (zid, eid, rid), body)
                     if not ok((st2, r2)):
                         return fail("更新规则 %s 失败" % name, (st2, r2))
