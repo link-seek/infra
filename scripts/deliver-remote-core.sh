@@ -285,6 +285,12 @@ put /tmp/ci-dotenv "$REMOTE_DIR/.env"
 rm -f /tmp/ci-dotenv
 cp /tmp/compose.deploy.yml /tmp/sync-compose.yml
 ( cd "$STACK_DIR" && tar -czf /tmp/sync-files.tgz $SYNC_FILES )
+# 通用探针（stacks/_common/probe-cases）：一份，多栈共用；先铺底，栈自带同名文件覆盖它。
+# （2026-11-03 教训：两栈各存一份必然 skew，ali-gz 空目录导致 key 链路无探针覆盖。）
+if [ -d stacks/_common/probe-cases ]; then
+  ( cd stacks/_common && tar -czf /tmp/sync-common-probe.tgz probe-cases )
+  $SSH "mkdir -p $REMOTE_DIR && tar -xzf - -C $REMOTE_DIR && echo common-probe-synced" < /tmp/sync-common-probe.tgz
+fi
 $SSH "mkdir -p $REMOTE_DIR && tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env && echo synced" < /tmp/sync-files.tgz
 put /tmp/sync-compose.yml "$REMOTE_DIR/compose.yml"
 # 三件套共用脚本从 scripts/ 走 stdin，同时留 /tmp 同名副本供排障/跨仓复用；
