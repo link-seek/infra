@@ -41,71 +41,21 @@ jobs:
           PARENT="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')"
           [ -n "$PARENT" ] || { echo "FAIL: CF_PARENT_TOKEN 为空"; exit 1; }
           echo "::add-mask::$PARENT"
-          MINTED="$(CF_PARENT_TOKEN_SANITIZED="$PARENT" \
+          # 显式收 exit 码：set -e 下失败的 $() 会静默直接退出，诊断打不出来。
+          set +e
+          MINTED="$(CF_PARENT_TOKEN="$PARENT" \
             CF_TOKEN_NAME="cf-edge-${{ github.run_id }}" \
             CF_TOKEN_TTL_HOURS=2 \
-            CF_PERM_GROUPS="zone read,zone rulesets read,zone rulesets edit dns read" \
-            STATE_FILE="$STATE_FILE" \
-            python3 - <<'PY'
-          import json, os, urllib.parse, urllib.request, urllib.error
-          from datetime import datetime, timedelta, timezone
-          BASE = "https://api.cloudflare.com/client/v4"
-          TOKEN = os.environ["CF_PARENT_TOKEN_SANITIZED"]
-          print("::add-mask::%s" % TOKEN)
-          def call(method, path, body=None):
-              headers = {"Authorization": "Bearer " + TOKEN}
-              data = None
-              if body is not None:
-                  headers["Content-Type"] = "application/json"
-                  data = json.dumps(body).encode()
-              req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
-              try:
-                  with urllib.request.urlopen(req, timeout=30) as resp:
-                      return resp.status, json.load(resp or b"{}")
-              except urllib.error.HTTPError as exc:
-                  try:
-                      return exc.code, json.load(exc.read() or b"{}")
-                  except Exception:
-                      return exc.code, {}
-              except Exception as exc:
-                  return 0, {"success": False, "errors": [{"message": str(exc)[:200]}]}
-          recs = json.load(open(os.environ.get("STATE_FILE", "cf/linkseek-edge.json")))
-          zone_name = recs.get("zone", "linkseek.net.cn")
-          st, r = call("GET", "/zones?name=" + urllib.parse.quote(zone_name))
-          if not (isinstance(r, dict) and r.get("success") and r.get("result")):
-              print("FAIL: 取 zone/account 失败 status=%s" % st); raise SystemExit(1)
-          zones = r["result"]
-          print("ZONE %s id=%s" % (zone_name, zones[0]["id"]))
-          account_id = (zones[0].get("account") or {}).get("id")
-          if not account_id:
-              print("FAIL: zone 无 account"); raise SystemExit(1)
-          st, r = call("GET", "/accounts/%s/tokens/permission_groups?per_page=100" % account_id)
-          groups = r.get("result") if isinstance(r.get("result"), list) else []
-          by_name = {str(g.get("name", "")).lower(): g for g in groups}
-          wanted = [x.strip().lower() for x in os.environ["CF_PERM_GROUPS"].split(",") if x.strip()]
-          zone_ids = []
-          for w in wanted:
-              # 兼容 "a b" 与 "a_b" 两种写法
-              cand = [w, w.replace(" ", "_")]
-              g = next((by_name[c] for c in cand if c in by_name), None)
-              if not g:
-                  print("FAIL: permission group 不存在: %s（可用：%s）" % (w, sorted(by_name)[:40]))
-                  raise SystemExit(1)
-              zone_ids.append(str(g["id"]))
-          policies = [{"effect": "allow",
-              "resources": {"com.cloudflare.api.account.%s" % account_id: {"com.cloudflare.api.account.zone.*": "*"}},
-              "permission_groups": [{"id": i} for i in zone_ids]}]
-          expires = (datetime.now(timezone.utc) + timedelta(hours=int(os.environ.get("CF_TOKEN_TTL_HOURS", "2")))).strftime("%Y-%m-%dT%H:%M:%SZ")
-          st, r = call("POST", "/accounts/%s/tokens" % account_id, {
-              "name": os.environ["CF_TOKEN_NAME"], "expires_on": expires, "policies": policies})
-          if not (isinstance(r, dict) and r.get("success")):
-              print("FAIL: CF 现签失败 status=%s errors=%s" % (st, json.dumps((r or {}).get("errors"))[:300])); raise SystemExit(1)
-          value = str((r.get("result") or {}).get("value") or "")
-          if not value:
-              print("FAIL: CF 现签无值"); raise SystemExit(1)
-          print("CF_MINTED_VALUE=%s" % value)
-          PY
-          )"
+            CF_PERM_GROUPS="zone read,zone rulesets read,zone rulesets edit,dns read" \
+            CF_ZONE_NAME=$(grep -o '"zone": *"[^"]*"' "$STATE_FILE" | head -n 1 | cut -d'"' -f4) \
+            python3 scripts/cf-mint.py 2>&1)"
+          MINT_RC=$?
+          set -e
+          if [ "$MINT_RC" -ne 0 ]; then
+            echo "FAIL: mint 脚本 rc=$MINT_RC"
+            printf '%s\n' "$MINTED" | tail -n 10
+            exit 1
+          fi
           CHILD="$(printf '%s' "$MINTED" | grep '^CF_MINTED_VALUE=' | tail -n 1 | cut -d= -f2-)"
           [ -n "$CHILD" ] || { echo "FAIL: CF 现签未拿到值"; echo "$MINTED" | tail -n 5; exit 1; }
           echo "::add-mask::$CHILD"
