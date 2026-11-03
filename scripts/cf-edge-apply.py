@@ -58,15 +58,12 @@ def main():
         for it in items:
             print(f"DISCOVER id={it.get('id')} kind={it.get('kind')} phase={it.get('phase')} name={it.get('name')}")
 
-    st, r = api("GET", f"/zones/{zid}/rulesets")
-    if st != 200:
-        print(f"FAIL: 列 rulesets status={st}")
-        return 1
     phases = {}
-    for rs in r.get("result") or []:
-        if rs.get("phase"):
-            phases[rs["phase"]] = rs
-    print("phases: " + ", ".join(sorted(phases)))
+    for ph in ("http_request_firewall_managed", "http_ratelimit"):
+        st0, r0 = api("GET", f"/zones/{zid}/rulesets/phases/{ph}/entrypoint")
+        if st0 == 200 and isinstance(r0, dict) and r0.get("result"):
+            phases[ph] = r0["result"]
+    print("phases: " + ", ".join(sorted(phases)) + "（entrypoint 直读，404 表示该 phase 未建）")
 
     # ---- WAF 托管包：只调已部署 bundle 的执行动作（log/block），不动结构 ----
     waf = want.get("managed_waf") or {}
@@ -78,13 +75,8 @@ def main():
             else:
                 print("WAF: 未部署托管包 —— dashboard 一键启用后，dry-run 会打印其 ID 供 pin 回 state")
             return 1
-        # LIST 只给摘要；取完整定义看规则（只读，dry-run 也可看）
-        st0, r0 = api("GET", f"/zones/{zid}/rulesets/{ers['id']}")
-        if st0 != 200 or not isinstance(r0, dict):
-            print(f"FAIL: 读 WAF phase 详情 status={st0}")
-            return 1
-        full = r0.get("result") or {}
-        # 写回必须用详情版（LIST 摘要缺字段，回写会丢规则）
+        # entrypoint GET 已是完整定义（含 rules），直接用；写回也用它（LIST 摘要缺字段，回写会丢规则）
+        full = ers
         if not isinstance(full.get("rules"), list):
             print("FAIL: WAF phase 详情无 rules")
             return 1
