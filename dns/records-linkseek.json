@@ -7,9 +7,9 @@
       "type": "A",
       "content": "120.77.76.20",
       "ttl": 600,
-      "proxied": false,
-      "state": "absent",
-      "comment": "2026-11-03 改走隧道直连，A 记录删除（删前比对 content）"
+      "proxied": true,
+      "state": "present",
+      "comment": "2026-11-03 回滚隧道直连：经广州 ali-gz Caddy → tailnet → 网关独立身份（国内直连，无跨洋 hairpin；橙云开，WAF/限流生效）"
     },
     {
       "name": "litellm.linkseek.net.cn",
@@ -17,8 +17,8 @@
       "content": "b759dba6-b698-4a4f-a019-0d6b2d08cf99.cfargotunnel.com",
       "ttl": 1,
       "proxied": true,
-      "state": "present",
-      "comment": "网关公网入口：经 hw21 隧道直连网关独立身份（MagicDNS）。与 llm-trial 同隧道，deploy-cloudflared 锚点校验。"
+      "state": "absent",
+      "comment": "隧道直连下线（回滚备用：改回 present＋A 改 absent 即可）"
     }
   ]
 }

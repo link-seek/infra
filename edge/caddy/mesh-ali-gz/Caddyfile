@@ -35,4 +35,21 @@ opencode.yingxin.net.cn {
 	}
 }
 
-# （网关公网入口已迁隧道直连，Caddy vhost 见 git 历史；如需回滚，恢复本段＋DNS 指回 A 记录即可。）
+# 网关公网入口（回滚隧道直连，2026-11-03）：Caddy → 独立 tailnet 身份 litellm-gateway:4000。
+# 国内直连：用户→CF 边缘→广州 ali-gz→tailnet→华北网关，无跨洋 hairpin。隧道 ingress 保留当回滚。
+litellm.linkseek.net.cn {
+	reverse_proxy {
+		dynamic a {
+			name litellm-gateway.mackarel-polaris.ts.net.
+			port 4000
+			refresh 5s
+			resolvers 100.100.100.100
+		}
+		fail_duration 30s
+		max_fails 2
+		lb_try_duration 5s
+	}
+	log {
+		output file /var/log/caddy/litellm.log
+	}
+}
