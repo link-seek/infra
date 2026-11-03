@@ -59,19 +59,34 @@ def main():
         by_name.setdefault(str(g.get("name", "")).lower().replace(" ", "_"), g)
     wanted = [x.strip().lower() for x in os.environ.get("CF_PERM_GROUPS", "").split(",") if x.strip()]
     zone_ids = []
+    acct_ids = []
     for w in wanted:
         cand = [w, w.replace(" ", "_"), w.replace("_", " ")]
         g = next((by_name[c] for c in cand if c in by_name), None)
         if not g:
             print("FAIL: permission group 不存在: %s" % w)
-            print("AVAILABLE-ALL: %s" % sorted(by_name))
             return 1
-        zone_ids.append(str(g["id"]))
-    policies = [{
-        "effect": "allow",
-        "resources": {"com.cloudflare.api.account.%s" % account_id: {"com.cloudflare.api.account.zone.*": "*"}},
-        "permission_groups": [{"id": i} for i in zone_ids],
-    }]
+        scopes = g.get("scopes") or []
+        if any(str(s) == "com.cloudflare.api.account" for s in scopes):
+            acct_ids.append(str(g["id"]))
+        else:
+            zone_ids.append(str(g["id"]))
+    policies = []
+    if zone_ids:
+        policies.append({
+            "effect": "allow",
+            "resources": {"com.cloudflare.api.account.%s" % account_id: {"com.cloudflare.api.account.zone.*": "*"}},
+            "permission_groups": [{"id": i} for i in zone_ids],
+        })
+    if acct_ids:
+        policies.append({
+            "effect": "allow",
+            "resources": {"com.cloudflare.api.account.%s" % account_id: "*"},
+            "permission_groups": [{"id": i} for i in acct_ids],
+        })
+    if not policies:
+        print("FAIL: 无可用 policy")
+        return 1
     expires = (datetime.now(timezone.utc) + timedelta(hours=int(os.environ.get("CF_TOKEN_TTL_HOURS", "2")))).strftime("%Y-%m-%dT%H:%M:%SZ")
     st, r = call(parent, "POST", "/accounts/%s/tokens" % account_id, {
         "name": os.environ.get("CF_TOKEN_NAME", "cf-edge"),
