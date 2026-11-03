@@ -45,7 +45,7 @@ jobs:
       node_tag: prod
       node_ip: 100.91.222.51 # mesh-hw-21（tag 定范围 + IP 定点，两边逻辑一致）
       digest_or_tag: ${{ inputs.digest_or_tag || 'stable' }}
-      stack_dir: stacks/opencode-prod
+      stack_dir: stacks/opencode/hw21
       action: ${{ inputs.action || 'up' }}
       ssh_transport: tailscale
     secrets:
