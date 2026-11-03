@@ -71,6 +71,8 @@ jobs:
           [ "$EXPECT_HOST" = "$LIVE_UUID.cfargotunnel.com" ] || { echo "ABORT: CNAME 目标 $EXPECT_HOST 与线上隧道 $LIVE_UUID 不一致"; exit 1; }
           echo "anchor-ok: tunnel $LIVE_UUID"
           # 只换 ingress 段（UUID/credentials 行原样保留），结构校验
+          # 2026-11-03：hw21→LAX QUIC 丢包致公网抖动/涓流（journal: dial timeout/stream canceled），
+          # 切 protocol http2（TCP 经得起 UDP 丢包）。cloudflared 支持 protocol: quic/http2/h2mux/auto。
           python3 - "$CFG" "/tmp/ci-tunnel-ingress.yaml" <<'PYEOF'
           import sys, yaml
           cfg_path, ingress_path = sys.argv[1], sys.argv[2]
@@ -80,8 +82,9 @@ jobs:
           assert isinstance(want, list) and all("service" in r for r in want), "ingress 声明格式错"
           assert all("hostname" in r for r in want[:-1]), "ingress 声明格式错（末条外缺 hostname）"
           cfg["ingress"] = want
+          cfg["protocol"] = "http2"
           open(cfg_path, "w").write(yaml.safe_dump(cfg, default_flow_style=False))
-          print(f"ingress-merged: {len(want)} 条")
+          print(f"ingress-merged: {len(want)} 条，protocol=http2")
           PYEOF
           systemctl restart cloudflared && echo "restarted"
           sleep 20
@@ -95,6 +98,16 @@ jobs:
           done
           echo "main-domain opencode -> $CODE"
           [ "$CODE" = "200" ] || PASS=0
+          # 网关公网入口硬门：litellm 必须 200（隧道直连网关独立身份；ci-probe key 探活）
+          LCODE="000"
+          for i in $(seq 1 10); do
+            LCODE="$(curl -s -m 15 -o /dev/null -w '%{http_code}' https://litellm.linkseek.net.cn/v1/models -H 'Authorization: Bearer ci-probe' || echo 000)"
+            echo "litellm probe#$i -> $LCODE"
+            [ "$LCODE" = "200" ] && break
+            sleep 15
+          done
+          echo "gateway-domain litellm -> $LCODE"
+          [ "$LCODE" = "200" ] || PASS=0
           # 新域名等 tunnel 边界到 Cloudflare 生效（边缘握手最长 ~4 分钟）：不早判 fail
           TCODE="000"
           for i in $(seq 1 24); do
