@@ -11,6 +11,14 @@ on:
         description: 覆盖 state 里的 zone（只读发现用，如 xieyucheng.top）
         required: false
         default: ''
+      extra_groups:
+        description: 追加的 token 权限组（逗号分隔，如 account rulesets read）
+        required: false
+        default: ''
+      discover:
+        description: 仅发现模式（列 account rulesets 找托管包 ID，不改任何东西）
+        required: false
+        default: 'false'
       dry_run:
         description: 只打印计划不执行（true/false）
         required: false
@@ -50,7 +58,7 @@ jobs:
           MINTED="$(CF_PARENT_TOKEN="$PARENT" \
             CF_TOKEN_NAME="cf-edge-${{ github.run_id }}" \
             CF_TOKEN_TTL_HOURS=2 \
-            CF_PERM_GROUPS="zone read,zone waf read,zone waf write,zone settings read,zone settings write,dns read" \
+            CF_PERM_GROUPS="zone read,zone waf read,zone waf write,zone settings read,zone settings write,dns read${{ inputs.extra_groups && format(', {0}', inputs.extra_groups) || '' }}" \
             CF_ZONE_NAME=$(grep -o '"zone": *"[^"]*"' "$STATE_FILE" | head -n 1 | cut -d'"' -f4) \
             python3 scripts/cf-mint.py 2>&1)"
           MINT_RC=$?
@@ -85,6 +93,7 @@ jobs:
       - name: 边缘对账（声明即执行预览/落地）
         env:
           ZONE_OVERRIDE: ${{ inputs.zone_override }}
+          CF_DISCOVER: ${{ inputs.discover }}
         run: |
           set -euo pipefail
           STATE_FILE="$STATE_FILE" DRY_RUN="$DRY_RUN" python3 scripts/cf-edge-apply.py
