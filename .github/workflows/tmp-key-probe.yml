@@ -1,0 +1,69 @@
+name: tmp-key-probe
+# 临时探针：拿 org OPENCODE_API_KEY 经 prod 本机直调网关 muse-spark，验证 key 是否有额度。
+# 只读：目标机只跑一条 curl（/tmp 响应现场删），不重建容器不改文件。用完即删。
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: tmp-key-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 加网 + 解析 prod 节点（TS-only；mint-only）
+        id: target
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -z "$TSKEY" ] || echo "::add-mask::$TSKEY"
+          MINTED=""
+          if [ -n "$TSKEY" ]; then
+            MINT_BODY="{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"tag:user\"]}}},\"expirySeconds\":21600}"
+            MINT_RESP="$(mktemp)"
+            MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+              -d "$MINT_BODY" \
+              https://api.tailscale.com/api/v2/tailnet/-/keys 2>/tmp/mint.err || true)"
+            if [ "$MINT_CODE" = "200" ] || [ "$MINT_CODE" = "201" ]; then
+              MINTED="$(python3 -c "import json; print(json.load(open('$MINT_RESP')).get('key',''))" || true)"
+              [ -n "$MINTED" ] && echo "::add-mask::$MINTED"
+            else
+              echo "mint-bearer failed: HTTP $MINT_CODE"
+            fi
+            rm -f "$MINT_RESP"
+          fi
+          if [ -n "$MINTED" ]; then
+            timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-keyprobe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false \
+              || { echo "TS-UP-FAILED"; exit 1; }
+          else
+            echo "FAIL: mint 未成功"; exit 1
+          fi
+          IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if 'tag:prod' in (p.get('Tags') or [])], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
+          [ "$IP" != "NO-MATCH" ] || { echo "FAIL: prod 节点无匹配"; exit 1; }
+          echo "target prod -> $IP"
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
+      - name: 直调网关 chat/completions（只打印状态码+脱敏片段，永不打印 key）
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          ORG_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          set -euo pipefail
+          for MODEL in "muse-spark-1.3-contributor" "openai/muse-spark-1.3-contributor"; do
+            echo "=== model=${MODEL} ==="
+            tailscale ssh "root@${TARGET_IP}" "ORG_KEY='${ORG_KEY}' MODEL='${MODEL}' bash -s" <<'EOF'
+          set -euo pipefail
+          BODY="$(mktemp)"; trap 'rm -f "$BODY"' EXIT
+          CODE="$(curl -sS -m 90 -o "$BODY" -w '%{http_code}' http://127.0.0.1:4000/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer ${ORG_KEY}" \
+            --data "{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":5}" || echo "CURLFAIL")"
+          echo "http=${CODE}"
+          head -c 600 "$BODY"; echo ""
+          EOF
+          done
