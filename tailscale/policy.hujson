@@ -8,8 +8,6 @@
 		"tag:guest":     ["autogroup:admin"],
 		"tag:user":      ["autogroup:admin"],
 		"tag:admin":     ["autogroup:admin"],
-		// 兼容：在线 CI 节点仍带 tag:ci，过渡期保留，节点清零后删。
-		"tag:ci":        ["autogroup:admin"],
 		// 常驻生产机（hw-21）。
 		"tag:prod":      ["autogroup:admin"],
 		// opencode-prod 容器（userspace tailscaled），独立 tailnet 节点。
@@ -60,12 +58,6 @@
 		{"src": ["tag:user"], "dst": ["100.111.231.85"], "ip": ["22", "2244"]},
 		// 非 HW（ali-gz/oci）只放 admin：deliver-caddy 以 admin 身份上机（手动 dispatch＋全程盯）。
 		{"src": ["tag:admin"], "dst": ["100.85.128.116"], "ip": ["22"]},
-		// 兼容：在线 CI 节点仍带 tag:ci，过渡期保留，节点清零后删。
-		{"src": ["tag:ci"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
-		{"src": ["tag:ci"], "dst": ["100.91.222.51"], "ip": ["4000"]},
-		{"src": ["tag:ci"], "dst": ["tag:ci"], "ip": ["22", "2244"]},
-		{"src": ["tag:ci"], "dst": ["tag:opencode"], "ip": ["22"]},
-		{"src": ["tag:ci"], "dst": ["100.111.231.85"], "ip": ["22", "2244"]},
 		// 网关独立入网（#181/#202）：网关 :4000 全网放行（公共基础设施，认证由网关自己管）。
 		{"src": ["tag:mesh", "tag:opencode", "tag:user", "tag:guest", "autogroup:member"], "dst": ["tag:gateway"], "ip": ["4000"]},
 		// opencode-prod 容器只登 .21/.41 两个等价节点；人（tag:mesh）可登容器排障。
@@ -73,12 +65,10 @@
 		{"src": ["tag:mesh"],     "dst": ["tag:opencode"], "ip": ["22"]},
 		// 入口 Caddy（mesh）到 opencode 系容器 4097；现有 mesh→opencode:22 不动。
 		{"src": ["tag:mesh"], "dst": ["tag:opencode"], "ip": ["4097"]},
-		// CI 看 canary：trial 靶机/runner 都是 tag:ci，netmap 按 ACL 过滤，
+		// CI 看 canary：trial 靶机/runner 按各自身份（guest/user），netmap 按 ACL 过滤，
 		// 无此条则探针在宿主设备表永远看不到 canary（40616506188/40617554410 实锤）。
 		// 只给网络可见性，不给 ssh 规则（探针用 docker exec），CI 不能 SSH 进 canary。
-		{"src": ["tag:ci"],       "dst": ["tag:opencode"], "ip": ["22"]},
-		// deliver-stack 一次性节点（tag:ci）上 hw41 部署，2244 上机 + 22 备用。
-		{"src": ["tag:ci"], "dst": ["100.111.231.85"], "ip": ["2244"]}
+		// deliver-stack 一次性节点（guest/user）上 hw41 部署，2244 上机 + 22 备用。
 	],
 	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
 		"name":       "opencode-ai",
@@ -166,15 +156,8 @@
 		"dst":    ["tag:mesh"],
 		"users":  ["root"]
 	}, {
-		// 兼容：在线 CI 节点仍带 tag:ci，过渡期保留，节点清零后删。
 		"action": "accept",
-		"src":    ["tag:ci"],
 		"dst":    ["tag:prod"],
-		"users":  ["root"]
-	}, {
-		"action": "accept",
-		"src":    ["tag:ci"],
-		"dst":    ["tag:ci"],
 		"users":  ["root"]
 	}, {
 		// opencode-prod 容器：SSH dst 不能用 IP，用 tag:mesh；上面的网络 grant
@@ -219,11 +202,7 @@
 			"allow": ["100.85.128.116:22", "100.91.222.51:22"]
 		},
 		{"src": "tag:mesh", "allow": ["20.27.177.113:443"]},
-		{"src": "tag:ci", "allow": ["100.91.222.51:22"]},
-		{"src": "tag:ci", "allow": ["100.91.222.51:4000"]},
 		// hw41 已定为生产后端，CI 上机需要；原 deny 意图见 git 历史。
-		{"src": "tag:ci", "allow": ["100.111.231.85:22"]},
-		{"src": "tag:ci", "deny": ["100.69.220.112:22", "100.85.128.116:22"]},
 		// 非 HW 只放 admin：deliver-caddy 身份（手动 dispatch＋全程盯）。
 		{"src": "tag:admin", "allow": ["100.85.128.116:22"]},
 		{"src": "tag:opencode", "allow": ["100.91.222.51:22", "100.111.231.85:22"]},
