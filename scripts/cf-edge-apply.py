@@ -49,7 +49,14 @@ def main():
         print(f"FAIL: 取 zone 失败 status={st} body={json.dumps(r)[:200]}")
         return 1
     zid = zones[0]["id"]
-    print(f"zone={zone_name} id={zid}" + (" DRY-RUN" if dry else ""))
+    acct = (zones[0].get("account") or {}).get("id", "")
+    print(f"zone={zone_name} id={zid} acct={acct}" + (" DRY-RUN" if dry else ""))
+    if dry and os.environ.get("CF_DISCOVER", ""):
+        st0, r0 = api("GET", f"/accounts/{acct}/rulesets?per_page=100")
+        items = (r0.get("result") or []) if isinstance(r0, dict) else []
+        print(f"DISCOVER account-rulesets total={len(items)} status={st0}")
+        for it in items:
+            print(f"DISCOVER id={it.get('id')} kind={it.get('kind')} phase={it.get('phase')} name={it.get('name')}")
 
     st, r = api("GET", f"/zones/{zid}/rulesets")
     if st != 200:
