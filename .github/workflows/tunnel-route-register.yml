@@ -31,6 +31,8 @@ jobs:
           PARENT="$(printf '%s' "${CF_PARENT_TOKEN:-}" | tr -d '\r\n ')"
           [ -n "$PARENT" ] || { echo "FAIL: CF_PARENT_TOKEN 为空"; exit 1; }
           echo "::add-mask::$PARENT"
+          # 显式收 exit 码：set -e 下失败的 $() 会静默直接退出，诊断打不出来（cf-edge 同款坑）。
+          set +e
           MINTED="$(CF_PARENT_TOKEN_SANITIZED="$PARENT" \
             CF_TOKEN_NAME="cf-dns-${{ github.run_id }}" \
             CF_TOKEN_TTL_HOURS=2 \
@@ -76,6 +78,11 @@ jobs:
               g = by_name.get(w)
               if not g:
                   print("FAIL: permission group 不存在: %s" % w)
+                  print("HINT 可用组（tunnel/dns/zone 相关）:")
+                  for gg in groups:
+                      nm = str(gg.get("name", ""))
+                      if any(k in nm.lower() for k in ("tunnel", "dns", "zone")):
+                          print("  - %s scopes=%s" % (nm, gg.get("scopes")))
                   raise SystemExit(1)
               scopes = g.get("scopes") or []
               if any("account.zone" in str(s) for s in scopes):
@@ -114,6 +121,13 @@ jobs:
           print("CF_MINTED_VALUE=%s" % value)
           PY
           )"
+          MINT_RC=$?
+          set -e
+          if [ "$MINT_RC" -ne 0 ]; then
+            echo "FAIL: mint 脚本 rc=$MINT_RC"
+            printf '%s\n' "$MINTED" | tail -n 20
+            exit 1
+          fi
           CHILD="$(printf '%s' "$MINTED" | grep '^CF_MINTED_VALUE=' | tail -1 | cut -d= -f2-)"
           [ -n "$CHILD" ] || { echo "FAIL: CF 现签未拿到值"; printf '%s\n' "$MINTED"; exit 1; }
           echo "::add-mask::$CHILD"
@@ -179,14 +193,23 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/${{ steps.acct.outputs.account }}/cfd_tunnel/b759dba6-b698-4a4f-a019-0d6b2d08cf99/configurations" \
             | python3 -c "import json,sys; d=json.load(sys.stdin); print('PUT success:', d.get('success'), json.dumps(d.get('errors'))[:300] if not d.get('success') else '')"
 
-      - name: 验证 llm-trial（401 = TLS+ingress+路由全通）
+      - name: 验证路由（llm-trial＋litellm 双探）
         if: always()
         run: |
           for i in $(seq 1 20); do
             CODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://llm-trial.xieyucheng.top/v1/models || echo 000)"
-            echo "probe#$i -> $CODE"
-            [ "$CODE" = "401" ] && { echo "REGISTERED OK: 401（无 key 符合预期）"; exit 0; }
+            echo "trial probe#$i -> $CODE"
+            [ "$CODE" = "401" ] && { echo "TRIAL OK: 401（无 key 符合预期）"; break; }
+            BODY="$(curl -s -m 10 https://llm-trial.xieyucheng.top/v1/models || echo CURLFAIL)"
+            echo "$BODY" | grep -q '"data"' && { echo "TRIAL OK: 200 模型列表（网关直通）"; break; }
+            [ "$i" = "20" ] && { echo "STILL BLOCKED trial: $CODE（未登记或 token 无 Tunnel 写权限）"; exit 1; }
             sleep 15
           done
-          echo "STILL BLOCKED: $CODE（未登记或 token 无 Tunnel 写权限）"
+          for i in $(seq 1 20); do
+            LCODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://litellm.linkseek.net.cn/v1/models -H 'Authorization: Bearer ci-probe' || echo 000)"
+            echo "litellm probe#$i -> $LCODE"
+            [ "$LCODE" = "200" ] && { echo "LITELLM OK: 200（隧道路由已生效）"; exit 0; }
+            sleep 15
+          done
+          echo "STILL BLOCKED litellm: $LCODE"
           exit 1
