@@ -58,6 +58,10 @@ def main():
         for it in items:
             print(f"DISCOVER id={it.get('id')} kind={it.get('kind')} phase={it.get('phase')} name={it.get('name')}")
 
+    stL, rL = api("GET", f"/zones/{zid}/rulesets?per_page=100")
+    if isinstance(rL, dict):
+        for rs in rL.get("result") or []:
+            print(f"LIST id={rs.get('id')} kind={rs.get('kind')} phase={rs.get('phase')} rules={len(rs.get('rules') or [])} name={str(rs.get('name'))[:40]}")
     phases = {}
     for ph in ("http_request_firewall_managed", "http_ratelimit"):
         st0, r0 = api("GET", f"/zones/{zid}/rulesets/phases/{ph}/entrypoint")
