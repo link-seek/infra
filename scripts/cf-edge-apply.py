@@ -24,12 +24,17 @@ def api(method, path, body=None):
     req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.status, json.load(resp or b"{}")
+            raw = resp.read()
+            try:
+                return resp.status, json.loads(raw or b"{}")
+            except Exception:
+                return resp.status, {"_raw": raw[:300]}
     except urllib.error.HTTPError as exc:
+        raw = exc.read() or b""
         try:
-            return exc.code, json.load(exc.read() or b"{}")
+            return exc.code, json.loads(raw)
         except Exception:
-            return exc.code, {}
+            return exc.code, {"_raw": raw[:300], "_note": "non-JSON body"}
     except Exception as exc:
         return 0, {"success": False, "errors": [{"message": str(exc)[:200]}]}
 
