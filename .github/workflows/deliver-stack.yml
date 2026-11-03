@@ -78,13 +78,13 @@ on:
         required: false
         default: stable
       stack_dir:
-        description: "栈目录，如 stacks/opencode-prod"
+        description: "栈目录，如 stacks/opencode/hw21"
         required: true
         type: choice
         options:
           - stacks/litellm-gateway
-          - stacks/opencode-prod
-          - stacks/opencode-prod-ali-gz
+          - stacks/opencode/hw21
+          - stacks/opencode/hw41
       action:
         description: "up 部署 / down 下线 / preflight 只到探针（img 场景）"
         required: false
