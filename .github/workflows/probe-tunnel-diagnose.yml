@@ -46,6 +46,13 @@ jobs:
           curl -s -m 5 -o /dev/null -w "local-4000:%{http_code}\n" http://127.0.0.1:4000/v1/models || echo "local-4000:000"
           echo "===== systemd 日志尾（最近 30 行，找 1033/重复 hostname 报错） ====="
           journalctl -u cloudflared -n 30 --no-pager 2>/dev/null | tail -30 || echo "no journal"
+          echo "===== 网关容器状态（只读，不打 secret 值） ====="
+          docker ps --filter name=litellm-guard --format '{{.Names}} {{.Status}}' || echo "no-docker-or-no-container"
+          echo "===== 网关日志尾（找 upstream/401/auth 报错，只看最近 60 行） ====="
+          docker logs litellm-guard --tail 60 2>&1 | grep -a -iE "error|fail|401|unauthor|upstream|model|key" | tail -25 || echo "no-gateway-logs"
+          echo "===== 网关配置在位（只验有无，不打印值） ====="
+          docker exec litellm-guard sh -c 'env | grep -c "^LITELLM_MASTER_KEY=.." || true' 2>&1 | head -2 || echo "exec-failed"
+          docker exec litellm-guard sh -c 'ls -la /app/config.yaml /app/guard-rules.json 2>&1' | head -4 || echo "ls-failed"
           EOF
       - name: CF token 现签（DNS 读写，2h，fail-closed）
         if: always()
