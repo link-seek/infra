@@ -73,8 +73,16 @@ def main():
             return 1
         # LIST 只给摘要；取完整定义看规则（只读，dry-run 也可看）
         st0, r0 = api("GET", f"/zones/{zid}/rulesets/{ers['id']}")
-        full = (r0.get("result") or {}) if isinstance(r0, dict) else {}
-        ers_rules = full.get("rules", ers.get("rules") or [])
+        if st0 != 200 or not isinstance(r0, dict):
+            print(f"FAIL: 读 WAF phase 详情 status={st0}")
+            return 1
+        full = r0.get("result") or {}
+        # 写回必须用详情版（LIST 摘要缺字段，回写会丢规则）
+        if not isinstance(full.get("rules"), list):
+            print("FAIL: WAF phase 详情无 rules")
+            return 1
+        ers_rules = full["rules"]
+        full_rules = [dict(x) for x in ers_rules]
         # entrypoint 内可能有多条；只看引用托管包的 execute 规则
         managed = [x for x in ers_rules if (x.get("action_parameters") or {}).get("id")]
         if not managed and waf.get("ruleset_id"):
@@ -90,7 +98,7 @@ def main():
         else:
             # read-modify-write：只翻 overrides.action（或 rule action），其余原样写回
             new_rules = []
-            for x in ers.get("rules") or []:
+            for x in full_rules:
                 ap = dict(x.get("action_parameters") or {})
                 if ap.get("id"):
                     ov = dict(ap.get("overrides") or {})
