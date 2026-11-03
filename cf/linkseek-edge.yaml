@@ -1,0 +1,30 @@
+# linkseek.net.cn 边缘配置声明（Cloudflare）。cf-edge-apply.yml 照此文件对账。
+# 模式：dry-run 先打计划，确认再真下发；fail-closed。
+zone: linkseek.net.cn
+
+# WAF 托管规则集：先 observe（log）24h 看误杀，再切 enforce（block）。
+# ruleset_id 首次 dry-run 从线上发现后填入（dashboard 一键启用亦可，之后归流水线管）。
+managed_waf:
+  enabled: true
+  action: log
+  ruleset_id: ""
+
+# 速率限制（超出封 IP 10 分钟；只看写操作，读操作不进）。
+# 不按路径限：chat/completions、responses、messages、embeddings 等各模型接口各异，
+# 按路径写规则就是打地鼠——一律按 HTTP 方法卡（POST/PUT/PATCH/DELETE）。
+rate_limits:
+  - name: api-writes
+    expression: '(starts_with(http.request.uri.path, "/v1/") and http.request.method in {"POST" "PUT" "PATCH" "DELETE"})'
+    period: 60
+    requests_per_period: 100
+    mitigation_timeout: 600
+    action: block
+  - name: api-general
+    expression: 'starts_with(http.request.uri.path, "/v1/")'
+    period: 60
+    requests_per_period: 200
+    mitigation_timeout: 600
+    action: block
+
+# Bot 判定只做信号，不做拦截（API 客户端无浏览器指纹，拦了误伤自己人）。
+bot_fight_mode: false
