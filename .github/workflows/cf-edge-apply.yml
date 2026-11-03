@@ -43,14 +43,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: CF token（组织 token 直用＋mask；fail-closed）
+      - name: CF token 现签（zone/ruleset 读写，2h，fail-closed；组织 token 无 rulesets 权限，必须现签）
         run: |
           set -euo pipefail
           PARENT="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')"
           [ -n "$PARENT" ] || { echo "FAIL: CF_PARENT_TOKEN 为空"; exit 1; }
           echo "::add-mask::$PARENT"
-          echo "CF_TOKEN=$PARENT" >> "$GITHUB_ENV"
-          echo "CF token 就绪（组织 token 直用，mask＋审计）"
+          # 显式收 exit 码：set -e 下失败的 $() 会静默直接退出，诊断打不出来。
+          set +e
+          MINTED="$(CF_PARENT_TOKEN="$PARENT" \
+            CF_TOKEN_NAME="cf-edge-${{ github.run_id }}" \
+            CF_TOKEN_TTL_HOURS=2 \
+            CF_PERM_GROUPS="zone read,zone waf read,zone waf write,zone settings read,zone settings write,dns read" \
+            CF_ZONE_NAME=$(grep -o '"zone": *"[^"]*"' "$STATE_FILE" | head -n 1 | cut -d'"' -f4) \
+            python3 scripts/cf-mint.py 2>&1)"
+          MINT_RC=$?
+          set -e
+          if [ "$MINT_RC" -ne 0 ]; then
+            echo "FAIL: mint 脚本 rc=$MINT_RC"
+            printf '%s\n' "$MINTED" | tail -n 15
+            exit 1
+          fi
+          CHILD="$(printf '%s' "$MINTED" | grep '^CF_MINTED_VALUE=' | tail -n 1 | cut -d= -f2-)"
+          [ -n "$CHILD" ] || { echo "FAIL: CF 现签未拿到值"; printf '%s\n' "$MINTED" | tail -n 15; exit 1; }
+          echo "::add-mask::$CHILD"
+          echo "CF_TOKEN=$CHILD" >> "$GITHUB_ENV"
+          echo "CF 现签 OK（cf-edge-${{ github.run_id }}，2h）"
 
       - name: 加入 tailnet（admin 身份标记；本线只调公网 CF API，不碰内网）
         run: |
