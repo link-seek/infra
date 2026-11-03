@@ -41,7 +41,7 @@ def main():
     state_path = os.environ.get("STATE_FILE", "cf/linkseek-edge.json")
     dry = os.environ.get("DRY_RUN", "1").lower() in ("1", "true", "yes", "on")
     want = json.load(open(state_path))
-    zone_name = want["zone"]
+    zone_name = os.environ.get("ZONE_OVERRIDE") or want["zone"]
 
     st, r = api("GET", "/zones?name=" + urllib.parse.quote(zone_name))
     zones = (r.get("result") or []) if isinstance(r, dict) else []

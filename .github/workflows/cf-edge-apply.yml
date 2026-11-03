@@ -7,6 +7,10 @@ name: cf-edge-apply（边缘配置对账）
 on:
   workflow_dispatch:
     inputs:
+      zone_override:
+        description: 覆盖 state 里的 zone（只读发现用，如 xieyucheng.top）
+        required: false
+        default: ''
       dry_run:
         description: 只打印计划不执行（true/false）
         required: false
@@ -79,6 +83,8 @@ jobs:
           tailscale ip -4
 
       - name: 边缘对账（声明即执行预览/落地）
+        env:
+          ZONE_OVERRIDE: ${{ inputs.zone_override }}
         run: |
           set -euo pipefail
           STATE_FILE="$STATE_FILE" DRY_RUN="$DRY_RUN" python3 scripts/cf-edge-apply.py
