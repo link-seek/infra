@@ -71,11 +71,16 @@ def main():
             else:
                 print("WAF: 未部署托管包 —— dashboard 一键启用后，dry-run 会打印其 ID 供 pin 回 state")
             return 1
+        # LIST 只给摘要；取完整定义看规则（只读，dry-run 也可看）
+        st0, r0 = api("GET", f"/zones/{zid}/rulesets/{ers['id']}")
+        full = (r0.get("result") or {}) if isinstance(r0, dict) else {}
+        ers_rules = full.get("rules", ers.get("rules") or [])
         # entrypoint 内可能有多条；只看引用托管包的 execute 规则
-        managed = [x for x in (ers.get("rules") or []) if (x.get("action_parameters") or {}).get("id")]
+        managed = [x for x in ers_rules if (x.get("action_parameters") or {}).get("id")]
         if not managed and waf.get("ruleset_id"):
             print("WAF: phase 存在但无托管包引用 —— 请检查 dashboard")
             return 1
+        print(f"WAF: phase 规则数={len(ers_rules)}")
         for m in managed:
             ap = m.get("action_parameters") or {}
             cur = ((ap.get("overrides") or {}).get("action")) or m.get("action")
