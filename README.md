@@ -35,7 +35,8 @@ stacks/<system>/          # 各系统 topology 级引用，不搬业务仓代码
 | workflow | 手动点火 | 动作 |
 |---|---|---|
 | `deliver-litellm-gateway.yml` | Actions → deliver-litellm-gateway → Run（digest 默认 stable） | 蓝绿：canary 探针绿才切流 |
-| `deliver-opencode-prod.yml` | Actions → deliver-opencode-prod → Run（digest 默认 stable） | 蓝绿 + 失败自动回滚（旧镜像留本地） |
+| `deliver-opencode-prod-hw21.yml` | Actions → deliver-opencode-prod-hw21 → Run（digest 默认 stable，只发 hw-21） | 蓝绿 + 失败自动回滚（旧镜像留本地） |
+| `deliver-opencode-prod-hw41.yml` | Actions → deliver-opencode-prod-hw41 → Run（digest 默认 stable，只发 hw-41，网站后端） | 蓝绿 + 失败自动回滚（旧镜像留本地） |
 | `deliver-opendesign.yml` | 同上，输入 `CUTOVER` 才执行 | 切流 OD |
 | `deliver-caddy.yml` | 同上 | ephemeral runner → tailnet → 目标节点 reload + 验证 |
 | `deliver-cloudflared.yml` | 同上（挑空闲时间，有十几秒闪断） | 备份 → 只换 ingress 段 → restart → 验证，失败回滚 |
