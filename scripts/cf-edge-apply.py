@@ -97,7 +97,7 @@ def main():
             "expression": x["expression"],
             "action": x.get("action", "block"),
             "ratelimit": {
-                "characteristics": ["ip.src"],
+                "characteristics": ["cf.colo.id", "ip.src"],
                 "period": int(x["period"]),
                 "requests_per_period": int(x["requests_per_period"]),
                 "mitigation_timeout": int(x.get("mitigation_timeout", 600)),
