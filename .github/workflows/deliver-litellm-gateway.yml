@@ -21,6 +21,7 @@ jobs:
     uses: ./.github/workflows/deliver-stack.yml
     with:
       node_tag: prod
+      node_ip: 100.91.222.51 # 网关栈落点 mesh-hw-21（tag 定范围 + IP 定点）
       digest_or_tag: ${{ inputs.digest_or_tag || 'stable' }}
       stack_dir: stacks/litellm-gateway
       action: ${{ inputs.action || 'up' }}
