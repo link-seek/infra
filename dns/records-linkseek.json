@@ -9,16 +9,7 @@
       "ttl": 600,
       "proxied": false,
       "state": "present",
-      "comment": "2026-11-03 灰云直连：用户→广州 ali-gz Caddy → tailnet → 网关（无 CF 中转；WAF/限流暂不上，CF 规则休眠保留）"
-    },
-    {
-      "name": "litellm.linkseek.net.cn",
-      "type": "CNAME",
-      "content": "b759dba6-b698-4a4f-a019-0d6b2d08cf99.cfargotunnel.com",
-      "ttl": 1,
-      "proxied": true,
-      "state": "absent",
-      "comment": "隧道直连已删（2026-11-03 晚灰云直连，回滚点已清）"
+      "comment": "网关公网入口：广州 ali-gz Caddy → tailnet → 华北网关"
     }
   ]
 }
