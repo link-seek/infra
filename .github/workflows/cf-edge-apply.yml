@@ -1,0 +1,151 @@
+name: cf-edge-apply（边缘配置对账）
+
+# cf/*-edge.yaml 是唯一真相：WAF 托管包动作、速率限制、Bot 开关。
+# 只手动 dispatch（admin 事项：必须活人点火＋全程盯，禁自动触发）。
+# dry_run=true（默认）：只打计划；=false：真下发。
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 只打印计划不执行（true/false）
+        required: false
+        default: 'true'
+      state_file:
+        description: 状态声明文件
+        required: false
+        default: cf/linkseek-edge.yaml
+
+concurrency:
+  group: cf-edge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      STATE_FILE: ${{ inputs.state_file || 'cf/linkseek-edge.yaml' }}
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CF token 现签（zone/ruleset 读写，2h，fail-closed）
+        run: |
+          set -euo pipefail
+          PARENT="$(printf '%s' "$CF_PARENT_TOKEN" | tr -d '\r\n ')"
+          [ -n "$PARENT" ] || { echo "FAIL: CF_PARENT_TOKEN 为空"; exit 1; }
+          echo "::add-mask::$PARENT"
+          MINTED="$(CF_PARENT_TOKEN_SANITIZED="$PARENT" \
+            CF_TOKEN_NAME="cf-edge-${{ github.run_id }}" \
+            CF_TOKEN_TTL_HOURS=2 \
+            CF_PERM_GROUPS="zone read,zone rulesets read,zone rulesets edit dns read" \
+            STATE_FILE="$STATE_FILE" \
+            python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request, urllib.error
+          from datetime import datetime, timedelta, timezone
+          BASE = "https://api.cloudflare.com/client/v4"
+          TOKEN = os.environ["CF_PARENT_TOKEN_SANITIZED"]
+          print("::add-mask::%s" % TOKEN)
+          def call(method, path, body=None):
+              headers = {"Authorization": "Bearer " + TOKEN}
+              data = None
+              if body is not None:
+                  headers["Content-Type"] = "application/json"
+                  data = json.dumps(body).encode()
+              req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return resp.status, json.load(resp or b"{}")
+              except urllib.error.HTTPError as exc:
+                  try:
+                      return exc.code, json.load(exc.read() or b"{}")
+                  except Exception:
+                      return exc.code, {}
+              except Exception as exc:
+                  return 0, {"success": False, "errors": [{"message": str(exc)[:200]}]}
+          import yaml
+          recs = yaml.safe_load(open(os.environ.get("STATE_FILE", "cf/linkseek-edge.yaml")))
+          zone_name = recs.get("zone", "linkseek.net.cn")
+          st, r = call("GET", "/zones?name=" + urllib.parse.quote(zone_name))
+          if not (isinstance(r, dict) and r.get("success") and r.get("result")):
+              print("FAIL: 取 zone/account 失败 status=%s" % st); raise SystemExit(1)
+          zones = r["result"]
+          print("ZONE %s id=%s" % (zone_name, zones[0]["id"]))
+          account_id = (zones[0].get("account") or {}).get("id")
+          if not account_id:
+              print("FAIL: zone 无 account"); raise SystemExit(1)
+          st, r = call("GET", "/accounts/%s/tokens/permission_groups?per_page=100" % account_id)
+          groups = r.get("result") if isinstance(r.get("result"), list) else []
+          by_name = {str(g.get("name", "")).lower(): g for g in groups}
+          wanted = [x.strip().lower() for x in os.environ["CF_PERM_GROUPS"].split(",") if x.strip()]
+          zone_ids = []
+          for w in wanted:
+              # 兼容 "a b" 与 "a_b" 两种写法
+              cand = [w, w.replace(" ", "_")]
+              g = next((by_name[c] for c in cand if c in by_name), None)
+              if not g:
+                  print("FAIL: permission group 不存在: %s（可用：%s）" % (w, sorted(by_name)[:40]))
+                  raise SystemExit(1)
+              zone_ids.append(str(g["id"]))
+          policies = [{"effect": "allow",
+              "resources": {"com.cloudflare.api.account.%s" % account_id: {"com.cloudflare.api.account.zone.*": "*"}},
+              "permission_groups": [{"id": i} for i in zone_ids]}]
+          expires = (datetime.now(timezone.utc) + timedelta(hours=int(os.environ.get("CF_TOKEN_TTL_HOURS", "2")))).strftime("%Y-%m-%dT%H:%M:%SZ")
+          st, r = call("POST", "/accounts/%s/tokens" % account_id, {
+              "name": os.environ["CF_TOKEN_NAME"], "expires_on": expires, "policies": policies})
+          if not (isinstance(r, dict) and r.get("success")):
+              print("FAIL: CF 现签失败 status=%s errors=%s" % (st, json.dumps((r or {}).get("errors"))[:300])); raise SystemExit(1)
+          value = str((r.get("result") or {}).get("value") or "")
+          if not value:
+              print("FAIL: CF 现签无值"); raise SystemExit(1)
+          print("CF_MINTED_VALUE=%s" % value)
+          PY
+          )"
+          CHILD="$(printf '%s' "$MINTED" | grep '^CF_MINTED_VALUE=' | tail -n 1 | cut -d= -f2-)"
+          [ -n "$CHILD" ] || { echo "FAIL: CF 现签未拿到值"; echo "$MINTED" | tail -n 5; exit 1; }
+          echo "::add-mask::$CHILD"
+          echo "CF_TOKEN=$CHILD" >> "$GITHUB_ENV"
+          echo "CF 现签 OK（cf-edge-${{ github.run_id }}，2h）"
+
+      - name: 加入 tailnet（admin 身份标记；本线只调公网 CF API，不碰内网）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:admin"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))" || true)"
+          [ -n "$MINTED" ] || { echo "FAIL: admin key 现签失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          echo "admin key minted（一次性节点，用完即焚）"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-cfedge-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale ip -4
+
+      - name: 边缘对账（声明即执行预览/落地）
+        run: |
+          set -euo pipefail
+          STATE_FILE="$STATE_FILE" DRY_RUN="$DRY_RUN" python3 scripts/cf-edge-apply.py
+
+      - name: 公网验证（隧道＋WAF 穿透冒烟）
+        if: inputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 6); do
+            CODE="$(curl -s -m 15 -o /dev/null -w '%{http_code}' https://litellm.linkseek.net.cn/v1/models -H 'Authorization: Bearer ci-probe' || echo 000)"
+            echo "litellm try$i http=$CODE"
+            [ "$CODE" = "200" ] && break
+            sleep 30
+          done
+          [ "$CODE" = "200" ] || { echo LITELM-NOT-READY; exit 1; }
+
+      - name: 退出 tailnet（焚毁节点）
+        if: always()
+        run: sudo tailscale logout || true
