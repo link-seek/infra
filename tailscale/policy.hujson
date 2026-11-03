@@ -10,6 +10,9 @@
 		"tag:admin":     ["autogroup:admin"],
 		// 常驻生产机（hw-21）。
 		"tag:prod":      ["autogroup:admin"],
+		// 机器专属 tag（#202 修正案：tag 精确到单机，node_ip 降为防呆）。
+		"tag:opencode-hw21": ["autogroup:admin"],
+		"tag:opencode-hw41": ["autogroup:admin"],
 		// opencode-prod 容器（userspace tailscaled），独立 tailnet 节点。
 		"tag:opencode":  ["autogroup:admin"],
 		// litellm-gateway 容器（userspace tailscaled，不开 --ssh），独立 tailnet 节点（#181）。
@@ -51,6 +54,7 @@
 		{"src": ["tag:guest"], "dst": ["tag:opencode"], "ip": ["22"]},
 		{"src": ["tag:guest"], "dst": ["100.91.222.51"], "ip": ["4000"]},
 		{"src": ["tag:user"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
+		{"src": ["tag:user"], "dst": ["tag:opencode-hw21", "tag:opencode-hw41"], "ip": ["22", "2244"]},
 		{"src": ["tag:user"], "dst": ["100.91.222.51"], "ip": ["4000"]},
 		{"src": ["tag:user"], "dst": ["tag:user"], "ip": ["22", "2244"]},
 		{"src": ["tag:user"], "dst": ["tag:guest"], "ip": ["22", "2244"]},
