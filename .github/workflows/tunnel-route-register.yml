@@ -188,7 +188,9 @@ jobs:
           t = json.load(open('/tmp/tunnel.json'))
           # 正本 = 仓里声明的 ingress.yaml（代码即代码，不在这拼）
           want = yaml.safe_load(open('edge/cloudflared/hw21-opencode/ingress.yaml'))['ingress']
-          assert isinstance(want, list) and all('hostname' in r and 'service' in r for r in want), 'ingress 声明格式错'
+          # 末条允许无 hostname（Cloudflare catch-all 规范）；其余必须 hostname+service 双全
+          assert isinstance(want, list) and all('service' in r for r in want), 'ingress 声明格式错'
+          assert all('hostname' in r for r in want[:-1]), 'ingress 声明格式错（末条外缺 hostname）'
           # Cloudflare 强制最后一条 catch-all
           if any('hostname' not in r for r in want):
               catch = [r for r in want if 'hostname' not in r][0]
