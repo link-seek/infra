@@ -83,7 +83,16 @@ def main():
     for rs in all_rs:
         if rs.get("kind") == "zone" and rs.get("phase"):
             by_phase.setdefault(rs["phase"], rs)
-    print("phases: " + ", ".join(sorted(by_phase)) + "（LIST 全量，逐条核对）")
+    # LIST 摘要的 rules 字段不可信（entrypoint 明细需按 ID 取全量；曾误报 rules=0 导致重复创建）
+    for ph in ("http_ratelimit", "http_request_firewall_managed"):
+        if ph in by_phase:
+            rid = by_phase[ph].get("id")
+            st0, r0 = api("GET", "/zones/%s/rulesets/%s" % (zid, rid))
+            if st0 == 200 and isinstance(r0, dict) and isinstance((r0.get("result") or {}).get("rules"), list):
+                by_phase[ph] = r0["result"]
+            else:
+                print("WARN: %s 全量拉取失败 status=%s，用 LIST 摘要继续" % (ph, st0))
+    print("phases: " + ", ".join(sorted(by_phase)) + "（LIST 定位＋按 ID 取全量核对）")
     for ph, rs in sorted(by_phase.items()):
         print("  phase=%s id=%s rules=%d" % (ph, rs.get("id"), len(rs.get("rules") or [])))
 
