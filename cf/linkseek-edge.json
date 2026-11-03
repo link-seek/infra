@@ -11,11 +11,11 @@
     {
       "name": "api-writes",
       "expression": "(starts_with(http.request.uri.path, \"/v1/\") and http.request.method in {\"POST\" \"PUT\" \"PATCH\" \"DELETE\"})",
-      "period": 60,
-      "requests_per_period": 100,
+      "period": 10,
+      "requests_per_period": 20,
       "mitigation_timeout": 600,
       "action": "block",
-      "_note": "不按路径限：chat/completions、responses、messages 等各模型接口各异，按方法卡"
+      "_note": "免费版 period 只能是 10（秒）；20次/10秒约=120次/分。按方法限：各模型接口通用。"
     }
   ],
   "bot_fight_mode": false,
