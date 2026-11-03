@@ -39,7 +39,7 @@ def ok(resp):
 
 def main():
     state_path = os.environ.get("STATE_FILE", "cf/linkseek-edge.json")
-    dry = os.environ.get("DRY_RUN", "1") == "1"
+    dry = os.environ.get("DRY_RUN", "1").lower() in ("1", "true", "yes", "on")
     want = json.load(open(state_path))
     zone_name = want["zone"]
 
@@ -71,11 +71,24 @@ def main():
             else:
                 print("WAF: 未部署托管包 —— dashboard 一键启用后，dry-run 会打印其 ID 供 pin 回 state")
             return 1
+        # LIST 只给摘要；取完整定义看规则（只读，dry-run 也可看）
+        st0, r0 = api("GET", f"/zones/{zid}/rulesets/{ers['id']}")
+        if st0 != 200 or not isinstance(r0, dict):
+            print(f"FAIL: 读 WAF phase 详情 status={st0}")
+            return 1
+        full = r0.get("result") or {}
+        # 写回必须用详情版（LIST 摘要缺字段，回写会丢规则）
+        if not isinstance(full.get("rules"), list):
+            print("FAIL: WAF phase 详情无 rules")
+            return 1
+        ers_rules = full["rules"]
+        full_rules = [dict(x) for x in ers_rules]
         # entrypoint 内可能有多条；只看引用托管包的 execute 规则
-        managed = [x for x in (ers.get("rules") or []) if (x.get("action_parameters") or {}).get("id")]
+        managed = [x for x in ers_rules if (x.get("action_parameters") or {}).get("id")]
         if not managed and waf.get("ruleset_id"):
             print("WAF: phase 存在但无托管包引用 —— 请检查 dashboard")
             return 1
+        print(f"WAF: phase 规则数={len(ers_rules)}")
         for m in managed:
             ap = m.get("action_parameters") or {}
             cur = ((ap.get("overrides") or {}).get("action")) or m.get("action")
@@ -85,7 +98,7 @@ def main():
         else:
             # read-modify-write：只翻 overrides.action（或 rule action），其余原样写回
             new_rules = []
-            for x in ers.get("rules") or []:
+            for x in full_rules:
                 ap = dict(x.get("action_parameters") or {})
                 if ap.get("id"):
                     ov = dict(ap.get("overrides") or {})
