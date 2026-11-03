@@ -1,5 +1,6 @@
 # 后端 hw21:4097
-opencode.xieyucheng.top {	reverse_proxy {
+opencode.xieyucheng.top {
+	reverse_proxy {
 		dynamic a {
 			name mesh-hw-21.mackarel-polaris.ts.net.
 			port 4097
