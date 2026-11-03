@@ -36,7 +36,7 @@ jobs:
           MINTED="$(CF_PARENT_TOKEN_SANITIZED="$PARENT" \
             CF_TOKEN_NAME="cf-dns-${{ github.run_id }}" \
             CF_TOKEN_TTL_HOURS=2 \
-            CF_PERM_GROUPS="dns read,dns write,zone read,cloudflare tunnel read,cloudflare tunnel edit" \
+            CF_PERM_GROUPS="dns read,dns write,zone read,cloudflare tunnel read,cloudflare tunnel write" \
             python3 - <<'PY'
           import json, os, urllib.parse, urllib.request, urllib.error
           from datetime import datetime, timedelta, timezone
