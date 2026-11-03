@@ -15,6 +15,10 @@ on:
         required: false
         type: string
         default: prod
+      node_ip:
+        required: false
+        type: string
+        default: ""
       digest_or_tag:
         required: false
         type: string
@@ -65,6 +69,10 @@ on:
         description: "TS 标签（tag:xxx）或主机名（host:yyy），默认 prod"
         required: false
         default: prod
+      node_ip:
+        description: "精确 IP（必须落在 node_tag 解析集内；多命中时必填，否则拒绝随缘发布）"
+        required: false
+        default: ""
       digest_or_tag:
         description: "digest（sha256:…）或 tag，默认 stable，进门即冻结"
         required: false
@@ -100,7 +108,7 @@ on:
           - tailscale
 
 concurrency:
-  group: deliver-stack-${{ inputs.stack_dir }}-${{ inputs.node_tag }}
+  group: deliver-stack-${{ inputs.stack_dir }}-${{ inputs.node_tag }}-${{ inputs.node_ip }}
   cancel-in-progress: false
 
 jobs:
@@ -169,21 +177,34 @@ jobs:
           fi
           set -x
           TAG="${{ inputs.node_tag }}"
+          NODE_IP="${{ inputs.node_ip }}"
           if [[ "$TAG" == host:* ]]; then
             HN="${TAG#host:}"
-            # 硬拦：host: 只放行临时节点（ci-*/img-*，现建现焚）；真机名一律走 tag:（2026-11-02 hw41 误投教训）。
+            # 硬拦：host: 只放行临时节点（ci-*/img-*，现建现焚）；真机名一律走 tag: + node_ip（2026-11-02 hw41 误投教训）。
             case "$HN" in
               ci-*|img-*) ;;
-              *) echo "FAIL: host: 只允许临时节点（ci-*/img-*），$HN 疑似常驻机，请改用 tag: 或走正式部署流程"; exit 1 ;;
+              *) echo "FAIL: host: 只允许临时节点（ci-*/img-*），$HN 疑似常驻机，请改用 tag: + node_ip 精确指定"; exit 1 ;;
             esac
-            # 同名多节点时取 lastSeen 最新的（取消的上次靶机尸体未散时，旧名会撞车；见 40888234721）。
-            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if p.get('HostName')=='$HN'], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
+            # 同名多节点时列出全部，由下面的 node_ip/单命中门裁决（取消的上次靶机尸体未散时，旧名会撞车；见 40888234721）。
+            CANDIDATES="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if p.get('HostName')=='$HN'], key=lambda p: p.get('lastSeen','')); print(' '.join([(p.get('TailscaleIPs') or [''])[0] for p in ms]))")"
           else
             TG="${TAG#tag:}"; [ "$TG" = "$TAG" ] && TG="$TAG"; TG="${TG#tag:}"
-            IP="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])], key=lambda p: p.get('lastSeen','')); print(ms[-1]['TailscaleIPs'][0] if ms else 'NO-MATCH')")"
+            CANDIDATES="$(tailscale status --json | python3 -c "import json,sys; ps=json.load(sys.stdin)['Peer']; ms=sorted([p for p in ps.values() if 'tag:$TG' in (p.get('Tags') or [])], key=lambda p: p.get('lastSeen','')); print(' '.join([(p.get('TailscaleIPs') or [''])[0] for p in ms]))")"
           fi
-          [ "$IP" != "NO-MATCH" ] || { echo "FAIL: 标签/主机 $TAG 在 tailnet 无匹配（tag 需后台先贴好）"; tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('self:', d.get('Self',{}).get('HostName')); [print(p.get('HostName'), p.get('Tags')) for p in d['Peer'].values()]"; exit 1; }
-          echo "target $TAG -> $IP"
+          # tag 定范围 + node_ip 精确定点：IP 必须落在解析集内，否则拒绝（防误投）；无 IP 时集合必须恰好 1 个。
+          # （2026-11-03 教训：tag:prod 双命中 hw21/hw41 时静默单选，发错机器还显示 success。）
+          if [ -z "$CANDIDATES" ]; then
+            echo "FAIL: 标签/主机 $TAG 在 tailnet 无匹配（tag 需后台先贴好）"; tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('self:', d.get('Self',{}).get('HostName')); [print(p.get('HostName'), p.get('Tags')) for p in d['Peer'].values()]"; exit 1
+          fi
+          if [ -n "$NODE_IP" ]; then
+            echo "$CANDIDATES" | tr ' ' '\n' | grep -Fxq "$NODE_IP" || { echo "FAIL: node_ip $NODE_IP 不在 $TAG 解析集（$CANDIDATES）内，拒绝（防误投）"; exit 1; }
+            IP="$NODE_IP"
+          else
+            set -- $CANDIDATES
+            [ "$#" -eq 1 ] || { echo "FAIL: 标签/主机 $TAG 命中 $# 个节点（$CANDIDATES），请加 node_ip 精确指定，拒绝随缘发布"; exit 1; }
+            IP="$1"
+          fi
+          echo "target $TAG ip_param=${NODE_IP:-auto} -> $IP"
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
           # 脆弱点已删：旧 forbid 名单（trial 下线期在线即误杀全部 deploy，见 2026-10-23 containment 开火事件）。
           # 现只留 entry 探测（entry 是跳板机，部署流量绝不该碰它；trial 已退役，不再探测）。
