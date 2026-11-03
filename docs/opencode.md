@@ -58,5 +58,6 @@ docker exec opencode-prod tailscale ssh root@mesh-hw-41 'hostname'
 ## mesh-ali-gz 入口 → hw41（opencode.yingxin.net.cn）
 
 - 入口：`opencode.yingxin.net.cn` → mesh-ali-gz Caddy → `100.111.231.85:4097`（容器在 hw41）。
-- 栈目录：`stacks/opencode-prod-ali-gz/`（复用 opencode-prod 模板，卷/命名独立）。
+- 栈目录：`stacks/opencode/hw41/`（与 hw21 同应用目录 `stacks/opencode/`，共享 `probes/`；
+  宿主机落点保持 `/root/stacks/opencode-prod-ali-gz/` 不变，不迁移；hw21 栈为 `stacks/opencode/hw21/`）。
 - 网关：tailnet `mesh-hw-21:4000`（本机无 litellm-guard）。

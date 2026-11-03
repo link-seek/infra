@@ -1,4 +1,4 @@
-# stacks/opencode-prod/deploy.manifest — 快递形状声明（deliver-stack.yml 复用线读取）
+# stacks/opencode/hw21/deploy.manifest — 快递形状声明（deliver-stack.yml 复用线读取）
 REMOTE_DIR=/root/stacks/opencode-prod
 ENV_CONF=env-sources.conf
 # pin 冻结：只冻 tools（chrome-cjk 无构建线，只跟 pin，不动）
@@ -34,3 +34,5 @@ PROBE_REQUIRE_DRAIN=1
 GOSS_RETRY_TIMEOUT=120s
 CUTOVER_SERVICES="opencode-prod browser"
 # 生产 up 探针级别：full（含 drain 活证明；网关在 prod 机恒在故恒强制执行）
+
+# 注：仓库目录已按落点归整；宿主机 REMOTE_DIR 保持历史值不变（见上），不迁移。

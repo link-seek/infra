@@ -16,7 +16,7 @@ on:
         type: choice
         options:
           - stacks/litellm-gateway
-          - stacks/opencode-prod
+          - stacks/opencode/hw21
       node_tag:
         description: "镜像 runner 的 TS 标签（镜像线生成，如 img-<run号>），防并发"
         required: true

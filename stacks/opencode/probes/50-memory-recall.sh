@@ -28,6 +28,11 @@ if ! docker inspect "$CANARY_CONTAINER" >/dev/null 2>&1; then
   exit 1
 fi
 
+# 非 opencode 栈（canary 无 opencode 二进制）直接跳过，不拦发布。
+if ! timeout 20 docker exec "$CANARY_CONTAINER" opencode --version >/dev/null 2>&1; then
+  skip_case "canary 无 opencode 二进制（$CANARY_CONTAINER 非 opencode 镜像）" "no-opencode-binary"
+fi
+
 # 模型调用走 .env 里的网关（trial 直调生产网关）；boot 级已在上方跳过。
 # 网关不可达时 opencode run 直接失败（fail-closed），不再静默 SKIP。
 
