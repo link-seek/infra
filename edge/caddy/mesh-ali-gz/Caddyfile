@@ -37,7 +37,28 @@ opencode.yingxin.net.cn {
 
 # 网关公网入口（2026-11-03 灰云直连）：Caddy → 独立 tailnet 身份 litellm-gateway:4000。
 # 国内直连：用户→广州 ali-gz→tailnet→华北网关。隧道回滚已删。
+# 模型列表实时透传官方（无 cron 无过滤）：/go/v1/models → Go 订阅清单；/v1/models → 余额清单。
 litellm.linkseek.net.cn {
+	@goList {
+		method GET
+		path /go/v1/models*
+	}
+	handle @goList {
+		rewrite * /inference/go/v1/models
+		reverse_proxy https://opencode.ai {
+			header_up Host opencode.ai
+		}
+	}
+	@zenList {
+		method GET
+		path /v1/models*
+	}
+	handle @zenList {
+		rewrite * /inference/v1/models
+		reverse_proxy https://opencode.ai {
+			header_up Host opencode.ai
+		}
+	}
 	reverse_proxy {
 		dynamic a {
 			name litellm-gateway.mackarel-polaris.ts.net.
