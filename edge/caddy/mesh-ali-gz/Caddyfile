@@ -1,6 +1,5 @@
 # 后端 hw21:4097
-opencode.xieyucheng.top {
-	reverse_proxy {
+opencode.xieyucheng.top {	reverse_proxy {
 		dynamic a {
 			name mesh-hw-21.mackarel-polaris.ts.net.
 			port 4097
@@ -32,5 +31,23 @@ opencode.yingxin.net.cn {
 	}
 	log {
 		output file /var/log/caddy/opencode-yingxin.log
+	}
+}
+
+# 网关公网入口：Caddy → 独立 tailnet 身份 litellm-gateway:4000（#181/#202）。
+litellm.linkseek.net.cn {
+	reverse_proxy {
+		dynamic a {
+			name litellm-gateway.mackarel-polaris.ts.net.
+			port 4000
+			refresh 5s
+			resolvers 100.100.100.100
+		}
+		fail_duration 30s
+		max_fails 2
+		lb_try_duration 5s
+	}
+	log {
+		output file /var/log/caddy/litellm.log
 	}
 }
