@@ -18,7 +18,7 @@
       "ttl": 1,
       "proxied": true,
       "state": "absent",
-      "comment": "隧道直连下线（回滚备用：改回 present＋A 改 absent 即可）"
+      "comment": "隧道直连已删（2026-11-03 晚灰云直连，回滚点已清）"
     }
   ]
 }
