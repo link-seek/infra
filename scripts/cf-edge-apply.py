@@ -39,7 +39,7 @@ def ok(resp):
 
 def main():
     state_path = os.environ.get("STATE_FILE", "cf/linkseek-edge.json")
-    dry = os.environ.get("DRY_RUN", "1") == "1"
+    dry = os.environ.get("DRY_RUN", "1").lower() in ("1", "true", "yes", "on")
     want = json.load(open(state_path))
     zone_name = want["zone"]
 
