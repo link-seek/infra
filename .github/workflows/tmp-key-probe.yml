@@ -62,7 +62,7 @@ jobs:
           CODE="$(curl -sS -m 90 -o "$BODY" -w '%{http_code}' http://127.0.0.1:4000/v1/chat/completions \
             -H 'Content-Type: application/json' \
             -H "Authorization: Bearer ${ORG_KEY}" \
-            --data "{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":5}" || echo "CURLFAIL")"
+            --data "{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":64}" || echo "CURLFAIL")"
           echo "http=${CODE}"
           head -c 600 "$BODY"; echo ""
           EOF
