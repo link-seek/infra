@@ -61,7 +61,9 @@ def main():
     phases = {}
     for ph in ("http_request_firewall_managed", "http_ratelimit"):
         st0, r0 = api("GET", f"/zones/{zid}/rulesets/phases/{ph}/entrypoint")
-        if st0 == 200 and isinstance(r0, dict) and r0.get("result"):
+        ok0 = st0 == 200 and isinstance(r0, dict) and bool(r0.get("result"))
+        print(f"phase {ph}: status={st0} ok={ok0}")
+        if ok0:
             phases[ph] = r0["result"]
     print("phases: " + ", ".join(sorted(phases)) + "（entrypoint 直读，404 表示该 phase 未建）")
 
