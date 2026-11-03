@@ -1,5 +1,5 @@
 {
-  "_doc": "linkseek.net.cn  zone DNS 声明（Cloudflare）。dns-apply.yml  dispatch 时 records_file 指到本文件。",
+  "_doc": "linkseek.net.cn zone DNS 声明（Cloudflare）。dns-apply.yml dispatch 时 records_file 指到本文件。",
   "zone": "linkseek.net.cn",
   "records": [
     {
@@ -8,8 +8,17 @@
       "content": "120.77.76.20",
       "ttl": 600,
       "proxied": false,
+      "state": "absent",
+      "comment": "2026-11-03 改走隧道直连，A 记录删除（删前比对 content）"
+    },
+    {
+      "name": "litellm.linkseek.net.cn",
+      "type": "CNAME",
+      "content": "b759dba6-b698-4a4f-a019-0d6b2d08cf99.cfargotunnel.com",
+      "ttl": 1,
+      "proxied": true,
       "state": "present",
-      "comment": "网关公网入口：mesh-ali-gz Caddy → tailnet → litellm-gateway:4000（独立身份，#181）"
+      "comment": "网关公网入口：经 hw21 隧道直连网关独立身份（MagicDNS）。与 llm-trial 同隧道，deploy-cloudflared 锚点校验。"
     }
   ]
 }

@@ -61,6 +61,8 @@ jobs:
             "root@$NODE:/tmp/ci-tunnel-expect.txt"
           ssh -o BatchMode=yes -p "$PORT" -i ~/.ssh/ci_key root@$NODE bash -s <<'APPLY_EOF'
           set -euo pipefail
+          # 隧道上游含 MagicDNS 名（网关独立身份）：保证本机首选 100.100.100.100（deliver-caddy 同款）。
+          grep -q '^nameserver 100.100.100.100' /etc/resolv.conf || sed -i '1i nameserver 100.100.100.100' /etc/resolv.conf
           CFG=/etc/cloudflared/config.yml
           cp "$CFG" "$CFG.prev-$(date -u +%Y%m%dT%H%M%SZ)" && echo "backup-ok"
           # 锚点校验：records.json 的 CNAME 目标必须就是线上 tunnel UUID（错隧道即 abort，不动线上）
