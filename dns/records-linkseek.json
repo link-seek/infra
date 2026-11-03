@@ -1,0 +1,15 @@
+{
+  "_doc": "linkseek.net.cn  zone DNS 声明（Cloudflare）。dns-apply.yml  dispatch 时 records_file 指到本文件。",
+  "zone": "linkseek.net.cn",
+  "records": [
+    {
+      "name": "litellm.linkseek.net.cn",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "网关公网入口：mesh-ali-gz Caddy → tailnet → litellm-gateway:4000（独立身份，#181）"
+    }
+  ]
+}
