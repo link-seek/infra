@@ -21,10 +21,12 @@ if [ -n "$CANARY_SERVICE" ]; then
     docker compose -p "$CANARY_PROJECT" logs --tail 60 "$CANARY_SERVICE" 2>/dev/null || true
   fi
 fi
+# -v 只删 canary 自有 -p 项目卷；生产卷（prod-data 等）不在该项目内，不受影响。
+# （2026-11-03 #169：down 不 -v 致 canary 孤儿卷永久堆积。）
 if [ -f "$OVERRIDE_FILE" ]; then
-  docker compose -p "$CANARY_PROJECT" -f compose.yml -f "$OVERRIDE_FILE" down 2>/dev/null || true
+  docker compose -p "$CANARY_PROJECT" -f compose.yml -f "$OVERRIDE_FILE" down -v 2>/dev/null || true
 else
-  docker compose -p "$CANARY_PROJECT" down 2>/dev/null || true
+  docker compose -p "$CANARY_PROJECT" down -v 2>/dev/null || true
 fi
 [ -z "$CANARY_CONTAINER" ] || docker rm -f "$CANARY_CONTAINER" 2>/dev/null || true
 echo "canary dropped"
