@@ -105,6 +105,7 @@ def main():
             "description": "managed:" + x["name"],
             "expression": x["expression"],
             "action": x.get("action", "block"),
+            "enabled": True,
             "ratelimit": {
                 "characteristics": ["cf.colo.id", "ip.src"],
                 "period": int(x["period"]),
@@ -120,6 +121,8 @@ def main():
             return False, ["expression"]
         if old.get("action") != new.get("action"):
             return False, ["action"]
+        if old.get("enabled") is not True:
+            return False, ["enabled"]
         ooo = old.get("ratelimit") or {}
         nnn = new.get("ratelimit") or {}
         _diff = [k for k in ("characteristics", "period", "requests_per_period", "mitigation_timeout") if ooo.get(k) != nnn.get(k)]
