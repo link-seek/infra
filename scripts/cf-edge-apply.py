@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # scripts/cf-edge-apply.py — linkseek.net.cn 边缘配置声明式对账（WAF/限流/Bot）。
-# 用法：STATE_FILE=cf/linkseek-edge.yaml DRY_RUN=1|0 CF_TOKEN=... python3 scripts/cf-edge-apply.py
+# 用法：STATE_FILE=cf/linkseek-edge.json DRY_RUN=1|0 CF_TOKEN=... python3 scripts/cf-edge-apply.py
 # 规矩：只动本文件声明的条目（rate limit 以 description managed: 开头认领；WAF 只动已部署的托管 bundle）。
 # fail-closed：任何一步不符预期即 exit 非零；dry-run 只打印计划。
 import json
@@ -10,7 +10,6 @@ import urllib.parse
 import urllib.request
 import urllib.error
 
-import yaml
 
 BASE = "https://api.cloudflare.com/client/v4"
 
@@ -39,9 +38,9 @@ def ok(resp):
 
 
 def main():
-    state_path = os.environ.get("STATE_FILE", "cf/linkseek-edge.yaml")
+    state_path = os.environ.get("STATE_FILE", "cf/linkseek-edge.json")
     dry = os.environ.get("DRY_RUN", "1") == "1"
-    want = yaml.safe_load(open(state_path))
+    want = json.load(open(state_path))
     zone_name = want["zone"]
 
     st, r = api("GET", "/zones?name=" + urllib.parse.quote(zone_name))
@@ -131,7 +130,7 @@ def main():
         else:
             st2, r2 = api("POST", f"/zones/{zid}/rulesets", {
                 "name": "managed edge rate limits",
-                "description": "cf/linkseek-edge.yaml 对账",
+                "description": "cf/linkseek-edge.json 对账",
                 "kind": "zone", "phase": "http_ratelimit", "rules": new_rules})
             verb = "create"
         if not ok((st2, r2)):
