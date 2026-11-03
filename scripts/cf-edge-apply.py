@@ -65,12 +65,22 @@ def main():
     zid = zones[0]["id"]
     print("zone=%s id=%s%s" % (zone_name, zid, " DRY-RUN" if dry else ""))
 
-    # ---- 盘点：LIST 拿全量（entrypoint GET 行为存疑，不用它） ----
-    st, r = api("GET", "/zones/%s/rulesets?per_page=100" % zid)
-    if st != 200 or not isinstance(r, dict):
-        return fail("列 rulesets 失败", (st, r))
+    # ---- 盘点：LIST 拿全量（entrypoint GET 行为存疑，不用它；per_page 上限 50，翻页取全） ----
+    all_rs = []
+    page = 1
+    while True:
+        st, r = api("GET", "/zones/%s/rulesets?per_page=50&page=%d" % (zid, page))
+        if st != 200 or not isinstance(r, dict):
+            return fail("列 rulesets 失败", (st, r))
+        batch = r.get("result") or []
+        all_rs.extend(batch)
+        info = r.get("result_info") or {}
+        total_pages = info.get("total_pages", 1) or 1
+        if page >= total_pages or not batch or page >= 10:
+            break
+        page += 1
     by_phase = {}
-    for rs in r.get("result") or []:
+    for rs in all_rs:
         if rs.get("kind") == "zone" and rs.get("phase"):
             by_phase.setdefault(rs["phase"], rs)
     print("phases: " + ", ".join(sorted(by_phase)) + "（LIST 全量，逐条核对）")
