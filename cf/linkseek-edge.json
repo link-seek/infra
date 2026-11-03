@@ -13,9 +13,9 @@
       "expression": "(starts_with(http.request.uri.path, \"/v1/\") and http.request.method in {\"POST\" \"PUT\" \"PATCH\" \"DELETE\"})",
       "period": 10,
       "requests_per_period": 20,
-      "mitigation_timeout": 600,
+      "mitigation_timeout": 10,
       "action": "block",
-      "_note": "免费版 period 只能是 10（秒）；20次/10秒约=120次/分。按方法限：各模型接口通用。"
+      "_note": "免费版 period/mitigation_timeout 只能是 10（秒）；20次/10秒约=120次/分。按方法限：各模型接口通用。"
     }
   ],
   "bot_fight_mode": false,
