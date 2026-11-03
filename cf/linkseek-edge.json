@@ -16,14 +16,6 @@
       "mitigation_timeout": 600,
       "action": "block",
       "_note": "不按路径限：chat/completions、responses、messages 等各模型接口各异，按方法卡"
-    },
-    {
-      "name": "api-general",
-      "expression": "starts_with(http.request.uri.path, \"/v1/\")",
-      "period": 60,
-      "requests_per_period": 200,
-      "mitigation_timeout": 600,
-      "action": "block"
     }
   ],
   "bot_fight_mode": false,
