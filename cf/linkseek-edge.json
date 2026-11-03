@@ -7,17 +7,7 @@
     "ruleset_id": "",
     "_note": "ruleset_id 首次 dry-run 从线上发现后填入（dashboard 一键启用亦可，之后归流水线管）"
   },
-  "rate_limits": [
-    {
-      "name": "api-writes",
-      "expression": "(starts_with(http.request.uri.path, \"/v1/\") and http.request.method in {\"POST\" \"PUT\" \"PATCH\" \"DELETE\"})",
-      "period": 10,
-      "requests_per_period": 20,
-      "mitigation_timeout": 10,
-      "action": "block",
-      "_note": "免费版 period/mitigation_timeout 只能是 10（秒）；20次/10秒约=120次/分。按方法限：各模型接口通用。"
-    }
-  ],
+  "rate_limits": [],
   "bot_fight_mode": false,
   "_note_bot": "Bot 判定只做信号，不做拦截（API 客户端无浏览器指纹）"
 }
