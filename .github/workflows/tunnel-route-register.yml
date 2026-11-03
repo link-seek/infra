@@ -71,17 +71,29 @@ jobs:
           st, r = call("GET", "/accounts/%s/tokens/permission_groups?per_page=100" % account_id)
           groups = r.get("result") if isinstance(r.get("result"), list) else []
           by_name = {str(g.get("name", "")).lower(): g for g in groups}
+          # 别名：老账号下隧道组可能叫 Argo Tunnel（新版叫 Cloudflare Tunnel），双向认。
+          def _aliases(w):
+              cands = [w]
+              cands.append(w.replace("cloudflare tunnel", "argo tunnel"))
+              cands.append(w.replace("argo tunnel", "cloudflare tunnel"))
+              return cands
           wanted = [x.strip().lower() for x in os.environ["CF_PERM_GROUPS"].split(",") if x.strip()]
           zone_ids = []
           acct_ids = []
           for w in wanted:
-              g = by_name.get(w)
+              g = next((by_name[c] for c in _aliases(w) if c in by_name), None)
               if not g:
                   print("FAIL: permission group 不存在: %s" % w)
-                  print("HINT 可用组（tunnel/dns/zone 相关）:")
+                  print("HINT 可用组（tunnel 相关）:")
                   for gg in groups:
                       nm = str(gg.get("name", ""))
-                      if any(k in nm.lower() for k in ("tunnel", "dns", "zone")):
+                      if "tunnel" in nm.lower() or "argo" in nm.lower():
+                          print("  - %s scopes=%s" % (nm, gg.get("scopes")))
+                  print("HINT 可用组（dns/zone 相关）:")
+                  for gg in groups:
+                      nm = str(gg.get("name", ""))
+                      if ("tunnel" not in nm.lower() and "argo" not in nm.lower()
+                              and any(k in nm.lower() for k in ("dns", "zone"))):
                           print("  - %s scopes=%s" % (nm, gg.get("scopes")))
                   raise SystemExit(1)
               scopes = g.get("scopes") or []
@@ -125,7 +137,8 @@ jobs:
           set -e
           if [ "$MINT_RC" -ne 0 ]; then
             echo "FAIL: mint 脚本 rc=$MINT_RC"
-            printf '%s\n' "$MINTED" | tail -n 20
+            printf '%s\n' "$MINTED" | grep -E "FAIL|tunnel|Tunnel|Argo|argo" | head -n 10
+            printf '%s\n' "$MINTED" | tail -n 25
             exit 1
           fi
           CHILD="$(printf '%s' "$MINTED" | grep '^CF_MINTED_VALUE=' | tail -1 | cut -d= -f2-)"
