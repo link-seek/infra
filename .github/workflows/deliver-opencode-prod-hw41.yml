@@ -41,7 +41,7 @@ jobs:
     needs: check-secrets
     uses: ./.github/workflows/deliver-stack.yml
     with:
-      node_tag: prod
+      node_tag: tag:opencode-hw41
       node_ip: 100.111.231.85 # mesh-hw-41（tag 定范围 + IP 定点；host: 已被硬拦，改走此逻辑）
       digest_or_tag: ${{ inputs.digest_or_tag || 'stable' }}
       stack_dir: stacks/opencode/hw41
