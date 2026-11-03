@@ -47,6 +47,8 @@ litellm.linkseek.net.cn {
 		rewrite * /inference/go/v1/models
 		reverse_proxy https://opencode.ai {
 			header_up Host opencode.ai
+			header_up -Authorization
+			header_up -X-Api-Key
 		}
 	}
 	@zenList {
@@ -57,6 +59,8 @@ litellm.linkseek.net.cn {
 		rewrite * /inference/v1/models
 		reverse_proxy https://opencode.ai {
 			header_up Host opencode.ai
+			header_up -Authorization
+			header_up -X-Api-Key
 		}
 	}
 	reverse_proxy {
