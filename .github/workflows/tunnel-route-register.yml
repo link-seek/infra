@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: "true=登记 llm-trial（读后写）；false=只读"
+        description: "true=按 ingress.yaml 全量同步远端路由（读后写）；false=只读"
         required: false
         default: 'false'
 
@@ -178,7 +178,7 @@ jobs:
           json.dump(t, open('/tmp/tunnel.json','w'))
           "
 
-      - name: 登记 llm-trial（apply=true 时）
+      - name: 同步远端路由（apply=true 时）
         if: inputs.apply == 'true'
         env:
           ACC: ${{ steps.acct.outputs.account }}
@@ -208,22 +208,25 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/${{ steps.acct.outputs.account }}/cfd_tunnel/b759dba6-b698-4a4f-a019-0d6b2d08cf99/configurations" \
             | python3 -c "import json,sys; d=json.load(sys.stdin); print('PUT success:', d.get('success'), json.dumps(d.get('errors'))[:300] if not d.get('success') else '')"
 
-      - name: 验证路由（llm-trial＋litellm 双探）
+      - name: 验证路由（llm-trial 已摘＋litellm 存活）
         if: always()
         run: |
+          # 2026-11-04：llm/llm-trial 下线。PUT 后边缘收敛最长数分钟，循环确认不再路由（非 401 且无模型列表）；持续路由则判失败。
+          STILL_ROUTING=1
           for i in $(seq 1 20); do
             CODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://llm-trial.xieyucheng.top/v1/models || echo 000)"
-            echo "trial probe#$i -> $CODE"
-            [ "$CODE" = "401" ] && { echo "TRIAL OK: 401（无 key 符合预期）"; break; }
+            echo "retired probe#$i -> $CODE"
             BODY="$(curl -s -m 10 https://llm-trial.xieyucheng.top/v1/models || echo CURLFAIL)"
-            echo "$BODY" | grep -q '"data"' && { echo "TRIAL OK: 200 模型列表（网关直通）"; break; }
-            [ "$i" = "20" ] && { echo "STILL BLOCKED trial: $CODE（未登记或 token 无 Tunnel 写权限）"; exit 1; }
-            sleep 15
+            if [ "$CODE" = "401" ] || echo "$BODY" | grep -q '"data"'; then
+              echo "still routing, wait edge propagation"; sleep 15; continue
+            fi
+            echo "RETIRED OK: llm-trial 已不再路由（$CODE）"; STILL_ROUTING=0; break
           done
+          [ "$STILL_ROUTING" = "1" ] && { echo "STILL ROUTING trial: 远端 PUT 未生效"; exit 1; }
           for i in $(seq 1 20); do
             LCODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://litellm.linkseek.net.cn/v1/models -H 'Authorization: Bearer ci-probe' || echo 000)"
             echo "litellm probe#$i -> $LCODE"
-            [ "$LCODE" = "200" ] && { echo "LITELLM OK: 200（隧道路由已生效）"; exit 0; }
+            [ "$LCODE" = "200" ] && { echo "LITELLM OK: 200（灰云直连入口存活）"; exit 0; }
             sleep 15
           done
           echo "STILL BLOCKED litellm: $LCODE"
