@@ -2,7 +2,7 @@ name: opencode-prod-ali-gz
 services:
   opencode-prod:
     # 版本 pin（digest）：升级 = 改这行发 PR，合后自动灰度。禁止改回 :latest。
-    image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:5e20e232caf75a42ce030821dc2d5ec2b1de55fd11d7d1e55c87388eecea8a17
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
     pull_policy: always
     container_name: opencode-prod-ali-gz
     hostname: opencode-prod-ali-gz
