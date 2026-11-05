@@ -54,7 +54,8 @@ curl -s http://100.91.222.51:4000/v1/chat/completions -H "Authorization: Bearer 
 ```
 * `:4747` 式误报注意：本网关无会话激活行为，4000 常驻；监控直接轮询 `/v1/models` 即可。
 
-## HTTPS（PR2，另起）
+## 公网入口（2026-11-04 收敛）
 
-* 试用域名 `llm-trial.xieyucheng.top` 先行，正式 `llm.xieyucheng.top` 等试用全绿；
-  动隧道前先看本文“现网运行体”，回滚 = OD 切回 `http://100.91.222.51:4000`。
+* 唯一入口 `litellm.linkseek.net.cn`（灰云直连 ali-gz Caddy → tailnet → 华北网关）。
+* `llm-trial.xieyucheng.top` / `llm.xieyucheng.top`（隧道）2026-11-04 下线：ingress/DNS 均摘，隧道只剩 opendesign。
+* 动隧道前先看本文“现网运行体”。

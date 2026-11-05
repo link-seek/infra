@@ -2,8 +2,9 @@ name: deliver-cloudflared
 # 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
 # 隧道即代码：只手动 dispatch（备份→只换 ingress 段→restart→验证→失败回滚）。
-# 手动点火即闪断窗口（restart 时隧道内两个现网域名闪断十几秒），挑空闲时间点。
+# 手动点火即闪断窗口（restart 时隧道内现网域名 opendesign 闪断十几秒），挑空闲时间点。
 # UUID/credentials 永不进仓：线上 tunnel: 行是锚点，records.json 的 CNAME 目标必须与之一致（fail-closed）。
+# 2026-11-04：llm/llm-trial 已下线（ingress/DNS 均摘），锚点仍读 records.json 里保留的 llm-trial 记录。
 
 on:
   workflow_dispatch:
@@ -50,7 +51,7 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           NODE="100.91.222.51"; PORT="2244"
           ssh-keyscan -p "$PORT" -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
-          # 期望的 CNAME 目标（records.json 声明）发上机，线上比对 tunnel: 锚点（fail-closed）
+          # 期望的 CNAME 目标（records.json 声明，llm-trial 记录下线后保留作锚点）发上机，线上比对 tunnel: 锚点（fail-closed）
           python3 -c "import json; print([r['content'] for r in json.load(open('dns/records.json'))['records'] if r['name']=='llm-trial.xieyucheng.top'][0])" > /tmp/expect_cname.txt
           cat /tmp/expect_cname.txt
           scp -o BatchMode=yes -P "$PORT" -i ~/.ssh/ci_key \
@@ -88,7 +89,7 @@ jobs:
           PYEOF
           systemctl restart cloudflared && echo "restarted"
           sleep 20
-          # 验证：新域名回温＋ trial 域名 TLS 通（401 无 key 即通，签的是 Cloudflare 边缘证书）
+          # 验证：主域/opencode 回温＋网关入口 200；已下线域名确认不再路由（warn-only，远端 PUT/边缘传播有延迟）
           PASS=1
           # 主域硬门：opencode 必须回温（隧道健康探针；hw21-opencode 已下线）
           for i in $(seq 1 10); do
@@ -98,7 +99,7 @@ jobs:
           done
           echo "main-domain opencode -> $CODE"
           [ "$CODE" = "200" ] || PASS=0
-          # 网关公网入口硬门：litellm 必须 200（隧道直连网关独立身份；ci-probe key 探活）
+          # 网关公网入口硬门：litellm 必须 200（灰云直连 ali-gz Caddy→tailnet→网关；ci-probe key 探活）
           LCODE="000"
           for i in $(seq 1 10); do
             LCODE="$(curl -s -m 15 -o /dev/null -w '%{http_code}' https://litellm.linkseek.net.cn/v1/models -H 'Authorization: Bearer ci-probe' || echo 000)"
@@ -108,25 +109,18 @@ jobs:
           done
           echo "gateway-domain litellm -> $LCODE"
           [ "$LCODE" = "200" ] || PASS=0
-          # 新域名等 tunnel 边界到 Cloudflare 生效（边缘握手最长 ~4 分钟）：不早判 fail
-          TCODE="000"
-          for i in $(seq 1 24); do
+          # 已下线域名确认（warn-only）：llm-trial 不应再路由到网关。
+          # 时序注意：远端 PUT（tunnel-route-register apply=true）应先于本次 dispatch 生效，边缘传播最长数分钟；未收敛只警告，不断言失败。
+          for i in $(seq 1 6); do
             TCODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://llm-trial.xieyucheng.top/v1/models || echo 000)"
-            echo "trial-domain probe#$i -> $TCODE"
-            [ "$TCODE" = "401" ] && { echo "VERIFY OK: llm-trial TLS+ingress（401 无 key 符合预期）"; break; }
-            sleep 15
+            echo "retired-domain probe#$i -> $TCODE"
+            [ "$TCODE" = "401" ] && { echo "WARN: llm-trial 仍在路由（远端 PUT/边缘未收敛或 DNS 未删）"; sleep 15; continue; }
+            TBODY="$(curl -s -m 10 https://llm-trial.xieyucheng.top/v1/models || echo CURLFAIL)"
+            echo "$TBODY" | grep -q '"data"' && { echo "WARN: llm-trial 仍透出模型列表（远端未收敛）"; sleep 15; continue; }
+            echo "RETIRED OK: llm-trial 已不再路由（$TCODE）"; break
           done
-          # 401 为期望；只要不是稳定 530（= CNAME proxied 冲突），仅警告不拦路
-          [ "$TCODE" != "401" ] && { echo "WARN: llm-trial 未达 401（$TCODE），检查 CNAME proxied 状态"; echo "warn-not-fail" >> /tmp/llm-trial-warn; }
           ODCODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "https://opendesign.xieyucheng.top/" || echo 000)"
           echo "old-domain opendesign -> $ODCODE (warn-only, 旧疾另修)" 
-          for i in $(seq 1 10); do
-            BODY="$(curl -s -m 10 https://llm-trial.xieyucheng.top/v1/models || echo CURLFAIL)"
-            echo "$BODY" | grep -q '"data"' && { echo "trial-domain models OK (TLS+ingress 通)"; break; }
-            echo "$BODY" | grep -qi 'error.*401\|Unauthorized\|Invalid API Key\|No api key' && { echo "trial-domain 401 (TLS+ingress 通，缺 key 符合预期)"; break; }
-            [ "$i" = "10" ] && PASS=0
-            sleep 15
-          done
           if [ "$PASS" = "1" ]; then
             echo "VERIFY OK"
           else

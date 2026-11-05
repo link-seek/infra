@@ -1,12 +1,10 @@
 # hw21-opencode 隧道 ingress 声明（唯一源；hw21-opencode 域名已下线，文件名为隧道名保留）
 # UUID/credentials-file 留宿主机（/etc/cloudflared/），不进仓。
-# deploy-cloudflared.yml：备份线上 config → 只替换 ingress 段 → restart →
-# 验旧域名＋新域名 → 失败则恢复备份再 restart。合 PR 即执行，执行即闪断窗口。
+# 2026-11-04：llm/llm-trial 网关域名下线（公网入口收敛至 litellm.linkseek.net.cn 灰云直连），本隧道只剩 opendesign。
+# deliver-cloudflared：备份线上 config → 只替换 ingress 段 → restart → 验证 → 失败回滚。
+# 合 PR 不执行，需手动 dispatch（restart 闪断 opendesign 十几秒，挑空闲时间）。
+# 远端路由 API 托管：本地改完需 dispatch tunnel-route-register(apply=true) 做远端 PUT，否则路由不生效。
 ingress:
   - hostname: opendesign.xieyucheng.top
     service: http://127.0.0.1:7456
-  - hostname: llm.xieyucheng.top
-    service: http://127.0.0.1:4000
-  - hostname: llm-trial.xieyucheng.top
-    service: http://127.0.0.1:4000
   - service: http_status:404
