@@ -1,0 +1,15 @@
+http:
+  http://127.0.0.1:{{ .Vars.CANARY_PORT }}/:
+    status: 200
+    timeout: 15000
+    no-follow-redirects: false
+
+command:
+  canary-image-pin:
+    exec: 'test "$(docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Image"])'')" = "$(docker inspect {{ .Vars.PIN_REPOS }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Id"])'')"'
+    exit-status: 0
+    timeout: 30000
+  canary-volume-mounts:
+    exec: 'docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c ''import json,sys; mounts={m["Destination"] for m in json.load(sys.stdin)[0]["Mounts"]}; need={"/app/cloudflare-os/.wrangler"}; missing=need-mounts; assert not missing, "missing mounts: %s" % sorted(missing)'''
+    exit-status: 0
+    timeout: 30000

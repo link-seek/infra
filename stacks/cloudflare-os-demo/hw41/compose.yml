@@ -1,0 +1,25 @@
+name: cloudflared-os-demo
+services:
+  app:
+    # 版本 pin（digest）：升级 = 改这行发 PR，合后自动灰度。禁止改回 :latest。
+    # 首版占位：bake 首构后填 digest 再合 PR。
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo:stable
+    pull_policy: always
+    container_name: cloudflared-os-demo
+    hostname: cloudflared-os-demo
+    init: true
+    restart: unless-stopped
+    networks:
+      - cfos-net
+    ports:
+      # demo 入口（tailnet 经 100.111.231.85:18787 访问；生产 4097 不碰）。
+      - "18787:8787"
+    env_file:
+      - .env
+    volumes:
+      # run-local 状态（.wrangler 在上游子目录）：重建不丢会话。
+      - wrangler-state:/app/cloudflare-os/.wrangler
+networks:
+  cfos-net:
+volumes:
+  wrangler-state:

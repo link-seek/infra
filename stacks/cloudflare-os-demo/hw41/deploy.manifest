@@ -1,0 +1,26 @@
+# stacks/cloudflare-os-demo/hw41/deploy.manifest — 快递形状声明（deliver-stack.yml 复用线读取）
+# demo 试用栈：cloudflare-os run-local 落 HW41，手机经 tailnet 入口试用。无 SLA。
+REMOTE_DIR=/root/stacks/cloudflare-os-demo
+ENV_CONF=env-sources.conf
+# pin 冻结：demo 单镜像。
+PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo"
+SYNC_FILES="compose.yml README.md .env.example goss-trial.yaml probe-cases"
+# 探针 goss 版本（deliver-remote-core.sh 在 CI 下载后按同一条 tar 路送上靶机，不烘镜像）
+GOSS_VERSION="v0.4.10"
+# —— canary 三件套参数（共用 scripts/canary-*.sh；本栈不保留重复脚本）——
+CANARY_PROJECT=cloudflare-os-demo-canary
+CANARY_SERVICE=app
+CANARY_SERVICES="app"
+CANARY_CONTAINER=cloudflare-os-demo-canary
+# canary 先上线：hostname 必须错开，避免抢正式节点名（本栈无 tailnet 身份，不设 TS_HOSTNAME）
+CANARY_HOSTNAME=cloudflare-os-demo-canary
+# canary 宿主端口（正式 18787，避免冲突）
+CANARY_PORT=28787
+CANARY_CONTAINER_PORT=8787
+# goss 文件 / 用例下限（现 3 条：http1+command1+file1）；防删门禁
+GOSS_FILE=goss-trial.yaml
+MIN_GOSS_CASES=3
+GOSS_RETRY_TIMEOUT=120s
+CUTOVER_SERVICES="app"
+# demo 无外部网关依赖，不做 drain；PROBE_* 从简
+PROBE_NEEDS_IP=0
