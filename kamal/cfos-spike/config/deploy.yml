@@ -20,7 +20,7 @@ registry:
 builder:
   arch:
     - amd64
-  dockerfile: kamal/cfos-spike/Dockerfile.cfos-spike
+  dockerfile: Dockerfile.cfos-spike
 
 # run-local 要 PIPELINE_MANAGED；远端 binding 要 CF token（secret 经 .kamal/secrets）。
 env:
