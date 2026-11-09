@@ -6,7 +6,7 @@ http:
 
 command:
   canary-image-pin:
-    exec: 'test "$(docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Image"])'')" = "$(docker inspect {{ .Vars.PIN_REPOS }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Id"])'')"'
+    exec: 'test "$(docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Image"])'')" = "$(docker inspect {{ .Vars.PIN_IMG }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Id"])'')"'
     exit-status: 0
     timeout: 30000
   canary-volume-mounts:

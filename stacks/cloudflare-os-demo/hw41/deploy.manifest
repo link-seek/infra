@@ -19,6 +19,7 @@ CANARY_PORT=28787
 CANARY_CONTAINER_PORT=8787
 # goss 文件 / 用例下限（现 3 条：http1+command1+file1）；防删门禁
 GOSS_FILE=goss-trial.yaml
+PROBE_PIN_VARS="PIN_IMG=swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo"
 MIN_GOSS_CASES=3
 GOSS_RETRY_TIMEOUT=120s
 CUTOVER_SERVICES="app"
