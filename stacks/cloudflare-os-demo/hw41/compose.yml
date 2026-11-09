@@ -13,7 +13,8 @@ services:
       - cfos-net
     ports:
       # demo 入口（tailnet 经 100.111.231.85:18787 访问；生产 4097 不碰）。
-      - "18787:8787"
+      # 容器内 8788 = node 转发口（wrangler 只绑 127.0.0.1:8787，见镜像 forward.js）
+      - "18787:8788"
     env_file:
       - .env
     volumes:
