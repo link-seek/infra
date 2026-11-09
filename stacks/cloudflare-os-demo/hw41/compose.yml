@@ -3,7 +3,7 @@ services:
   app:
     # 版本 pin（digest）：升级 = 改这行发 PR，合后自动灰度。禁止改回 :latest。
     # 首版占位：bake 首构后填 digest 再合 PR。
-    image: swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo:stable
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo@sha256:147942d0938bed4ec7dafcd906396ec243f5ac0cb92e27482cfefd7e3a42282c
     pull_policy: always
     container_name: cloudflared-os-demo
     hostname: cloudflared-os-demo
