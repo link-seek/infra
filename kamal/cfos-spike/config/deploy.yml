@@ -31,11 +31,11 @@ env:
 
 # kamal-proxy：80 对外，转发到 8788 转发口；每 5s 打 /，deploy_timeout 覆盖冷启动。
 proxy:
-  app_port: 8788
+  app_port: 80
   healthcheck:
     path: /
     interval: 5
     timeout: 10
 
 # run-local 冷启动数分钟，deploy 超时按 15 分钟给。
-deploy_timeout: 420
+deploy_timeout: 180
