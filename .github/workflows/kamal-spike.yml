@@ -104,7 +104,7 @@ jobs:
           check200 && echo "GOOD serving"
           echo "== deploy BAD (broken forwarder), expect FAILURE =="
           sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$BAD|" Dockerfile.cfos-spike
-          if timeout 1200 kamal deploy > /tmp/deploy-bad.log 2>&1; then echo "UNEXPECTED: broken deploy passed"; exit 1; fi; tail -n 8 /tmp/deploy-bad.log
+          if timeout 1200 kamal deploy > /tmp/deploy-bad.log 2>&1; then echo "UNEXPECTED: broken deploy passed"; exit 1; fi; echo "deploy-bad exit=$? (non-zero expected)"; tail -n 8 /tmp/deploy-bad.log
           echo "BAD correctly rejected"
           echo "== rollback, expect GOOD serving =="
           timeout 600 kamal rollback 2>&1 | tail -n 5
