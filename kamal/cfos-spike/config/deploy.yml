@@ -5,6 +5,11 @@ image: cfos-spike
 servers:
   - SERVER_PLACEHOLDER
 
+# Tailscale SSH 经 tailscaled 管道，不依赖 22 端口劫持、不需要 key。
+# runner 等临时节点劫持常不生效，此路最稳（tailscale 官方描述的用法）。
+ssh:
+  proxy_command: "tailscale nc %h %p"
+
 registry:
   server: swr.cn-north-9.myhuaweicloud.com
   username:
