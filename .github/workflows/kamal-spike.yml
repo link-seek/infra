@@ -74,7 +74,7 @@ jobs:
             echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
-          timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" 2>&1 | tail -n 15
+          timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" > /tmp/exec.log 2>&1; tail -n 15 /tmp/exec.log
 
       - name: kamal deploy healthy, broken, rollback
         working-directory: kamal/cfos-spike
@@ -104,7 +104,7 @@ jobs:
           check200 && echo "GOOD serving"
           echo "== deploy BAD (broken forwarder), expect FAILURE =="
           sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$BAD|" Dockerfile.cfos-spike
-          if timeout 1200 kamal deploy 2>&1 | tail -n 5; then echo "UNEXPECTED: broken deploy passed"; exit 1; fi
+          if timeout 1200 kamal deploy > /tmp/deploy-bad.log 2>&1; then echo "UNEXPECTED: broken deploy passed"; exit 1; fi; tail -n 8 /tmp/deploy-bad.log
           echo "BAD correctly rejected"
           echo "== rollback, expect GOOD serving =="
           timeout 600 kamal rollback 2>&1 | tail -n 5
