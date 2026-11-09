@@ -1,0 +1,63 @@
+name: kamal-spike
+
+# Phase 1 spike（#277）：ephemeral runner 自举为靶机，验证 Kamal(net-ssh) 走 Tailscale SSH。
+# 不动生产，不部署应用。成功标准：kamal server exec 回显 + SWR 登录成功。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+
+      - name: install kamal
+        run: gem install kamal -v 2.12.0 --no-document
+
+      - name: join tailnet ephemeral with ssh
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kamal-spike-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
+          SELF_IP="$(tailscale ip -4)"
+          echo "SELF_IP=$SELF_IP" >> "$GITHUB_ENV"
+          tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("self tags:", d["Self"].get("Tags"))'
+
+      - name: baseline plain ssh over tailnet
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SELF_IP" 'echo PLAIN-SSH-OK; whoami'
+
+      - name: kamal server exec over TSSH
+        working-directory: kamal/cfos-spike
+        run: |
+          set -euo pipefail
+          sed -i "s/SERVER_PLACEHOLDER/$SELF_IP/" deploy.yml
+          kamal init 2>/dev/null || true
+          timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" 2>&1 | tail -n 15
+
+      - name: SWR login
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          echo "$SWR_PASS" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_USER" --password-stdin
+
+      - name: leave tailnet
+        if: always()
+        run: sudo tailscale logout || true
