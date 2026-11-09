@@ -47,9 +47,9 @@ jobs:
           echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
           # 资源采样：怀疑 OOM/磁盘挤死 tailscaled，每 15s 记 free/df/dmesg OOM 痕迹
           (while true; do echo "== $(date -u +%FT%TZ) =="; free -m | head -n 2; df -h / /tmp | tail -n 2; dmesg 2>/dev/null | grep -i -m3 "oom\|killed process" || true; echo; sleep 15; done > /tmp/resmon.log 2>&1 & echo $! > /tmp/resmon.pid)
-          # NAT 保活：长本地阶段（docker 构建）零 ssh 流量，Azure NAT 映射过期后直连掉线、
-          # DERP 又被 runner 出口墙掉（502）。后台每 20s ping 一次保活。
-          (while true; do sudo tailscale ping --timeout=5s --c=1 "$SRV_IP" >/dev/null 2>&1 || true; sleep 20; done & echo $! > /tmp/keepalive.pid)
+          # 数据面保活：ICMP ping 保不住 UDP 映射。改真 ssh 短命令每 45s 一次，
+          # 走完整数据面（直连/DERP+认证），长本地阶段不断流。
+          (while true; do timeout 30 tailscale ssh root@"$SRV_IP" 'echo keepalive-ok' >/dev/null 2>&1 || true; sleep 45; done & echo $! > /tmp/keepalive.pid)
           sudo tailscale --socket=/tmp/ts2.sock status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("srv tags:", d["Self"].get("Tags"))'
 
       - name: baseline plain ssh to server daemon
