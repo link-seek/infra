@@ -9,7 +9,7 @@ on:
 jobs:
   spike:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -76,12 +76,43 @@ jobs:
           chmod 600 .kamal/secrets
           timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" 2>&1 | tail -n 15
 
-      - name: SWR login
+      - name: kamal deploy v1 + verify + v2 + rollback
+        working-directory: kamal/cfos-spike
         env:
           SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
           SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
         run: |
-          echo "$SWR_PASS" | docker login swr.cn-north-9.myhuaweicloud.com -u "$SWR_USER" --password-stdin
+          set -euo pipefail
+          {
+            echo "KAMAL_REGISTRY_USER=$SWR_USER"
+            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+            echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
+          } > .kamal/secrets
+          chmod 600 .kamal/secrets
+          D1="sha256:f4795016f273720927865024c14e28523b145583b02317c1bd6317277eadc799"
+          D2="sha256:cfe24a21570336277e462c8308681eabf9c3ff3125983cbc4c048c0ddce61286"
+          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$D1|" Dockerfile.cfos-spike
+          timeout 1500 kamal deploy 2>&1 | tail -n 8
+          echo "== v1 serving =="
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && break || sleep 20
+          done
+          echo "v1 http=$code"; test "$code" = "200"
+          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$D2|" Dockerfile.cfos-spike
+          timeout 1500 kamal deploy 2>&1 | tail -n 5
+          echo "== v2 serving =="
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && break || sleep 20
+          done
+          echo "v2 http=$code"; test "$code" = "200"
+          echo "== rollback =="
+          timeout 600 kamal rollback 2>&1 | tail -n 8
+          kamal app containers 2>&1 | tail -n 8
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && break || sleep 20
+          done
+          echo "post-rollback http=$code"; test "$code" = "200"
 
       - name: leave tailnet
         if: always()
