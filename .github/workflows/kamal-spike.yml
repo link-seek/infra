@@ -46,14 +46,23 @@ jobs:
         run: |
           ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SELF_IP" 'echo PLAIN-SSH-OK; whoami' || true
           echo "--- official client ---"
-          tailscale ssh --timeout=20s root@"$SELF_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
+          timeout 30 tailscale ssh root@"$SELF_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
 
       - name: kamal server exec over TSSH
         working-directory: kamal/cfos-spike
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
         run: |
           set -euo pipefail
           sed -i "s/SERVER_PLACEHOLDER/$SELF_IP/" config/deploy.yml
           grep -q "$SELF_IP" config/deploy.yml || { echo "FAIL: server IP not wired"; exit 1; }
+          mkdir -p .kamal
+          {
+            echo "KAMAL_REGISTRY_USER=$SWR_USER"
+            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+          } > .kamal/secrets
+          chmod 600 .kamal/secrets
           timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" 2>&1 | tail -n 15
 
       - name: SWR login
