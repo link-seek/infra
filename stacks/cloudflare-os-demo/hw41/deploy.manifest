@@ -21,7 +21,8 @@ CANARY_CONTAINER_PORT=8788
 GOSS_FILE=goss-trial.yaml
 PROBE_PIN_VARS="PIN_IMG=swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo"
 MIN_GOSS_CASES=3
-GOSS_RETRY_TIMEOUT=120s
+# run-local 冷启动（pnpm install 检查 + vite 全量构建 + wrangler）约 3～8 分钟，120s 不够。
+GOSS_RETRY_TIMEOUT=600s
 CUTOVER_SERVICES="app"
 # demo 无外部网关依赖，不做 drain；PROBE_* 从简
 PROBE_NEEDS_IP=0
