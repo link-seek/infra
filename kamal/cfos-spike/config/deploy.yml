@@ -11,3 +11,7 @@ registry:
     - KAMAL_REGISTRY_USER
   password:
     - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch:
+    - amd64
