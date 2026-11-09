@@ -40,6 +40,10 @@ jobs:
           tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("self tags:", d["Self"].get("Tags"))'
           sudo tailscale set --ssh
           sleep 5
+          echo "--- tssh diag ---"
+          sudo iptables -S 2>/dev/null | grep -i -m8 "tailscale\|dport 22" || echo "no iptables tailscale rules"
+          sudo ss -tlnp 2>/dev/null | grep -E ":22 " | head -n 4 || echo "nothing on :22 via ss"
+          tailscale version | head -n 2
           sudo ss -tlnp 2>/dev/null | grep -E ":22 " | head -n 3 || true
 
       - name: baseline plain ssh over tailnet
