@@ -1,7 +1,7 @@
 # Kamal spike v1:只验证 net-ssh(TSSH)通道 + SWR 登录, hypotheses in #277.
 # Zero deploy. Runner self-target via Tailscale SSH (no keys).
 service: cfos-spike
-image: cfos-spike
+image: linkseed/cfos-spike
 servers:
   - SERVER_PLACEHOLDER
 
