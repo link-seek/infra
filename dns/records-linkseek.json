@@ -10,6 +10,15 @@
       "proxied": false,
       "state": "present",
       "comment": "网关公网入口：广州 ali-gz Caddy → tailnet → 华北网关"
+    },
+    {
+      "name": "cfos-demo.linkseek.net.cn",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "demo 入口：广州 ali-gz Caddy → tailnet → hw41:18787（cloudflare-os 试用，转正退役）"
     }
   ]
 }
