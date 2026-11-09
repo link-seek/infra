@@ -47,8 +47,8 @@ jobs:
         working-directory: kamal/cfos-spike
         run: |
           set -euo pipefail
-          sed -i "s/SERVER_PLACEHOLDER/$SELF_IP/" deploy.yml
-          kamal init 2>/dev/null || true
+          sed -i "s/SERVER_PLACEHOLDER/$SELF_IP/" config/deploy.yml
+          grep -q "$SELF_IP" config/deploy.yml || { echo "FAIL: server IP not wired"; exit 1; }
           timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" 2>&1 | tail -n 15
 
       - name: SWR login
