@@ -76,7 +76,7 @@ jobs:
           chmod 600 .kamal/secrets
           timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" 2>&1 | tail -n 15
 
-      - name: kamal deploy v1 + verify + v2 + rollback
+      - name: kamal deploy healthy, broken, rollback
         working-directory: kamal/cfos-spike
         env:
           SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
@@ -90,30 +90,22 @@ jobs:
             echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
-          D1="sha256:f4795016f273720927865024c14e28523b145583b02317c1bd6317277eadc799"
-          D2="sha256:cfe24a21570336277e462c8308681eabf9c3ff3125983cbc4c048c0ddce61286"
-          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$D1|" Dockerfile.cfos-spike
-          timeout 1500 kamal deploy 2>&1 | tail -n 8
-          echo "== v1 serving =="
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && break || sleep 20
-          done
-          echo "v1 http=$code"; test "$code" = "200"
-          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$D2|" Dockerfile.cfos-spike
-          timeout 1500 kamal deploy 2>&1 | tail -n 5
-          echo "== v2 serving =="
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && break || sleep 20
-          done
-          echo "v2 http=$code"; test "$code" = "200"
-          echo "== rollback =="
-          timeout 600 kamal rollback 2>&1 | tail -n 8
-          kamal app containers 2>&1 | tail -n 8
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && break || sleep 20
-          done
-          echo "post-rollback http=$code"; test "$code" = "200"
-
-      - name: leave tailnet
-        if: always()
-        run: sudo tailscale logout || true; sudo pkill -f "tailscaled.*ts2.sock" || true
+          GOOD="sha256:cfe24a21570336277e462c8308681eabf9c3ff3125983cbc4c048c0ddce61286"
+          BAD="sha256:f4795016f273720927865024c14e28523b145583b02317c1bd6317277eadc799"
+          check200() {
+            for i in $(seq 1 20); do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && return 0 || sleep 15
+            done
+            return 1
+          }
+          echo "== deploy GOOD, expect success =="
+          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$GOOD|" Dockerfile.cfos-spike
+          timeout 1200 kamal deploy 2>&1 | tail -n 5
+          check200 && echo "GOOD serving"
+          echo "== deploy BAD (broken forwarder), expect FAILURE =="
+          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$BAD|" Dockerfile.cfos-spike
+          if timeout 1200 kamal deploy 2>&1 | tail -n 5; then echo "UNEXPECTED: broken deploy passed"; exit 1; fi
+          echo "BAD correctly rejected"
+          echo "== rollback, expect GOOD serving =="
+          timeout 600 kamal rollback 2>&1 | tail -n 5
+          check200 && echo "ROLLBACK serving"

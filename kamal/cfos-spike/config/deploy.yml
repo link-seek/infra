@@ -38,4 +38,4 @@ proxy:
     timeout: 10
 
 # run-local 冷启动数分钟，deploy 超时按 15 分钟给。
-deploy_timeout: 900
+deploy_timeout: 420
