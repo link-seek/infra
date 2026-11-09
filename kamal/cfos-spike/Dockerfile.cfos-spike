@@ -1,0 +1,3 @@
+# 预构建转接：digest pin 在此（Kamal 只会构建，此行即 pin；tag 语义见 spike 报告）。
+ARG CFOS_DIGEST=sha256:f4795016f273720927865024c14e28523b145583b02317c1bd6317277eadc799
+FROM swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo@${CFOS_DIGEST}

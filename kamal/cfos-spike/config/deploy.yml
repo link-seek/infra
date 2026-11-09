@@ -20,3 +20,20 @@ registry:
 builder:
   arch:
     - amd64
+  dockerfile: kamal/cfos-spike/Dockerfile.cfos-spike
+  dockerfile: Dockerfile.cfos-spike
+
+# run-local 要 PIPELINE_MANAGED；远端 binding 要 CF token（secret 经 .kamal/secrets）。
+env:
+  clear:
+    PIPELINE_MANAGED: "true"
+  secret:
+    - CLOUDFLARE_API_TOKEN
+
+# run-local 冷启动数分钟，健康检查按 8788 转发口打。
+healthcheck:
+  path: /
+  port: 8788
+  interval: 15
+  timeout: 10
+  attempts: 40
