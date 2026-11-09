@@ -44,6 +44,12 @@ jobs:
           sudo iptables -S 2>/dev/null | grep -i -m8 "tailscale\|dport 22" || echo "no iptables tailscale rules"
           sudo ss -tlnp 2>/dev/null | grep -E ":22 " | head -n 4 || echo "nothing on :22 via ss"
           tailscale version | head -n 2
+          echo "--- prefs RunSSH ---"
+          sudo tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('RunSSH:', d.get('RunSSH'), '| WantRunning:', d.get('WantRunning'))" || echo "prefs unreadable"
+          echo "--- self dump ---"
+          tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); s=d.get('Self',{}); print({k:s.get(k) for k in ['HostName','Tags','TailscaleIPs']})"
+          echo "--- tailscaled cmdline ---"
+          ps aux | grep -m1 "[t]ailscaled" | head -c 300; echo
           sudo ss -tlnp 2>/dev/null | grep -E ":22 " | head -n 3 || true
 
       - name: baseline plain ssh over tailnet
