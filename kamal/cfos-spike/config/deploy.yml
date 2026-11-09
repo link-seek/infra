@@ -10,6 +10,10 @@ servers:
 ssh:
   proxy_command: "tailscale nc %h %p"
 
+# spike：一次只起一个 SSH，并发 nc 曾批量暴毙（待定因），先串行求稳。
+sshkit:
+  max_concurrent_starts: 1
+
 registry:
   server: swr.cn-north-9.myhuaweicloud.com
   username:
