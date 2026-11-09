@@ -1,3 +1,4 @@
-# spike 力学验证专用：tiny 图片段， desktop-app 负重另测（preflight 已覆盖）。
-# 回滚靠 Kamal 版本切换证明，不靠 digest 差异。
-FROM nginx:alpine
+# spike 力学验证专用：runner 自带 ubuntu 缓存，不碰 Hub 限流；python http 供健康检查。
+FROM ubuntu:24.04
+EXPOSE 80
+CMD ["python3", "-m", "http.server", "80"]
