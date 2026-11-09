@@ -45,6 +45,9 @@ jobs:
           timeout 120 sudo tailscale --socket=/tmp/ts2.sock up --authkey="$KEY_B" --hostname="kspike-srv-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
           SRV_IP="$(sudo tailscale --socket=/tmp/ts2.sock ip -4)"
           echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
+          # NAT 保活：长本地阶段（docker 构建）零 ssh 流量，Azure NAT 映射过期后直连掉线、
+          # DERP 又被 runner 出口墙掉（502）。后台每 20s ping 一次保活。
+          (while true; do sudo tailscale ping --timeout=5s --c=1 "$SRV_IP" >/dev/null 2>&1 || true; sleep 20; done & echo $! > /tmp/keepalive.pid)
           sudo tailscale --socket=/tmp/ts2.sock status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("srv tags:", d["Self"].get("Tags"))'
 
       - name: baseline plain ssh to server daemon
