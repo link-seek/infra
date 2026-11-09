@@ -100,15 +100,15 @@ jobs:
             return 1
           }
           echo "== deploy v1 =="
-          timeout 600 kamal deploy > /tmp/deploy-v1.log 2>&1; echo "deploy-v1 exit=$?"
+          timeout 600 kamal deploy > /tmp/deploy-v1.log 2>&1 || echo "deploy-v1 exit=$?"
           tail -n 6 /tmp/deploy-v1.log
           check200 && echo V1-SERVING
           echo "== deploy v2 (same bytes, new version) =="
-          timeout 600 kamal deploy > /tmp/deploy-v2.log 2>&1; echo "deploy-v2 exit=$?"
+          timeout 600 kamal deploy > /tmp/deploy-v2.log 2>&1 || echo "deploy-v2 exit=$?"
           tail -n 6 /tmp/deploy-v2.log
           check200 && echo V2-SERVING
           echo "== rollback =="
-          timeout 300 kamal rollback > /tmp/rollback.log 2>&1; echo "rollback exit=$?"
+          timeout 300 kamal rollback > /tmp/rollback.log 2>&1 || echo "rollback exit=$?"
           tail -n 6 /tmp/rollback.log
           kamal app containers > /tmp/containers.log 2>&1 || true; tail -n 6 /tmp/containers.log
           check200 && echo ROLLBACK-SERVING
