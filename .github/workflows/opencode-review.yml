@@ -30,7 +30,7 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
         with:
-          model: ${{ vars.OPENCODE_REVIEW_MODEL }} # 引擎ID集中在org变量，一改全仓生效
+          model: ${{ vars.OPENCODE_MODEL }} # 引擎ID集中在org变量，一改全仓生效
           variant: max
           use_github_token: true
           prompt: |
