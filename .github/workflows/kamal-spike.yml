@@ -38,10 +38,15 @@ jobs:
           SELF_IP="$(tailscale ip -4)"
           echo "SELF_IP=$SELF_IP" >> "$GITHUB_ENV"
           tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("self tags:", d["Self"].get("Tags"))'
+          sudo tailscale set --ssh
+          sleep 5
+          sudo ss -tlnp 2>/dev/null | grep -E ":22 " | head -n 3 || true
 
       - name: baseline plain ssh over tailnet
         run: |
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SELF_IP" 'echo PLAIN-SSH-OK; whoami'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SELF_IP" 'echo PLAIN-SSH-OK; whoami' || true
+          echo "--- official client ---"
+          tailscale ssh --timeout=20s root@"$SELF_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
 
       - name: kamal server exec over TSSH
         working-directory: kamal/cfos-spike
