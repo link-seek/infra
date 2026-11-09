@@ -23,40 +23,41 @@ jobs:
       - name: install kamal
         run: gem install kamal -v 2.12.0 --no-document
 
-      - name: join tailnet ephemeral with ssh
+      - name: dual tailscaled (client A + server B)
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
-          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
-            -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":3600}' \
-            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
-          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kamal-spike-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
-          SELF_IP="$(tailscale ip -4)"
-          echo "SELF_IP=$SELF_IP" >> "$GITHUB_ENV"
-          tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("self tags:", d["Self"].get("Tags"))'
-          sudo tailscale set --ssh
-          sleep 5
-          echo "--- tssh diag ---"
-          sudo iptables -S 2>/dev/null | grep -i -m8 "tailscale\|dport 22" || echo "no iptables tailscale rules"
-          sudo ss -tlnp 2>/dev/null | grep -E ":22 " | head -n 4 || echo "nothing on :22 via ss"
-          tailscale version | head -n 2
-          echo "--- prefs RunSSH ---"
-          sudo tailscale debug prefs 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('RunSSH:', d.get('RunSSH'), '| WantRunning:', d.get('WantRunning'))" || echo "prefs unreadable"
-          echo "--- self dump ---"
-          tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); s=d.get('Self',{}); print({k:s.get(k) for k in ['HostName','Tags','TailscaleIPs']})"
-          echo "--- tailscaled cmdline ---"
-          ps aux | grep -m1 "[t]ailscaled" | head -c 300; echo
-          sudo ss -tlnp 2>/dev/null | grep -E ":22 " | head -n 3 || true
+          mint() {
+            curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+              -H 'Content-Type: application/json' \
+              -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":3600}' \
+              https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))"
+          }
+          KEY_A="$(mint)"; KEY_B="$(mint)"
+          [ -n "$KEY_A" ] && [ -n "$KEY_B" ] || { echo "FAIL: mint"; exit 1; }
+          # A: default socket, pure client (for tailscale nc pipes)
+          timeout 120 sudo tailscale up --authkey="$KEY_A" --hostname="kspike-cli-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          # B: second daemon, userspace (no TUN clash), serves TSSH
+          timeout 120 sudo tailscaled --tun=userspace-networking --state=/tmp/ts2.state --socket=/tmp/ts2.sock >/tmp/ts2.log 2>&1 &
+          sleep 3
+          timeout 120 sudo tailscale --socket=/tmp/ts2.sock up --authkey="$KEY_B" --hostname="kspike-srv-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
+          SRV_IP="$(sudo tailscale --socket=/tmp/ts2.sock ip -4)"
+          echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
+          sudo tailscale --socket=/tmp/ts2.sock status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("srv tags:", d["Self"].get("Tags"))'
+
+      - name: baseline plain ssh to server daemon
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SRV_IP" 'echo PLAIN-SSH-OK; whoami' || true
+          echo "--- official client ---"
+          timeout 30 tailscale ssh root@"$SRV_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
 
       - name: baseline plain ssh over tailnet
         run: |
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SELF_IP" 'echo PLAIN-SSH-OK; whoami' || true
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SRV_IP" 'echo PLAIN-SSH-OK; whoami' || true
           echo "--- official client ---"
-          timeout 30 tailscale ssh root@"$SELF_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
+          timeout 30 tailscale ssh root@"$SRV_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
 
       - name: kamal server exec over TSSH
         working-directory: kamal/cfos-spike
@@ -65,8 +66,8 @@ jobs:
           SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
         run: |
           set -euo pipefail
-          sed -i "s/SERVER_PLACEHOLDER/$SELF_IP/" config/deploy.yml
-          grep -q "$SELF_IP" config/deploy.yml || { echo "FAIL: server IP not wired"; exit 1; }
+          sed -i "s/SERVER_PLACEHOLDER/$SRV_IP/" config/deploy.yml
+          grep -q "$SRV_IP" config/deploy.yml || { echo "FAIL: server IP not wired"; exit 1; }
           mkdir -p .kamal
           {
             echo "KAMAL_REGISTRY_USER=$SWR_USER"
@@ -84,4 +85,4 @@ jobs:
 
       - name: leave tailnet
         if: always()
-        run: sudo tailscale logout || true
+        run: sudo tailscale logout || true; sudo pkill -f "tailscaled.*ts2.sock" || true
