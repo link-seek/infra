@@ -21,7 +21,6 @@ builder:
   arch:
     - amd64
   dockerfile: kamal/cfos-spike/Dockerfile.cfos-spike
-  dockerfile: Dockerfile.cfos-spike
 
 # run-local 要 PIPELINE_MANAGED；远端 binding 要 CF token（secret 经 .kamal/secrets）。
 env:
@@ -30,10 +29,13 @@ env:
   secret:
     - CLOUDFLARE_API_TOKEN
 
-# run-local 冷启动数分钟，健康检查按 8788 转发口打。
-healthcheck:
-  path: /
-  port: 8788
-  interval: 15
-  timeout: 10
-  attempts: 40
+# kamal-proxy：80 对外，转发到 8788 转发口；每 5s 打 /，deploy_timeout 覆盖冷启动。
+proxy:
+  app_port: 8788
+  healthcheck:
+    path: /
+    interval: 5
+    timeout: 10
+
+# run-local 冷启动数分钟，deploy 超时按 15 分钟给。
+deploy_timeout: 900
