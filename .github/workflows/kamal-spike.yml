@@ -104,11 +104,13 @@ jobs:
         env:
           SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
           SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
         run: |
           set -euo pipefail
           {
             echo "KAMAL_REGISTRY_USER=$SWR_USER"
             echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+            echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
           check200() {
