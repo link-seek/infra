@@ -4,3 +4,10 @@ service: cfos-spike
 image: cfos-spike
 servers:
   - SERVER_PLACEHOLDER
+
+registry:
+  server: swr.cn-north-9.myhuaweicloud.com
+  username:
+    - KAMAL_REGISTRY_USER
+  password:
+    - KAMAL_REGISTRY_PASSWORD
