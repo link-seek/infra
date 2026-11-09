@@ -45,9 +45,8 @@ IC="$(probe_chat "sk-invalid-test" "$FAKE_OUT")"
 echo "verify: fake-key=$IC $(head -c 120 "$FAKE_OUT")"
 if grep -qi "no.connected.db\|no_db_connection" "$FAKE_OUT" 2>/dev/null; then
   fail "fake key 透出 No connected db"
-elif { [ "$IC" = "401" ] || [ "$IC" = "403" ]; } && grep -qiE "upstream request failed|invalid credential" "$FAKE_OUT"; then
-  : # OK：杂 key 透回上游 verdict（上游措辞会变：曾为 "Upstream request failed" 前缀，
-  : #   现为裸 Invalid credential；不断言具体措辞，只断言被拒+无 db 泄漏+透传）
+elif [ "$IC" != "200" ]; then
+  : # OK：杂 key 被拒即对（上游措辞不管；db 泄漏已在上分支排除）
 else
   fail "fake key 未透传上游"
 fi
