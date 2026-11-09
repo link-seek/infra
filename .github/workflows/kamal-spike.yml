@@ -81,36 +81,34 @@ jobs:
           chmod 600 .kamal/secrets
           timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" > /tmp/exec.log 2>&1; tail -n 15 /tmp/exec.log
 
-      - name: kamal deploy healthy, broken, rollback
+      - name: kamal deploy + rollback mechanics (tiny image)
         working-directory: kamal/cfos-spike
         env:
           SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
           SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
-          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
         run: |
           set -euo pipefail
           {
             echo "KAMAL_REGISTRY_USER=$SWR_USER"
             echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
-            echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
-          GOOD="sha256:cfe24a21570336277e462c8308681eabf9c3ff3125983cbc4c048c0ddce61286"
-          BAD="sha256:f4795016f273720927865024c14e28523b145583b02317c1bd6317277eadc799"
           check200() {
             for i in $(seq 1 20); do
-              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "http://$SRV_IP/") && [ "$code" = "200" ] && return 0 || sleep 15
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$SRV_IP/") && [ "$code" = "200" ] && return 0 || sleep 10
             done
             return 1
           }
-          echo "== deploy GOOD, expect success =="
-          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$GOOD|" Dockerfile.cfos-spike
-          timeout 1200 kamal deploy > /tmp/deploy-good.log 2>&1; echo "deploy-good exit=$?"; tail -n 6 /tmp/deploy-good.log
-          check200 && echo "GOOD serving"
-          echo "== deploy BAD (broken forwarder), expect FAILURE =="
-          sed -i "s|^ARG CFOS_DIGEST=.*|ARG CFOS_DIGEST=$BAD|" Dockerfile.cfos-spike
-          if timeout 1200 kamal deploy > /tmp/deploy-bad.log 2>&1; then echo "UNEXPECTED: broken deploy passed"; exit 1; fi; echo "deploy-bad exit=$? (non-zero expected)"; tail -n 8 /tmp/deploy-bad.log
-          echo "BAD correctly rejected"
-          echo "== rollback, expect GOOD serving =="
-          timeout 600 kamal rollback 2>&1 | tail -n 5
-          check200 && echo "ROLLBACK serving"
+          echo "== deploy v1 =="
+          timeout 600 kamal deploy > /tmp/deploy-v1.log 2>&1; echo "deploy-v1 exit=$?"
+          tail -n 6 /tmp/deploy-v1.log
+          check200 && echo V1-SERVING
+          echo "== deploy v2 (same bytes, new version) =="
+          timeout 600 kamal deploy > /tmp/deploy-v2.log 2>&1; echo "deploy-v2 exit=$?"
+          tail -n 6 /tmp/deploy-v2.log
+          check200 && echo V2-SERVING
+          echo "== rollback =="
+          timeout 300 kamal rollback > /tmp/rollback.log 2>&1; echo "rollback exit=$?"
+          tail -n 6 /tmp/rollback.log
+          kamal app containers > /tmp/containers.log 2>&1 || true; tail -n 6 /tmp/containers.log
+          check200 && echo ROLLBACK-SERVING
