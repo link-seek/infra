@@ -85,6 +85,7 @@ on:
           - stacks/litellm-gateway
           - stacks/opencode/hw21
           - stacks/opencode/hw41
+          - stacks/cloudflare-os-demo/hw41
       action:
         description: "up 部署 / down 下线 / preflight 只到探针（img 场景）"
         required: false
