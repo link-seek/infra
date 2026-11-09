@@ -7,7 +7,7 @@ services:
     # 2026-10-20：da89b6（custom_auth 官方键名修 + internal_user 小写枚举修 + 空 key 放行对齐上游；
     # 2026-10-20：3c7cbc3（空 key 放行重 bake：行为门 nokey/newmaster/validkey/randkey 全 200 已验）。
     # 行为门已验：认证矩阵/真透传/等价性/master 轮换）。来源：link-seek/docker-images bake-gateway.yml。
-    image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:d32f463ec31e6035463cfd36aefa6c6e0287282a4c59aa1556f30fc2e64fa288
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:29d2b796e48eb7ea5222ef51bc19dc72eb4361323d6a15b4809ee09c752dc767
     pull_policy: always
     container_name: litellm-guard
     # PID 1 僵尸回收：与 opencode-prod 同一解法（旧栈 380+ 僵尸教训）。
