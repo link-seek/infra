@@ -7,6 +7,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: join tailnet as TSSH target
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":2700}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kspike-tgt-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
+          tailscale ip -4 > /tmp/target-ip.txt
+          cat /tmp/target-ip.txt
+      - name: publish target ip
+        uses: actions/upload-artifact@v4
+        with:
+          name: kspike-target
+          path: /tmp/target-ip.txt
+      - name: hold target alive
+        run: sleep 2400
+
   spike:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -23,42 +51,32 @@ jobs:
       - name: install kamal
         run: gem install kamal -v 2.12.0 --no-document
 
-      - name: dual tailscaled (client A + server B)
+      - name: join tailnet as control plane (pure client)
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
-          mint() {
-            curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
-              -H 'Content-Type: application/json' \
-              -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":3600}' \
-              https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))"
-          }
-          KEY_A="$(mint)"; KEY_B="$(mint)"
-          [ -n "$KEY_A" ] && [ -n "$KEY_B" ] || { echo "FAIL: mint"; exit 1; }
-          # A: default socket, pure client (for tailscale nc pipes)
-          timeout 120 sudo tailscale up --authkey="$KEY_A" --hostname="kspike-cli-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          # B: second daemon, userspace (no TUN clash), serves TSSH
-          timeout 120 sudo tailscaled --tun=userspace-networking --state=/tmp/ts2.state --socket=/tmp/ts2.sock >/tmp/ts2.log 2>&1 &
-          sleep 3
-          timeout 120 sudo tailscale --socket=/tmp/ts2.sock up --authkey="$KEY_B" --hostname="kspike-srv-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
-          SRV_IP="$(sudo tailscale --socket=/tmp/ts2.sock ip -4)"
-          echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
-          # 资源采样：怀疑 OOM/磁盘挤死 tailscaled，每 15s 记 free/df/dmesg OOM 痕迹
-          (while true; do echo "== $(date -u +%FT%TZ) =="; free -m | head -n 2; df -h / /tmp | tail -n 2; dmesg 2>/dev/null | grep -i -m3 "oom\|killed process" || true; echo; sleep 15; done > /tmp/resmon.log 2>&1 & echo $! > /tmp/resmon.pid)
-          # 数据面保活：ICMP ping 保不住 UDP 映射。改真 ssh 短命令每 45s 一次，
-          # 走完整数据面（直连/DERP+认证），长本地阶段不断流。
-          (while true; do timeout 30 tailscale ssh root@"$SRV_IP" 'echo keepalive-ok' >/dev/null 2>&1 || true; sleep 45; done & echo $! > /tmp/keepalive.pid)
-          sudo tailscale --socket=/tmp/ts2.sock status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("srv tags:", d["Self"].get("Tags"))'
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":2700}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kspike-ctl-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("control tags:", d["Self"].get("Tags"))'
 
-      - name: baseline plain ssh to server daemon
+      - name: wait for target ip artifact
         run: |
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SRV_IP" 'echo PLAIN-SSH-OK; whoami' || true
-          echo "--- official client ---"
-          timeout 30 tailscale ssh root@"$SRV_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
+          for i in $(seq 1 30); do
+            if gh run download "${{ github.run_id }}" -R link-seek/infra -n kspike-target -D /tmp/kspike 2>/dev/null && [ -f /tmp/kspike/target-ip.txt ]; then break; fi
+            sleep 20
+          done
+          SRV_IP="$(cat /tmp/kspike/target-ip.txt 2>/dev/null | tr -d '\r\n ')"
+          [ -n "$SRV_IP" ] || { echo "FAIL: no target ip"; exit 1; }
+          echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
+          echo "target=$SRV_IP"
 
-      - name: baseline plain ssh over tailnet
+      - name: baseline plain ssh to target
         run: |
           ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SRV_IP" 'echo PLAIN-SSH-OK; whoami' || true
           echo "--- official client ---"
@@ -112,3 +130,7 @@ jobs:
           tail -n 6 /tmp/rollback.log
           kamal app containers > /tmp/containers.log 2>&1 || true; tail -n 6 /tmp/containers.log
           check200 && echo ROLLBACK-SERVING
+
+      - name: cancel run (reap target job)
+        if: always()
+        run: gh run cancel "${{ github.run_id }}" -R link-seek/infra || true
