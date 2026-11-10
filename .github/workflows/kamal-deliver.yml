@@ -135,7 +135,7 @@ jobs:
               # CF/AI 现签：调 scripts/ 下 kamal 专用 minter（由 deliver-remote-core.sh 原样移植，旧线不动）。
               cfchild:*|cfai:*)
                 : "${CF_TOKEN:?FAIL: cf mint needs CF_TOKEN}"
-                script="scripts/cf-mint-child.py"; [ "$val" = "cfai:" ] && script="scripts/cf-mint-ai.py"
+                script="$GITHUB_WORKSPACE/scripts/cf-mint-child.py"; [ "$val" = "cfai:" ] && script="$GITHUB_WORKSPACE/scripts/cf-mint-ai.py"
                 CHILD="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="47ce24ced58f17c9fb15351adcbe67d4" python3 "$script")"
                 CHILD="$(printf '%s' "$CHILD" | grep '^CF_MINTED_VALUE=' | cut -d= -f2-)"
                 [ -n "$CHILD" ] || { echo "FAIL: CF mint empty ($key)"; exit 1; }
