@@ -1,0 +1,144 @@
+name: kamal-demo
+
+# Phase 2 第一刀（#277）：cfos-demo 真实镜像打 ephemeral 靶机，新旧对照。
+# HW41 的 80 不动，第一刀只打 ephemeral，零生产触碰。
+# 成功标准：V1-SERVING（200）+ ROLLBACK-SERVING（200）+ 密钥缺失 fail-closed。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: join tailnet as TSSH target
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":7200}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kdemo-tgt-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
+          tailscale ip -4 > /tmp/target-ip.txt
+          cat /tmp/target-ip.txt
+      - name: publish target ip
+        uses: actions/upload-artifact@v4
+        with:
+          name: kdemo-target
+          path: /tmp/target-ip.txt
+      - name: hold target alive
+        run: sleep 5400
+
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+
+      - name: install kamal
+        run: gem install kamal -v 2.12.0 --no-document
+
+      - name: join tailnet as control plane (pure client)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":7200}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kdemo-ctl-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("control tags:", d["Self"].get("Tags"))'
+
+      - name: wait for target ip artifact
+        run: |
+          for i in $(seq 1 30); do
+            if gh run download "${{ github.run_id }}" -R link-seek/infra -n kdemo-target -D /tmp/kdemo 2>/dev/null && [ -f /tmp/kdemo/target-ip.txt ]; then break; fi
+            sleep 20
+          done
+          SRV_IP="$(cat /tmp/kdemo/target-ip.txt 2>/dev/null | tr -d '\r\n ')"
+          [ -n "$SRV_IP" ] || { echo "FAIL: no target ip"; exit 1; }
+          echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
+          echo "target=$SRV_IP"
+
+      - name: fail-closed on secrets (unknown #4 部分回答)
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+        run: |
+          [ -n "${SWR_USER:-}" ] && [ -n "${SWR_PASS:-}" ] && [ -n "${CF_TOKEN:-}" ] \
+            || { echo "FAIL: secrets missing, refusing kamal (fail-closed)"; exit 1; }
+          echo "secrets-present-ok"
+
+      - name: kamal server exec over TSSH
+        working-directory: kamal/cfos-demo
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          set -euo pipefail
+          sed -i "s/SERVER_PLACEHOLDER/$SRV_IP/" config/deploy.yml
+          grep -q "$SRV_IP" config/deploy.yml || { echo "FAIL: server IP not wired"; exit 1; }
+          grep -q "sha256:" Dockerfile.cfos-demo || { echo "FAIL: digest pin missing"; exit 1; }
+          mkdir -p .kamal
+          {
+            echo "KAMAL_REGISTRY_USER=$SWR_USER"
+            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+          } > .kamal/secrets
+          chmod 600 .kamal/secrets
+          timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" > /tmp/exec.log 2>&1; tail -n 15 /tmp/exec.log
+
+      - name: kamal deploy + rollback (real image)
+        working-directory: kamal/cfos-demo
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            echo "KAMAL_REGISTRY_USER=$SWR_USER"
+            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+            echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
+          } > .kamal/secrets
+          chmod 600 .kamal/secrets
+          check200() {
+            for i in $(seq 1 60); do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$SRV_IP/") && [ "$code" = "200" ] && return 0 || sleep 15
+            done
+            return 1
+          }
+          echo "== deploy v1 (real image, digest relay) =="
+          timeout 1500 kamal deploy > /tmp/deploy-v1.log 2>&1 || echo "deploy-v1 exit=$?"
+          tail -n 6 /tmp/deploy-v1.log
+          check200 && echo V1-SERVING
+          echo "== deploy v2 (same bytes, new version) =="
+          timeout 1500 kamal deploy > /tmp/deploy-v2.log 2>&1 || echo "deploy-v2 exit=$?"
+          tail -n 6 /tmp/deploy-v2.log
+          check200 && echo V2-SERVING
+          echo "== rollback =="
+          timeout 600 kamal rollback > /tmp/rollback.log 2>&1 || echo "rollback exit=$?"
+          tail -n 6 /tmp/rollback.log
+          kamal app containers > /tmp/containers.log 2>&1 || true; tail -n 6 /tmp/containers.log
+          check200 && echo ROLLBACK-SERVING
+
+      - name: cancel run (reap target job)
+        if: always()
+        run: gh run cancel "${{ github.run_id }}" -R link-seek/infra || true
