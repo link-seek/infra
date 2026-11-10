@@ -79,19 +79,17 @@ jobs:
 
       - name: fail-closed on secrets (unknown #4 部分回答)
         env:
-          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
-          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          GHCR_PASS: ${{ secrets.AGENT_GITHUB_TOKEN }}
           CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
         run: |
-          [ -n "${SWR_USER:-}" ] && [ -n "${SWR_PASS:-}" ] && [ -n "${CF_TOKEN:-}" ] \
+          [ -n "${GHCR_PASS:-}" ] && [ -n "${CF_TOKEN:-}" ] \
             || { echo "FAIL: secrets missing, refusing kamal (fail-closed)"; exit 1; }
           echo "secrets-present-ok"
 
       - name: kamal server exec over TSSH
         working-directory: kamal/cfos-demo
         env:
-          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
-          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          GHCR_PASS: ${{ secrets.AGENT_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           sed -i "s/SERVER_PLACEHOLDER/$SRV_IP/" config/deploy.yml
@@ -99,8 +97,8 @@ jobs:
           grep -q "sha256:" Dockerfile.cfos-demo || { echo "FAIL: digest pin missing"; exit 1; }
           mkdir -p .kamal
           {
-            echo "KAMAL_REGISTRY_USER=$SWR_USER"
-            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+            echo "KAMAL_REGISTRY_USER=github-actions"
+            echo "KAMAL_REGISTRY_PASSWORD=$GHCR_PASS"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
           timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" > /tmp/exec.log 2>&1; tail -n 15 /tmp/exec.log
@@ -108,14 +106,13 @@ jobs:
       - name: kamal deploy + rollback (real image)
         working-directory: kamal/cfos-demo
         env:
-          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
-          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          GHCR_PASS: ${{ secrets.AGENT_GITHUB_TOKEN }}
           CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
         run: |
           set -euo pipefail
           {
-            echo "KAMAL_REGISTRY_USER=$SWR_USER"
-            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+            echo "KAMAL_REGISTRY_USER=github-actions"
+            echo "KAMAL_REGISTRY_PASSWORD=$GHCR_PASS"
             echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
