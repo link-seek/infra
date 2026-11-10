@@ -96,14 +96,12 @@ jobs:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
           GHCR_PASS: ${{ secrets.AGENT_GITHUB_TOKEN }}
           CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
-          S_ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
-          S_ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
-          S_ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
-          S_ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
-          S_ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
-          S_ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
-          S_ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
-          S_ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
+          S_ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
+          S_ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          S_ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
+          S_ENV_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
+          S_ENV_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
+          S_ENV_SMTP_PASS: ${{ secrets.PROD_SMTP_PASS }}
         run: |
           set -euo pipefail
           [ -f secrets.map ] || { echo "FAIL: secrets.map missing in ${{ inputs.deploy_dir }}"; exit 1; }
@@ -183,4 +181,6 @@ jobs:
 
       - name: cancel run (reap target job)
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
         run: gh run cancel "${{ github.run_id }}" -R link-seek/infra || true
