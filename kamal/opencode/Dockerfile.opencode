@@ -1,7 +1,7 @@
 # Kamal 转接层：digest pin 即行为版本（与 cfos-demo 线同语义）。
 # pin = HW41 线上现跑 tools digest（已知好）；换版=改 ARG 发 PR。
-# GHCR（runner 快车道）；HW41 落地时 Dockerfile+deploy.yml registry 一起切回 SWR。
+# trial 仓走 SWR（AGENT token 对 opencode-tools 包无 GHCR push 权）；提速以后再议。
 ARG TOOLS_DIGEST=sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
-FROM ghcr.io/link-seek/opencode-tools@${TOOLS_DIGEST}
+FROM swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@${TOOLS_DIGEST}
 ARG TOOLS_DIGEST
 LABEL tools.digest=$TOOLS_DIGEST
