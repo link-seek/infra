@@ -95,6 +95,8 @@ jobs:
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
           GHCR_PASS: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
           CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
           S_ENV_GH_TOKEN: ${{ secrets.PROD_GH_TOKEN }}
           S_ENV_LITELLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
@@ -107,13 +109,21 @@ jobs:
           [ -f secrets.map ] || { echo "FAIL: secrets.map missing in ${{ inputs.deploy_dir }}"; exit 1; }
           grep -q "sha256:" Dockerfile.* 2>/dev/null || { echo "FAIL: digest pin missing in Dockerfile"; exit 1; }
           mkdir -p .kamal
-          {
-            echo "KAMAL_REGISTRY_USER=github-actions"
-            echo "KAMAL_REGISTRY_PASSWORD=$GHCR_PASS"
-          } > .kamal/secrets
-          [ -n "${GHCR_PASS:-}" ] || { echo "FAIL: GHCR pass missing (fail-closed)"; exit 1; }
+          : > .kamal/secrets
+          REG_MODE=ghcr
+          grep -q '^registry:swr$' secrets.map && REG_MODE=swr || true
+          echo "registry-mode=$REG_MODE"
+          if [ "$REG_MODE" = "swr" ]; then
+            [ -n "${SWR_USER:-}" ] && [ -n "${SWR_PASS:-}" ] || { echo "FAIL: SWR creds missing (fail-closed)"; exit 1; }
+            echo "KAMAL_REGISTRY_USER=$SWR_USER" >> .kamal/secrets
+            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS" >> .kamal/secrets
+          else
+            [ -n "${GHCR_PASS:-}" ] || { echo "FAIL: GHCR pass missing (fail-closed)"; exit 1; }
+            echo "KAMAL_REGISTRY_USER=github-actions" >> .kamal/secrets
+            echo "KAMAL_REGISTRY_PASSWORD=$GHCR_PASS" >> .kamal/secrets
+          fi
           while IFS= read -r line; do
-            case "$line" in ''|\#*) continue;; esac
+            case "$line" in ''|\#*|registry:*) continue;; esac
             key="${line%%=*}"; val="${line#*=}"
             case "$val" in
               secret:*)

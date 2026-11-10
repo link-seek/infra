@@ -4,7 +4,7 @@
 # canary 异端口、goss 全量探针。trial 只验 serving（200 登录页）。
 # HW41 的 80 不动（nginx-proxy），本线只打 ephemeral。
 service: opencode
-image: link-seek/opencode-tools
+image: linkseed/opencode-trial
 
 servers:
   - SERVER_PLACEHOLDER
@@ -17,7 +17,7 @@ sshkit:
   max_concurrent_starts: 1
 
 registry:
-  server: ghcr.io
+  server: swr.cn-north-9.myhuaweicloud.com
   username:
     - KAMAL_REGISTRY_USER
   password:
