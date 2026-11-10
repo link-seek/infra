@@ -1,0 +1,48 @@
+# Kamal Phase 2 第一刀（#277）：cfos-demo 真实镜像打 ephemeral 靶机，新旧对照。
+# HW41 的 80 不动（nginx-proxy），第一刀只打 ephemeral，零生产触碰。
+# digest pin 语义：Kamal 按 tag 做版本，pin 活在 Dockerfile.cfos-demo 的 FROM；
+# deploy.manifest → 本文件的翻译关系：REMOTE_DIR/ENV_CONF/canary 三件套/goss 探针
+# 仍在自研线，Kamal 侧只管 digest+部署+健康+回滚（drain/canary 异端口/fail-closed 全量翻译待转正）。
+service: cfos-demo
+image: linkseed/cfos-demo
+
+servers:
+  - SERVER_PLACEHOLDER
+
+# Tailscale SSH 经 tailscaled 管道，不需要 key（spike v1 结论，0.04s）。
+ssh:
+  proxy_command: "tailscale nc %h %p"
+
+# spike：一次只起一个 SSH，并发 nc 曾批量暴毙，先串行求稳。
+sshkit:
+  max_concurrent_starts: 1
+
+registry:
+  server: swr.cn-north-9.myhuaweicloud.com
+  username:
+    - KAMAL_REGISTRY_USER
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch:
+    - amd64
+  dockerfile: Dockerfile.cfos-demo
+
+# run-local 要 PIPELINE_MANAGED；远端 binding 要 CF token（secret 经 .kamal/secrets）。
+env:
+  clear:
+    PIPELINE_MANAGED: "true"
+  secret:
+    - CLOUDFLARE_API_TOKEN
+
+# 真实镜像：容器内 8788 = node 转发口（forward.cjs），proxy 打 / 做健康检查。
+proxy:
+  app_port: 8788
+  healthcheck:
+    path: /
+    interval: 5
+    timeout: 10
+
+# run-local 冷启动 3～8 分钟（与 goss GOSS_RETRY_TIMEOUT=600s 对齐，proxy 侧再放宽）。
+deploy_timeout: 900
