@@ -1,0 +1,62 @@
+# Kamal opencode 试用（#277 通用骨架首个消费者）：ephemeral trial，非生产。
+# 翻译自 stacks/opencode/hw41/{deploy.manifest,env-sources.conf,compose.yml}。
+# 有意未覆盖（转正补）：browser accessory（chrome-cjk）、gateway drain 映射、
+# canary 异端口、goss 全量探针。trial 只验 serving（200 登录页）。
+# HW41 的 80 不动（nginx-proxy），本线只打 ephemeral。
+service: opencode
+image: link-seek/opencode-tools
+
+servers:
+  - SERVER_PLACEHOLDER
+
+# Tailscale SSH 经 tailscaled 管道，不需要 key（spike v1 结论）。
+ssh:
+  proxy_command: "tailscale nc %h %p"
+
+sshkit:
+  max_concurrent_starts: 1
+
+registry:
+  server: ghcr.io
+  username:
+    - KAMAL_REGISTRY_USER
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch:
+    - amd64
+  dockerfile: Dockerfile.opencode
+
+# PIPELINE_MANAGED 防手滑；TS_HOSTNAME 试用身份（与 hw41 prod 错开）；
+# 其余 literal 与 env-sources.conf 同值；secret 经 secrets.map 现场 render。
+env:
+  clear:
+    PIPELINE_MANAGED: "true"
+    TS_HOSTNAME: "opencode-trial"
+    LITELLM_BASE_URL: "http://100.91.222.51:4000"
+    SSH_TARGETS: "mesh-hw-21 mesh-hw-41"
+    SMTP_HOST: "smtp.163.com"
+    SMTP_PORT: "465"
+    SMTP_USER: "122306789@163.com"
+    SMTP_FROM: "122306789@163.com"
+  secret:
+    - LITELLM_API_KEY
+    - GH_TOKEN
+    - OPENCODE_SERVER_PASSWORD
+    - CLOUDFLARE_API_TOKEN
+    - CF_AI_TOKEN
+    - HCLOUD_AK
+    - HCLOUD_SK
+    - TS_JOIN_KEY
+    - SMTP_PASS
+
+# opencode-prod  listen 4097（compose serve --port 4097）；健康打 /（登录页 200）。
+proxy:
+  app_port: 4097
+  healthcheck:
+    path: /
+    interval: 5
+    timeout: 10
+
+deploy_timeout: 900
