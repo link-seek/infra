@@ -33,6 +33,7 @@ builder:
 env:
   clear:
     PIPELINE_MANAGED: "true"
+    TS_HOSTNAME: "cfos-demo-trial"
   secret:
     - CLOUDFLARE_API_TOKEN
 

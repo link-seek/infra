@@ -1,0 +1,186 @@
+name: kamal-deliver
+
+# Kamal 通用配送骨架（对标 deliver-stack）：每栈只交 kamal/<stack>/{Dockerfile.*, config/deploy.yml, secrets.map}。
+# secrets.map 声明映射（无真值），本 workflow 按旧线 S_ENV_* 语义现场 render 进 .kamal/secrets。
+# 旧线（deliver-stack/canary/各栈）一行不动；同栈同时间只认一个引擎（切换=显式 cutover）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_dir:
+        description: "kamal/<stack> 目录（如 kamal/cfos-demo）"
+        required: false
+        default: "kamal/cfos-demo"
+      artifact:
+        description: "target IP artifact 名（多跑并行防撞）"
+        required: false
+        default: "kdeliver-target"
+      host_prefix:
+        description: "tailnet hostname 前缀（如 kdemo）"
+        required: false
+        default: "kdeliver"
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: join tailnet as TSSH target
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":7200}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="${{ inputs.host_prefix }}-tgt-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
+          tailscale ip -4 > /tmp/target-ip.txt
+          cat /tmp/target-ip.txt
+      - name: publish target ip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: /tmp/target-ip.txt
+      - name: hold target alive
+        run: sleep 5400
+
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+
+      - name: install kamal
+        run: gem install kamal -v 2.12.0 --no-document
+
+      - name: join tailnet as control plane (pure client)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":7200}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="${{ inputs.host_prefix }}-ctl-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("control tags:", d["Self"].get("Tags"))'
+
+      - name: wait for target ip artifact
+        run: |
+          for i in $(seq 1 30); do
+            if gh run download "${{ github.run_id }}" -R link-seek/infra -n "${{ inputs.artifact }}" -D /tmp/kdeliver 2>/dev/null && [ -f /tmp/kdeliver/target-ip.txt ]; then break; fi
+            sleep 20
+          done
+          SRV_IP="$(cat /tmp/kdeliver/target-ip.txt 2>/dev/null | tr -d '\r\n ')"
+          [ -n "$SRV_IP" ] || { echo "FAIL: no target ip"; exit 1; }
+          echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
+          echo "target=$SRV_IP"
+
+      - name: render secrets (secrets.map, fail-closed)
+        working-directory: ${{ inputs.deploy_dir }}
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+          GHCR_PASS: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+          S_ENV_GH_TOKEN: ${{ secrets.ENV_GH_TOKEN }}
+          S_ENV_LITELLM_API_KEY: ${{ secrets.ENV_LITELLM_API_KEY }}
+          S_ENV_OPENCODE_SERVER_PASSWORD: ${{ secrets.ENV_OPENCODE_SERVER_PASSWORD }}
+          S_ENV_CLOUDFLARE_API_TOKEN: ${{ secrets.ENV_CLOUDFLARE_API_TOKEN }}
+          S_ENV_CF_AI_TOKEN: ${{ secrets.ENV_CF_AI_TOKEN }}
+          S_ENV_HCLOUD_AK: ${{ secrets.ENV_HCLOUD_AK }}
+          S_ENV_HCLOUD_SK: ${{ secrets.ENV_HCLOUD_SK }}
+          S_ENV_SMTP_PASS: ${{ secrets.ENV_SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          [ -f secrets.map ] || { echo "FAIL: secrets.map missing in ${{ inputs.deploy_dir }}"; exit 1; }
+          grep -q "sha256:" Dockerfile.* 2>/dev/null || { echo "FAIL: digest pin missing in Dockerfile"; exit 1; }
+          mkdir -p .kamal
+          {
+            echo "KAMAL_REGISTRY_USER=github-actions"
+            echo "KAMAL_REGISTRY_PASSWORD=$GHCR_PASS"
+          } > .kamal/secrets
+          [ -n "${GHCR_PASS:-}" ] || { echo "FAIL: GHCR pass missing (fail-closed)"; exit 1; }
+          while IFS= read -r line; do
+            case "$line" in ''|\#*) continue;; esac
+            key="${line%%=*}"; val="${line#*=}"
+            case "$val" in
+              secret:*)
+                ref="${val#secret:}"; eval "v=\${$ref:-}"
+                [ -n "$v" ] || { echo "FAIL: secret $key ($ref) missing (fail-closed)"; exit 1; }
+                echo "$key=$v" >> .kamal/secrets
+                ;;
+              minted:*)
+                tag="${val#minted:}"
+                set +x
+                : "${TS_API_KEY:?FAIL: TS mint needs TS_API_KEY}"
+                BODY="$(printf '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["%s"]}}},"expirySeconds":7776000}' "$tag")"
+                JOIN_KEY="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+                  -H 'Content-Type: application/json' -d "$BODY" \
+                  https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+                [ -n "$JOIN_KEY" ] || { echo "FAIL: TS mint for $key"; exit 1; }
+                echo "$key=$JOIN_KEY" >> .kamal/secrets
+                ;;
+              # CF/AI 现签：调 scripts/ 下 kamal 专用 minter（由 deliver-remote-core.sh 原样移植，旧线不动）。
+              cfchild:*|cfai:*)
+                : "${CF_TOKEN:?FAIL: cf mint needs CF_TOKEN}"
+                script="scripts/cf-mint-child.py"; [ "$val" = "cfai:" ] && script="scripts/cf-mint-ai.py"
+                CHILD="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="47ce24ced58f17c9fb15351adcbe67d4" python3 "$script")"
+                CHILD="$(printf '%s' "$CHILD" | grep '^CF_MINTED_VALUE=' | cut -d= -f2-)"
+                [ -n "$CHILD" ] || { echo "FAIL: CF mint empty ($key)"; exit 1; }
+                echo "$key=$CHILD" >> .kamal/secrets
+                ;;
+              *) echo "FAIL: bad secrets.map line: $line"; exit 1;;
+            esac
+          done < secrets.map
+          chmod 600 .kamal/secrets
+          echo "secrets-render-ok: $(grep -c '' .kamal/secrets) entries (values masked)"
+
+      - name: kamal server exec over TSSH
+        working-directory: ${{ inputs.deploy_dir }}
+        run: |
+          set -euo pipefail
+          sed -i "s/SERVER_PLACEHOLDER/$SRV_IP/" config/deploy.yml
+          grep -q "$SRV_IP" config/deploy.yml || { echo "FAIL: server IP not wired"; exit 1; }
+          timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" > /tmp/exec.log 2>&1; tail -n 15 /tmp/exec.log
+
+      - name: kamal deploy + rollback (real image)
+        working-directory: ${{ inputs.deploy_dir }}
+        run: |
+          set -euo pipefail
+          check200() {
+            for i in $(seq 1 60); do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$SRV_IP/") && [ "$code" = "200" ] && return 0 || sleep 15
+            done
+            return 1
+          }
+          echo "== deploy v1 =="
+          timeout 1500 kamal deploy > /tmp/deploy-v1.log 2>&1 || echo "deploy-v1 exit=$?"
+          tail -n 6 /tmp/deploy-v1.log
+          check200 && echo V1-SERVING
+          echo "== deploy v2 (same bytes, new version) =="
+          timeout 1500 kamal deploy > /tmp/deploy-v2.log 2>&1 || echo "deploy-v2 exit=$?"
+          tail -n 6 /tmp/deploy-v2.log
+          check200 && echo V2-SERVING
+          echo "== rollback =="
+          timeout 600 kamal rollback > /tmp/rollback.log 2>&1 || echo "rollback exit=$?"
+          tail -n 6 /tmp/rollback.log
+          kamal app containers > /tmp/containers.log 2>&1 || true; tail -n 6 /tmp/containers.log
+          check200 && echo ROLLBACK-SERVING
+
+      - name: cancel run (reap target job)
+        if: always()
+        run: gh run cancel "${{ github.run_id }}" -R link-seek/infra || true
