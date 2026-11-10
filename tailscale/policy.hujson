@@ -29,8 +29,8 @@
 		// yingxin：ali-gz Caddy（tag:mesh）反代 hw41:4097（opencode-prod-ali-gz 落点）。
 		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["4097"]},
 		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["2222"]},
-		// demo：ali-gz Caddy（tag:mesh）反代 hw41:18787（cloudflare-os 试用，转正即删）。
-		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["18787"]},
+		// demo：ali-gz Caddy（tag:mesh）直打 demo 容器身份 :8788（cloudflare-os 试用，转正即删）。
+		{"src": ["tag:mesh"], "dst": ["tag:opencode"], "ip": ["8788"]},
 		{"src": ["tag:mesh"], "dst": ["tag:connector"], "ip": ["*"]},
 		{"src": ["autogroup:member"], "dst": ["tag:connector"], "ip": ["*"]},
 		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4000"]},
