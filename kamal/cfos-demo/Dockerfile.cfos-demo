@@ -1,8 +1,9 @@
 # Kamal Phase 2 转接层：digest pin 即行为版本。
+# registry 走 GHCR（runner 同机房快；HW41 落地时切回 SWR，pin 不变）。
 # Kamal 按 tag 做版本，pin 只能活在 FROM；换版 = 改 ARG 发 PR（与自研 digest=行为对齐在这层）。
 # 首版 pin = HW41 线上正在跑的 digest（已知好，A 线 direct-serve 新镜像出来后再换）。
 # 换版时改下面两处（FROM 上方声明 + LABEL 上方重声明，Docker 语法要求）。
 ARG CFOS_DIGEST=sha256:cfe24a21570336277e462c8308681eabf9c3ff3125983cbc4c048c0ddce61286
-FROM swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo@${CFOS_DIGEST}
+FROM ghcr.io/link-seek/cloudflared-os-demo@${CFOS_DIGEST}
 ARG CFOS_DIGEST
 LABEL cfos.digest=$CFOS_DIGEST

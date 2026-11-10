@@ -4,7 +4,7 @@
 # deploy.manifest → 本文件的翻译关系：REMOTE_DIR/ENV_CONF/canary 三件套/goss 探针
 # 仍在自研线，Kamal 侧只管 digest+部署+健康+回滚（drain/canary 异端口/fail-closed 全量翻译待转正）。
 service: cfos-demo
-image: linkseed/cfos-demo
+image: link-seek/cfos-demo
 
 servers:
   - SERVER_PLACEHOLDER
@@ -18,7 +18,7 @@ sshkit:
   max_concurrent_starts: 1
 
 registry:
-  server: swr.cn-north-9.myhuaweicloud.com
+  server: ghcr.io
   username:
     - KAMAL_REGISTRY_USER
   password:
