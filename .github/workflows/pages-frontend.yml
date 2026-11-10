@@ -72,6 +72,8 @@ jobs:
         working-directory: cfos
         run: |
           set -euo pipefail
-          pnpm --dir cloudflare-os exec wrangler pages project create "${{ inputs.project }}" --production-branch=main 2>&1 | tail -n 2 || true
-          pnpm --dir cloudflare-os exec wrangler pages deploy cloudflare-os/packages/workshop-frontend/dist \
-            --project-name="${{ inputs.project }}" --branch=main --commit-hash="${{ inputs.cfos_sha }}"
+          WRANGLER=./cloudflare-os/node_modules/.bin/wrangler
+          DIST="$PWD/cloudflare-os/packages/workshop-frontend/dist"
+          "$WRANGLER" pages project create "${{ inputs.project }}" --production-branch=main 2>&1 | tail -n 2 || true
+          "$WRANGLER" pages deploy "$DIST" \
+            --project-name="${{ inputs.project }}" --branch=main --commit-hash="$(git rev-parse HEAD)"
