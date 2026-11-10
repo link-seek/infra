@@ -84,8 +84,8 @@ litellm.linkseek.net.cn {
 cfos-demo.linkseek.net.cn {
 	reverse_proxy {
 		dynamic a {
-			name mesh-hw-41.mackarel-polaris.ts.net.
-			port 18787
+			name cfos-demo.mackarel-polaris.ts.net.
+			port 8788
 			refresh 5s
 			resolvers 100.100.100.100
 		}
