@@ -18,6 +18,10 @@ on:
         description: "Pages 项目名"
         required: false
         default: "cfos-demo"
+      custom_domain:
+        description: "绑定的自定义域名（空则跳过；需先配好 CNAME）"
+        required: false
+        default: "cfos.linkseek.net.cn"
 
 jobs:
   deploy:
@@ -77,3 +81,17 @@ jobs:
           "$WRANGLER" pages project create "${{ inputs.project }}" --production-branch=main 2>&1 | tail -n 2 || true
           "$WRANGLER" pages deploy "$DIST" \
             --project-name="${{ inputs.project }}" --branch=main --commit-hash="$(git rev-parse HEAD)"
+
+      - name: custom domain（如有）
+        if: inputs.custom_domain != ''
+        env:
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+        run: |
+          set -euo pipefail
+          API=https://api.cloudflare.com/client/v4/accounts/47ce24ced58f17c9fb15351adcbe67d4
+          code=$(curl -s -o /tmp/dom.json -w "%{http_code}" -X POST "$API/pages/projects/${{ inputs.project }}/domains" \
+            -H "Authorization: Bearer $CF_TOKEN" -H 'Content-Type: application/json' \
+            --data "{"name":"${{ inputs.custom_domain }}"}")
+          echo "add-domain http=$code $(head -c 200 /tmp/dom.json)"
+          [ "$code" = "200" ] && exit 0
+          grep -q "already exists\|duplicate" /tmp/dom.json && echo "domain-exists-ok" && exit 0 || exit 1
