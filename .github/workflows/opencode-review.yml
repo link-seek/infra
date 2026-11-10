@@ -25,15 +25,17 @@ jobs:
           fetch-depth: 1
 
       - name: Run OpenCode review
-        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a
-        env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        uses: link-seek/opencode-github-bot@659479f063168760b3a3f801f991fd81cbd28cac # pinned: JSON-aware model var (model-cli.py); replaces anomalyco/opencode/github
         with:
           model: ${{ vars.OPENCODE_MODEL }} # 引擎ID集中在org变量，一改全仓生效
-          variant: max
-          use_github_token: true
-          prompt: |
+          llm-api-key: ${{ secrets.OPENCODE_API_KEY }}
+          github-token: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          mode: review
+          pr-number: ${{ github.event.pull_request.number }}
+          require-evidence: "false"
+          require-pinned-actions: "false"
+          collect-feedback: "true"
+          review-prompt: |
             Review this pull request for the link-seek/infra repo.
             This is the DEPLOY repo ("courier"): it only ships things, it never owns product logic.
             Flag ONLY violations of these three categories, each with file:line and trigger path:
