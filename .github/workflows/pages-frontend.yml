@@ -92,6 +92,7 @@ jobs:
           code=$(curl -s -o /tmp/dom.json -w "%{http_code}" -X POST "$API/pages/projects/${{ inputs.project }}/domains" \
             -H "Authorization: Bearer $CF_TOKEN" -H 'Content-Type: application/json' \
             --data "{"name":"${{ inputs.custom_domain }}"}")
-          echo "add-domain http=$code $(head -c 200 /tmp/dom.json)"
+          echo "add-domain http=$code body=$(cat /tmp/dom.json)"
+          echo "sent-name=${{ inputs.custom_domain }} project=${{ inputs.project }}"
           [ "$code" = "200" ] && exit 0
           grep -q "already exists\|duplicate" /tmp/dom.json && echo "domain-exists-ok" && exit 0 || exit 1
