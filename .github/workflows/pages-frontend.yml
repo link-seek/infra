@@ -89,10 +89,17 @@ jobs:
         run: |
           set -euo pipefail
           API=https://api.cloudflare.com/client/v4/accounts/47ce24ced58f17c9fb15351adcbe67d4
-          code=$(curl -s -o /tmp/dom.json -w "%{http_code}" -X POST "$API/pages/projects/${{ inputs.project }}/domains" \
+          PROJ="${{ inputs.project }}"
+          DOM="${{ inputs.custom_domain }}"
+          echo "== existing domains =="
+          curl -s "$API/pages/projects/$PROJ/domains" -H "Authorization: Bearer $CF_TOKEN" | head -c 500; echo
+          if curl -s "$API/pages/projects/$PROJ/domains" -H "Authorization: Bearer $CF_TOKEN" | grep -q "\"name\":\"$DOM\""; then
+            echo "domain-exists-ok"; exit 0
+          fi
+          python3 -c "import json; open('/tmp/dom-body.json','w').write(json.dumps({'name': '$DOM'}))"
+          echo "body-sent: $(cat /tmp/dom-body.json)"
+          code=$(curl -s -o /tmp/dom.json -w "%{http_code}" -X POST "$API/pages/projects/$PROJ/domains" \
             -H "Authorization: Bearer $CF_TOKEN" -H 'Content-Type: application/json' \
-            --data "{"name":"${{ inputs.custom_domain }}"}")
+            --data @/tmp/dom-body.json)
           echo "add-domain http=$code body=$(cat /tmp/dom.json)"
-          echo "sent-name=${{ inputs.custom_domain }} project=${{ inputs.project }}"
-          [ "$code" = "200" ] && exit 0
-          grep -q "already exists\|duplicate" /tmp/dom.json && echo "domain-exists-ok" && exit 0 || exit 1
+          [ "$code" = "200" ] && exit 0 || exit 1
