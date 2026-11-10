@@ -198,9 +198,13 @@ jobs:
           check200 && echo ROLLBACK-SERVING
           kamal app containers 2>/dev/null | grep "$V1" | grep -qi "up" && echo ROLLBACK-VERIFIED
 
+      - name: write done signal
+        if: always()
+        run: echo "done $GITHUB_RUN_ID $(date -u +%FT%TZ)" > /tmp/done.txt
+
       - name: signal done (reap target via artifact)
         if: always()
-        run: |
-          echo "done $GITHUB_RUN_ID $(date -u +%FT%TZ)" > /tmp/done.txt
-          gh run upload "${{ github.run_id }}" -R link-seek/infra -n "${{ inputs.artifact }}-done" -f /tmp/done.txt 2>/dev/null ||             echo "done-upload-failed (target hold will time out)"
-
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}-done
+          path: /tmp/done.txt
