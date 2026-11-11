@@ -35,7 +35,7 @@ spec:
       containers:
         - name: opencode
           image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
-          command: ["/bin/sh", "/entrypoint/entrypoint.sh", "--"]
+          command: ["/bin/sh", "/entrypoint/entrypoint.sh"]
           args: ["serve", "--port", "4097", "--hostname", "0.0.0.0"]
           ports:
             - {name: http, containerPort: 4097}
