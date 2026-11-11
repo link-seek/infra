@@ -114,6 +114,8 @@ jobs:
         run: |
           set -euo pipefail
           # runner 与 Caddy 同为 tailnet 普通节点：直连 pod 身份，验证切流前可达。
+          # 先 pod 侧自报（只读诊断，放门前，红了也能看）。
+          sudo tailscale ssh root@100.111.231.85 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n opencode exec deploy/opencode -c opencode -- sh -c \"tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null | head -c 600; echo; tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip\"'"
           # L3：tailscale 自带解析，不依赖系统 DNS。
           sudo tailscale ping --timeout=30s --c=2 opencode-k3s.mackarel-polaris.ts.net || { echo INGRESS-PING-FAIL; exit 1; }
           # L7：从 netmap 拿 pod tailnet IP，直调 4097（Host 头对 opencode 无意义，走 IP 即可）。
