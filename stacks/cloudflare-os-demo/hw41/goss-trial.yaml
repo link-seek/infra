@@ -1,10 +1,8 @@
-http:
-  http://127.0.0.1:{{ .Vars.CANARY_PORT }}/:
-    status: 200
-    timeout: 15000
-    no-follow-redirects: false
-
 command:
+  app-http-via-exec:
+    exec: 'docker exec {{ .Vars.CANARY_CONTAINER }} curl -sf --max-time 15 http://127.0.0.1:8788/ -o /dev/null -w "%{http_code}" | grep -q 200'
+    exit-status: 0
+    timeout: 60000
   canary-image-pin:
     exec: 'test "$(docker inspect {{ .Vars.CANARY_CONTAINER }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Image"])'')" = "$(docker inspect {{ .Vars.PIN_IMG }} | python3 -c ''import json,sys; print(json.load(sys.stdin)[0]["Id"])'')"'
     exit-status: 0

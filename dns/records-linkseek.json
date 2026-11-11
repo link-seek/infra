@@ -10,6 +10,24 @@
       "proxied": false,
       "state": "present",
       "comment": "网关公网入口：广州 ali-gz Caddy → tailnet → 华北网关"
+    },
+    {
+      "name": "cfos-demo.linkseek.net.cn",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "demo 后端入口：广州 ali-gz Caddy 直打容器身份 cfos-demo:8788（cloudflare-os 试用，转正退役）"
+    },
+    {
+      "name": "cfos.linkseek.net.cn",
+      "type": "CNAME",
+      "content": "cfos-demo.pages.dev",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "demo 前端：Pages 静态（VITE_BACKEND_HOST 指 cfos-demo），有备案"
     }
   ]
 }

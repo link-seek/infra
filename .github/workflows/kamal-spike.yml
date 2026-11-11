@@ -1,0 +1,138 @@
+name: kamal-spike
+
+# Phase 1 spike（#277）：ephemeral runner 自举为靶机，验证 Kamal(net-ssh) 走 Tailscale SSH。
+# 不动生产，不部署应用。成功标准：kamal server exec 回显 + SWR 登录成功。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: join tailnet as TSSH target
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":2700}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kspike-tgt-$GITHUB_RUN_ID" --ssh --accept-routes=false --accept-dns=false
+          tailscale ip -4 > /tmp/target-ip.txt
+          cat /tmp/target-ip.txt
+      - name: publish target ip
+        uses: actions/upload-artifact@v4
+        with:
+          name: kspike-target
+          path: /tmp/target-ip.txt
+      - name: hold target alive
+        run: sleep 2400
+
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+
+      - name: install kamal
+        run: gem install kamal -v 2.12.0 --no-document
+
+      - name: join tailnet as control plane (pure client)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":2700}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="kspike-ctl-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("control tags:", d["Self"].get("Tags"))'
+
+      - name: wait for target ip artifact
+        run: |
+          for i in $(seq 1 30); do
+            if gh run download "${{ github.run_id }}" -R link-seek/infra -n kspike-target -D /tmp/kspike 2>/dev/null && [ -f /tmp/kspike/target-ip.txt ]; then break; fi
+            sleep 20
+          done
+          SRV_IP="$(cat /tmp/kspike/target-ip.txt 2>/dev/null | tr -d '\r\n ')"
+          [ -n "$SRV_IP" ] || { echo "FAIL: no target ip"; exit 1; }
+          echo "SRV_IP=$SRV_IP" >> "$GITHUB_ENV"
+          echo "target=$SRV_IP"
+
+      - name: baseline plain ssh to target
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@"$SRV_IP" 'echo PLAIN-SSH-OK; whoami' || true
+          echo "--- official client ---"
+          timeout 30 tailscale ssh root@"$SRV_IP" 'echo TAILSCALE-SSH-OK; whoami' || true
+
+      - name: kamal server exec over TSSH
+        working-directory: kamal/cfos-spike
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          set -euo pipefail
+          sed -i "s/SERVER_PLACEHOLDER/$SRV_IP/" config/deploy.yml
+          grep -q "$SRV_IP" config/deploy.yml || { echo "FAIL: server IP not wired"; exit 1; }
+          mkdir -p .kamal
+          {
+            echo "KAMAL_REGISTRY_USER=$SWR_USER"
+            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+          } > .kamal/secrets
+          chmod 600 .kamal/secrets
+          timeout 120 kamal server exec "echo KAMAL-TSSH-OK; whoami" > /tmp/exec.log 2>&1; tail -n 15 /tmp/exec.log
+
+      - name: kamal deploy + rollback mechanics (tiny image)
+        working-directory: kamal/cfos-spike
+        env:
+          SWR_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            echo "KAMAL_REGISTRY_USER=$SWR_USER"
+            echo "KAMAL_REGISTRY_PASSWORD=$SWR_PASS"
+            echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN"
+          } > .kamal/secrets
+          chmod 600 .kamal/secrets
+          check200() {
+            for i in $(seq 1 20); do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$SRV_IP/") && [ "$code" = "200" ] && return 0 || sleep 10
+            done
+            return 1
+          }
+          echo "== deploy v1 =="
+          timeout 600 kamal deploy > /tmp/deploy-v1.log 2>&1 || echo "deploy-v1 exit=$?"
+          tail -n 6 /tmp/deploy-v1.log
+          check200 && echo V1-SERVING
+          echo "== deploy v2 (same bytes, new version) =="
+          timeout 600 kamal deploy > /tmp/deploy-v2.log 2>&1 || echo "deploy-v2 exit=$?"
+          tail -n 6 /tmp/deploy-v2.log
+          check200 && echo V2-SERVING
+          echo "== rollback =="
+          timeout 300 kamal rollback > /tmp/rollback.log 2>&1 || echo "rollback exit=$?"
+          tail -n 6 /tmp/rollback.log
+          kamal app containers > /tmp/containers.log 2>&1 || true; tail -n 6 /tmp/containers.log
+          check200 && echo ROLLBACK-SERVING
+
+      - name: cancel run (reap target job)
+        if: always()
+        run: gh run cancel "${{ github.run_id }}" -R link-seek/infra || true

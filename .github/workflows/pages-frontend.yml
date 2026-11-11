@@ -1,0 +1,105 @@
+name: pages-frontend
+
+# cfos 前端 → Cloudflare Pages（纯静态），后端留在容器（VITE_BACKEND_HOST 构建时注入）。
+# 新线独立文件，不碰 deliver-stack/canary/旧栈。版本与后端镜像同源（CFOS_SHA 输入，默认与现跑镜像同 pin）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      cfos_sha:
+        description: "link-seek/cloudflare-os commit（starter 层，与后端镜像同源）"
+        required: false
+        default: "fe4c68bdec67d3e9467515bac2c848df4cb91b9d"
+      backend_host:
+        description: "后端公网入口（Caddy 直打容器身份，VITE_BACKEND_HOST 注入）"
+        required: false
+        default: "cfos-demo.linkseek.net.cn"
+      project:
+        description: "Pages 项目名"
+        required: false
+        default: "cfos-demo"
+      custom_domain:
+        description: "绑定的自定义域名（空则跳过；需先配好 CNAME）"
+        required: false
+        default: "cfos.linkseek.net.cn"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 47ce24ced58f17c9fb15351adcbe67d4
+      VITE_BACKEND_HOST: ${{ inputs.backend_host }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: link-seek/cloudflare-os
+          ref: ${{ inputs.cfos_sha }}
+          submodules: recursive
+          path: cfos
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: install pnpm + deps (starter root, 与镜像 bake 同形)
+        working-directory: cfos
+        run: |
+          set -euo pipefail
+          npm install -g pnpm@11.17.0
+          pnpm install --frozen-lockfile
+
+      - name: build frontend (VITE_BACKEND_HOST 注入，与后端同 SHA)
+        working-directory: cfos
+        run: |
+          set -euo pipefail
+          echo "backend=$VITE_BACKEND_HOST sha=${{ inputs.cfos_sha }}"
+          [ -n "$VITE_BACKEND_HOST" ] || { echo "FAIL: backend host empty"; exit 1; }
+          pnpm --dir cloudflare-os run build
+          test -d cloudflare-os/packages/workshop-frontend/dist || { echo "FAIL: dist missing"; exit 1; }
+          ls cloudflare-os/packages/workshop-frontend/dist | head -n 5
+
+      - name: _redirects (相对路径 REST → 后端，WS /api 走绝对地址直连)
+        working-directory: cfos/cloudflare-os/packages/workshop-frontend/dist
+        run: |
+          set -euo pipefail
+          {
+            echo "/api/client-errors https://${{ inputs.backend_host }}/api/client-errors 200"
+            echo "/api/device-session/callback https://${{ inputs.backend_host }}/api/device-session/callback 200"
+            echo "/blueprint-screenshot/* https://${{ inputs.backend_host }}/blueprint-screenshot/:splat 200"
+            echo "/api/site-logo https://${{ inputs.backend_host }}/api/site-logo 200"
+          } > _redirects
+          cat _redirects
+
+      - name: pages deploy (幂等建项目 + 发生产分支)
+        working-directory: cfos
+        run: |
+          set -euo pipefail
+          WRANGLER=./cloudflare-os/node_modules/.bin/wrangler
+          DIST="$PWD/cloudflare-os/packages/workshop-frontend/dist"
+          "$WRANGLER" pages project create "${{ inputs.project }}" --production-branch=main 2>&1 | tail -n 2 || true
+          "$WRANGLER" pages deploy "$DIST" \
+            --project-name="${{ inputs.project }}" --branch=main --commit-hash="$(git rev-parse HEAD)"
+
+      - name: custom domain（如有）
+        if: inputs.custom_domain != ''
+        env:
+          CF_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+        run: |
+          set -euo pipefail
+          API=https://api.cloudflare.com/client/v4/accounts/47ce24ced58f17c9fb15351adcbe67d4
+          PROJ="${{ inputs.project }}"
+          DOM="${{ inputs.custom_domain }}"
+          echo "== existing domains =="
+          curl -s "$API/pages/projects/$PROJ/domains" -H "Authorization: Bearer $CF_TOKEN" | head -c 500; echo
+          if curl -s "$API/pages/projects/$PROJ/domains" -H "Authorization: Bearer $CF_TOKEN" | grep -q "\"name\":\"$DOM\""; then
+            echo "domain-exists-ok"; exit 0
+          fi
+          python3 -c "import json; open('/tmp/dom-body.json','w').write(json.dumps({'name': '$DOM'}))"
+          echo "body-sent: $(cat /tmp/dom-body.json)"
+          code=$(curl -s -o /tmp/dom.json -w "%{http_code}" -X POST "$API/pages/projects/$PROJ/domains" \
+            -H "Authorization: Bearer $CF_TOKEN" -H 'Content-Type: application/json' \
+            --data @/tmp/dom-body.json)
+          echo "add-domain http=$code body=$(cat /tmp/dom.json)"
+          [ "$code" = "200" ] && exit 0 || exit 1
