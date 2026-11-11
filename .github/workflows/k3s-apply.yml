@@ -1,7 +1,7 @@
 name: k3s-apply
 
 # k3s 通用应用骨架（对标 deliver-stack；旧线一行不动）。
-# 链路：runner 入 tailnet（guest，现 mint）→ ssh HW41（PROD_SSH_KEY:2244）
+# 链路：runner 取 tag:user 入 tailnet（配送身份，user→mesh 有 accept）→ TS SSH 上 HW41（零钥匙）
 #   → ssh .69（HW41 key 已种）→ kubectl apply。runner 直达 .69 无路由，.69 不进 tailnet
 #  （出入全走 Pod 内 userspace tailscaled，身份 opencode-k3s，Caddy 沿用现成 grant）。
 # Secret 全现场 render（组织 Secrets + CF/TS 现签），真值不进仓、不进日志。
@@ -36,7 +36,7 @@ jobs:
           curl -fsSL https://tailscale.com/install.sh | sh
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
             -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":3600}' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="k3s-applier-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
