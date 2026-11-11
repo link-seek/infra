@@ -61,6 +61,9 @@
 		{"src": ["tag:user"], "dst": ["tag:user"], "ip": ["22", "2244"]},
 		{"src": ["tag:user"], "dst": ["tag:guest"], "ip": ["22", "2244"]},
 		{"src": ["tag:user"], "dst": ["tag:opencode"], "ip": ["22"]},
+		// k3s-apply ingress 探针（Caddy 视角）：配送 runner 直连 pod :4097（HTTP，无 ssh）。
+		// 只给网络可见性+4097；canary 探针同款（74 行注释）。
+		{"src": ["tag:user"], "dst": ["tag:opencode"], "ip": ["4097"]},
 		{"src": ["tag:user"], "dst": ["100.111.231.85"], "ip": ["22", "2244"]},
 		// 非 HW（ali-gz/oci）只放 admin：deliver-caddy 以 admin 身份上机（手动 dispatch＋全程盯）。
 		{"src": ["tag:admin"], "dst": ["100.85.128.116"], "ip": ["22"]},
