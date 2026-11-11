@@ -17,8 +17,8 @@
       "content": "120.77.76.20",
       "ttl": 600,
       "proxied": false,
-      "state": "present",
-      "comment": "demo 后端入口：广州 ali-gz Caddy 直打容器身份 cfos-demo:8788（cloudflare-os 试用，转正退役）"
+      "state": "absent",
+      "comment": "已退役（HW41 demo 整机下线，Caddy 路由已摘；新后端域名待定）"
     },
     {
       "name": "cfos.linkseek.net.cn",
