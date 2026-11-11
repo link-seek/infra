@@ -1,5 +1,6 @@
 # link-seek/infra — 组织基础设施唯一源
 
+![status](https://img.shields.io/badge/status-active-brightgreen)
 本仓是 link-seek 所有基础设施配置的唯一入口：**线上长什么样、怎么变，全在这里**。
 规则三条：
 
