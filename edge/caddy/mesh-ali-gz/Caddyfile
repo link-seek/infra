@@ -78,22 +78,3 @@ litellm.linkseek.net.cn {
 		output file /var/log/caddy/litellm.log
 	}
 }
-
-# demo 入口 cfos-demo.linkseek.net.cn：Caddy → tailnet → hw41:18787（cloudflare-os run-local）。
-# demo 无 SLA；转正（Paid 上 CF 线上）即退役本块。
-cfos-demo.linkseek.net.cn {
-	reverse_proxy {
-		dynamic a {
-			name cfos-demo.mackarel-polaris.ts.net.
-			port 8788
-			refresh 5s
-			resolvers 100.100.100.100
-		}
-		fail_duration 30s
-		max_fails 2
-		lb_try_duration 5s
-	}
-	log {
-		output file /var/log/caddy/cfos-demo.log
-	}
-}
