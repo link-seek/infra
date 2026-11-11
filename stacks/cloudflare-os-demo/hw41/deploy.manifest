@@ -23,7 +23,8 @@ GOSS_FILE=goss-trial.yaml
 PROBE_PIN_VARS="PIN_IMG=swr.cn-north-9.myhuaweicloud.com/linkseed/cloudflared-os-demo"
 MIN_GOSS_CASES=3
 # run-local 冷启动（pnpm install 检查 + vite 全量构建 + wrangler）约 3～8 分钟，120s 不够。
-GOSS_RETRY_TIMEOUT=600s
+# dev 模式冷启动约 10 分钟（600s 两次都差一口气），放 900s；转正 CF 后冷启动秒级，此值可降回。
+GOSS_RETRY_TIMEOUT=900s
 CUTOVER_SERVICES="app"
 # demo 无外部网关依赖，不做 drain；PROBE_* 从简
 PROBE_NEEDS_IP=0
