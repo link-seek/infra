@@ -104,7 +104,7 @@ spec:
         - name: prod-data
           persistentVolumeClaim: {claimName: prod-data}
         - name: ts-state
-          emptyDir: {}
+          persistentVolumeClaim: {claimName: ts-state}
         - name: entrypoint
           configMap: {name: opencode-entrypoint, defaultMode: 0755}
 ---
