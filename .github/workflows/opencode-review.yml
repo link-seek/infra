@@ -25,7 +25,12 @@ jobs:
           fetch-depth: 1
 
       - name: Run OpenCode review
-        uses: link-seek/opencode-github-bot@659479f063168760b3a3f801f991fd81cbd28cac # pinned: JSON-aware model var (model-cli.py); replaces anomalyco/opencode/github
+        uses: link-seek/opencode-github-bot@932530f2fd9ee1b793e265625c793753f484f68e # pinned: JSON-aware model var (model-cli.py); replaces anomalyco/opencode/github
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_API_KEY_BULK: ${{ secrets.OPENCODE_API_KEY_BULK }}
+          KEY_FAST: ${{ secrets.KEY_FAST }}
+          KEY_BULK: ${{ secrets.KEY_BULK }}
         with:
           model: ${{ vars.OPENCODE_MODEL }} # 引擎ID集中在org变量，一改全仓生效
           llm-api-key: ${{ secrets.OPENCODE_API_KEY }}
