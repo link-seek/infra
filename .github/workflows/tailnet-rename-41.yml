@@ -57,12 +57,12 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
           set -euo pipefail
-          R41="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41"
-          $R41 "tailscale logout; sleep 2; tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
+          \$R41="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41"
+          \$R41 "tailscale logout; sleep 2; tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
           echo "--- 改名后自报 ---"
-          $R41 "tailscale status --self | head -1"
+          \$R41 "tailscale status --self | head -1"
           echo "--- 出网复验（up 会重建 ts-input，公网 DNS 应顶住）---"
-          $R41 "curl -fsSL -m 15 -o /dev/null https://pkgs.tailscale.com/stable/ && echo NET-OK"
+          \$R41 "curl -fsSL -m 15 -o /dev/null https://pkgs.tailscale.com/stable/ && echo NET-OK"
           EOF
