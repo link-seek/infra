@@ -35,11 +35,14 @@ jobs:
           KEY="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' -d "$BODY" https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$KEY" ] || { echo "FAIL: 新 key 签不出"; exit 1; }
           echo "::add-mask::$KEY"
-          printf '%s' "$KEY" > /tmp/rekey; chmod 600 /tmp/rekey
+          echo "joinkey=$KEY" >> "$GITHUB_OUTPUT"
       - name: 41 logout + 重上 mesh-hw-41
+        env:
+          REKEY: ${{ steps.prep.outputs.joinkey }}
         run: |
           set -euo pipefail
-          JOINKEY="$(cat /tmp/rekey)"; echo "::add-mask::$JOINKEY"
+          JOINKEY="$(printf '%s' "${REKEY:-}")"; [ -n "$JOINKEY" ] || { echo "FAIL: 上游 key 为空"; exit 1; }
+          echo "::add-mask::$JOINKEY"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
@@ -52,4 +55,3 @@ jobs:
           echo "--- 出网复验（up 会重建 ts-input，公网 DNS 应顶住）---"
           $R41 "curl -fsSL -m 15 -o /dev/null https://pkgs.tailscale.com/stable/ && echo NET-OK"
           EOF
-          shred -u /tmp/rekey
