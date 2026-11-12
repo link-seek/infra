@@ -17,6 +17,15 @@ GWCODE="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s 
 [ "$GWCODE" = "200" ] || { echo "E2E-GW-FAIL http=$GWCODE"; exit 1; }
 echo "gw models: $GWCODE"
 
+# 0.5 烟雾（纯模型，不碰记忆：分清模型路 vs 记忆路）
+set +e
+S_OUT="$(timeout 120 $KX opencode run "1+1等于几？只答数字" 2>&1)"; S_RC=$?
+set -e
+echo "$S_OUT" | tail -n 10
+echo "smoke rc=$S_RC"
+[ "$S_RC" = 0 ] || { echo "E2E-SMOKE-FAIL rc=$S_RC"; exit 1; }
+echo SMOKE-OK
+
 echo "=== session A（写 marker=$MARKER） ==="
 set +e
 A_OUT="$(timeout 150 $KX opencode run "记住：我养了一只猫叫$MARKER" 2>&1)"; A_RC=$?
