@@ -42,9 +42,8 @@ spec:
           env:
             - {name: PIPELINE_MANAGED, value: "true"}
             - {name: TS_HOSTNAME, value: opencode-k3s}
-            # 网关=HW41 式直连 HW21 宿主 :4000（公网域名后端身份不存在，#181 欠账，今天不动）。
-            # pod 经 TUN 出，需 opencode→.51:4000 grant（policy 内）。
-            - {name: LITELLM_BASE_URL, value: "http://100.91.222.51:4000"}
+            # 网关走公网域名（用户已修复公网后端；网关迁 k3s 后改集群内 Service）。
+            - {name: LITELLM_BASE_URL, value: "https://litellm.linkseek.net.cn"}
             - {name: SSH_TARGETS, value: "mesh-hw-21 mesh-hw-41"}
             - {name: SMTP_HOST, value: smtp.163.com}
             - {name: SMTP_PORT, value: "465"}

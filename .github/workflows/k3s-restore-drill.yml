@@ -47,4 +47,6 @@ jobs:
           $SSH41 "cat > /tmp/k3s-restore-ns.yaml" < "$GITHUB_WORKSPACE/k8s/restore/namespace.yaml"
           $SSH41 "cat > /tmp/k3s-restore-pvc.yaml" < "$GITHUB_WORKSPACE/k8s/restore/pvc.yaml"
           $SSH41 "cat > /tmp/k3s-restore-drill.sh" < "$GITHUB_WORKSPACE/scripts/k3s-restore-drill.sh"
+          # 落盘校验（防 dispatch 撞 merge 拿到旧 workflow）
+          $SSH41 "ls -la /tmp/k3s-restore-ns.yaml /tmp/k3s-restore-pvc.yaml /tmp/k3s-restore-drill.sh && grep -q 'opencode-restore' /tmp/k3s-restore-ns.yaml" || { echo "FAIL: 演练文件未落盘（疑 dispatch 撞 merge，重跑）"; exit 1; }
           $SSH41 "chmod +x /tmp/k3s-restore-drill.sh && sh /tmp/k3s-restore-drill.sh && rm -f /tmp/k3s-restore-drill.sh /tmp/k3s-restore-ns.yaml /tmp/k3s-restore-pvc.yaml"
