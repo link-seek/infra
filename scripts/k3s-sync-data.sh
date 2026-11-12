@@ -30,17 +30,15 @@ ls -lh /tmp/k3s-sync-work.tgz /tmp/k3s-sync-data.tgz
 # 3. 传 .69（同机房 LAN，HW41 直传）
 scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/k3s-sync-work.tgz /tmp/k3s-sync-data.tgz root@192.168.1.69:/tmp/
 
-# 4. .69 目标路径（PV hostPath 动态查，不写死；jsonpath 不套引号，防多层 ssh 吃引号）
+# 4. .69 目标路径（local-path PV 用 spec.local.path；hostPath 为空是正常的）
 $R69 "kubectl -n opencode get pvc"
 WPVNAME="$($R69 "kubectl -n opencode get pvc prod-work -o jsonpath={.spec.volumeName}")"
 DPVNAME="$($R69 "kubectl -n opencode get pvc prod-data -o jsonpath={.spec.volumeName}")"
 echo "pv: work=$WPVNAME data=$DPVNAME"
 [ -n "$WPVNAME" ] || { echo "FAIL: 取不到 work 卷名"; exit 1; }
 [ -n "$DPVNAME" ] || { echo "FAIL: 取不到 data 卷名"; exit 1; }
-WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath={.spec.hostPath.path}")"
-DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath={.spec.hostPath.path}")"
-echo "pvpath: work=[$WPATH] data=[$DPATH]"
-$R69 "kubectl get pv $WPVNAME -o json | head -c 1200; echo; ls /var/lib/rancher/k3s/storage/ 2>/dev/null || echo no-storage-dir"
+WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath={.spec.local.path}")"
+DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath={.spec.local.path}")"
 WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 [ -n "$WPATH" ] || { echo "FAIL: 取不到 work 卷路径"; exit 1; }
