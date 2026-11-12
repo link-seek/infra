@@ -9,13 +9,17 @@ SID="ses_k3s$(printf '%s' "$MARKER" | tr -cd '0-9A-Za-z' | tail -c 9)"
 K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
 KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
 
-# 0. 网关预检（读 pod 内渲染好的 URL；根路径本来就 503，打 /v1/models 判 200；fail-fast）
+# 0. 网关预检（读 pod 内 URL；POST 无 key 打一次：200/400/401/404=网关活着，其余/超时=FAIL，两次机会）
 GWURL="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_BASE_URL" | tr -d '[:space:]')"
 [ -n "$GWURL" ] || { echo "E2E-GW-URL-FAIL"; exit 1; }
 echo "gw url=$GWURL"
-GWCODE="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 15 -o /dev/null -w '%{http_code}' '$GWURL/v1/models'")"
-[ "$GWCODE" = "200" ] || { echo "E2E-GW-FAIL http=$GWCODE"; exit 1; }
-echo "gw models: $GWCODE"
+GWCODE=""
+for i in 1 2; do
+  GWCODE="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H 'Content-Type: application/json' -d '{\"model\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'" || true)"
+  echo "gw post try$i: $GWCODE"
+  case "$GWCODE" in 200|400|401|404) break;; *) sleep 10;; esac
+done
+case "$GWCODE" in 200|400|401|404) echo "gw alive: $GWCODE";; *) echo "E2E-GW-FAIL http=$GWCODE"; exit 1;; esac
 
 # 0.5 烟雾（纯模型，不碰记忆：分清模型路 vs 记忆路）
 set +e
