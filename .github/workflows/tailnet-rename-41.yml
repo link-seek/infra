@@ -1,0 +1,55 @@
+name: tailnet-rename-41
+# 一次性：删掉旧 mesh-hw-41 残留（100.111.231.85），把 mesh-hw-41-1 改回 mesh-hw-41。
+# 顺序：API 删旧（按 IP 精确匹配）→ 现签新 key → 41 logout + 重上（同名已空出）。
+# 41 的 k3s/业务不受影响（tailnet 只做管理面）。
+on:
+  workflow_dispatch:
+concurrency:
+  group: tailnet-rename-41
+  cancel-in-progress: false
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+    steps:
+      - name: 删旧节点 + 现签新 key
+        id: prep
+        run: |
+          set -euo pipefail
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          echo "找旧节点（100.111.231.85）..."
+          DEVICES="$(curl -sS -m 30 -H "Authorization: Bearer $TSKEY" 'https://api.tailscale.com/api/v2/tailnet/-/devices')"
+          # 注意：DELETE 只认列表里的数字 id 字段；用 nodeId 会 404（见 ts-cleanup 注释）。
+          OLDID="$(printf '%s' "$DEVICES" | python3 -c "import json,sys; ds=json.load(sys.stdin).get('devices',[]); print('\n'.join(str(d.get('id','')) for d in ds if '100.111.231.85' in str(d.get('addresses',[]))))" | head -1)"
+          if [ -n "$OLDID" ]; then
+            echo "删旧节点 $OLDID ..."
+            curl -sS -m 30 -o /dev/null -w 'delete:%{http_code}\n' -X DELETE -H "Authorization: Bearer $TSKEY" "https://api.tailscale.com/api/v2/device/$OLDID"
+          else
+            echo "旧节点已不在，无需删"
+          fi
+          BODY='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":["tag:mesh","tag:opencode-hw41","tag:prod"]}}},"expirySeconds":600}'
+          KEY="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' -d "$BODY" https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$KEY" ] || { echo "FAIL: 新 key 签不出"; exit 1; }
+          echo "::add-mask::$KEY"
+          printf '%s' "$KEY" > /tmp/rekey; chmod 600 /tmp/rekey
+      - name: 41 logout + 重上 mesh-hw-41
+        run: |
+          set -euo pipefail
+          JOINKEY="$(cat /tmp/rekey)"; echo "::add-mask::$JOINKEY"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          set -euo pipefail
+          R41="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41"
+          $R41 "tailscale logout; sleep 2; tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
+          echo "--- 改名后自报 ---"
+          $R41 "tailscale status --self | head -1"
+          echo "--- 出网复验（up 会重建 ts-input，公网 DNS 应顶住）---"
+          $R41 "curl -fsSL -m 15 -o /dev/null https://pkgs.tailscale.com/stable/ && echo NET-OK"
+          EOF
+          shred -u /tmp/rekey
