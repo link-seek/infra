@@ -1,0 +1,105 @@
+name: k3s-join-oci-proxy
+# OCI vm-proxy 以 tainted agent 入簇（dedicated=edge，只跑边缘验证；vpn 生产节点不动）。
+# 前置：proxy:22 已对 HW21 放行（临时 SG 规则，用完删）；key 从 OBS robotwin-assets 现取，不进 GH。
+# 流程：HW21 取 key → proxy 装 tailscale 入网 → 装 k3s agent（pin v1.37.2，经 tailnet 指 server）→ taint → 金丝雀 pod 验跨节点 → 清理。
+on:
+  workflow_dispatch:
+concurrency:
+  group: k3s-join-oci-proxy
+  cancel-in-progress: false
+jobs:
+  join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+    steps:
+      - name: 现签 proxy 上线 key（persistent，一次性 600s）
+        id: mint
+        run: |
+          set -euo pipefail
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          mint() { curl -sS -m 30 -o /tmp/mint.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" \
+            -H 'Content-Type: application/json' -d "$1" https://api.tailscale.com/api/v2/tailnet/-/keys; }
+          BODY_TAGGED='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":["tag:mesh"]}}},"expirySeconds":600}'
+          CODE="$(mint "$BODY_TAGGED")"
+          KEY="$(python3 -c "import json; print(json.load(open('/tmp/mint.json')).get('key',''))" 2>/dev/null || true)"
+          if [ -n "$KEY" ]; then
+            echo "tagged key minted (HTTP $CODE)"
+            echo "needs_tag=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagged mint 拒 (HTTP $CODE)：降级无 tag 进网"
+            BODY_BARE='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true}}},"expirySeconds":600}'
+            CODE2="$(mint "$BODY_BARE")"
+            KEY="$(python3 -c "import json; print(json.load(open('/tmp/mint.json')).get('key',''))" 2>/dev/null || true)"
+            [ -n "$KEY" ] || { echo "FAIL: 无 tag 也签不出 (HTTP $CODE2)"; exit 1; }
+            echo "bare key minted (HTTP $CODE2)"
+            echo "needs_tag=true" >> "$GITHUB_OUTPUT"
+          fi
+          [ -n "$KEY" ] && echo "::add-mask::$KEY"
+          printf '%s' "$KEY" > /tmp/proxy.key; chmod 600 /tmp/proxy.key
+          rm -f /tmp/mint.json
+      - name: runner 进 tailnet（ephemeral CI 身份）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-joinproxy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+      - name: proxy 入网 + k3s agent 加入 + 金丝雀验证
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          cp /tmp/proxy.key /tmp/join.key
+          scp -P 2244 -i ~/.ssh/ci_key /tmp/join.key root@100.91.222.51:/tmp/proxy-join.key
+          shred -u /tmp/join.key /tmp/proxy.key
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          set -euo pipefail
+          R69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+          # key 现取（OBS，不经 runner）；join key 上一步已 scp 到 HW21
+          obsutil cp obs://robotwin-assets/key/oci_vm_proxy_ed25519 /tmp/oci_proxy_key >/dev/null 2>&1
+          chmod 600 /tmp/oci_proxy_key
+          RP="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/oci_proxy_key ubuntu@168.110.36.240"
+          echo "== proxy 基本面 =="
+          $RP 'cat /etc/os-release | head -1; test -f /sys/fs/cgroup/cgroup.controllers && echo CGROUPV2 || echo CGROUPV1'
+          echo "== 装 tailscale（Ubuntu 走官方 install.sh）=="
+          $RP 'curl -fsSL https://tailscale.com/install.sh | sh && sudo systemctl enable --now tailscaled && sleep 3'
+          JKEY="$(cat /tmp/proxy-join.key)"; shred -u /tmp/proxy-join.key
+          $RP "sudo tailscale up --authkey=\"$JKEY\" --hostname=mesh-oci-proxy --accept-routes=false --accept-dns=false && tailscale ip -4"
+          echo "== k3s agent 装入（pin 1.37.2，flannel 走 tailscale0，taint edge）=="
+          TOKEN="$($R69 'cat /var/lib/rancher/k3s/server/node-token')"
+          [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
+          SRV=100.93.119.21
+          $RP "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC='agent --server https://$SRV:6443 --token \"$TOKEN\" --node-ip \$(tailscale ip -4 | head -1) --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -"
+          echo "== 等 agent Ready =="
+          for i in $(seq 1 24); do
+            sleep 15
+            NODES="$($R69 'kubectl get nodes --no-headers 2>/dev/null' | wc -l)"
+            READY="$($R69 'kubectl get nodes --no-headers 2>/dev/null' | grep -c ' Ready')"
+            echo "nodes=$NODES ready=$READY"
+            [ "$NODES" = 3 ] && [ "$READY" = 3 ] && break
+            [ "$i" = 24 ] && { echo "FAIL: proxy 未入簇"; $R69 'kubectl get nodes'; exit 1; }
+          done
+          $R69 'kubectl get nodes -o wide'
+          echo "== 金丝雀：edge 上起 busybox，双向打 overlay + L7 =="
+          $R69 "kubectl run canary-edge --image=busybox:1.36 --overrides='{\"spec\":{\"nodeSelector\":{\"dedicated\":\"edge\"},\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}]}}' -- sleep 3600 2>&1 | head -2"
+          $R69 "kubectl wait --for=condition=Ready pod/canary-edge --timeout=180s 2>&1 | tail -1"
+          $R69 'kubectl get pods -o wide | grep canary'
+          OPODIP=$($R69 "kubectl get pod -n opencode -o jsonpath='{.items[0].status.podIP}'")
+          echo "opencode pod IP: $OPODIP（脱敏后两位）" | sed 's/\.[0-9]*\.[0-9]*$/.*.*/'
+          $R69 "kubectl exec canary-edge -- ping -c2 $OPODIP 2>&1 | tail -2"
+          $R69 "kubectl exec canary-edge -- wget -q -O- http://$OPODIP:4097/ 2>&1 | head -c 120; echo"
+          $R69 'kubectl delete pod canary-edge --wait=false 2>&1 | head -1'
+          echo PROXY-JOIN-OK
+          EOF
+      - name: 收尾提醒
+        run: |
+          echo "needs_tag=${{ steps.mint.outputs.needs_tag }}"
+          echo "删临时 SG 规则（HW21→proxy:22，装完即删）——runner 外手动执行，见 run 备注。"
