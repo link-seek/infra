@@ -77,6 +77,8 @@ jobs:
           echo '$PASSB64' | base64 -d > /tmp/.p41; chmod 600 /tmp/.p41
           printf '#!/bin/sh\ncat /tmp/.p41\n' > /tmp/.ask41; chmod 700 /tmp/.ask41
           export SSH_ASKPASS=/tmp/.ask41 SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          # 重装后 host key 必变：先清 HW21 上残留的旧 key，否则 255。
+          ssh-keygen -R "$FRESH_IP" 2>/dev/null || true
           RSH="setsid -w ssh -o StrictHostKeyChecking=no root@$FRESH_IP"
           \$RSH "curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
           echo "--- 新 41 已在网，对端自报 ---"
