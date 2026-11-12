@@ -5,6 +5,8 @@
 # 注意：会在 .69 卷里留下 2~3 条 ses_k3s* 测试会话（canary 同款惯例，批量清，不逐条删）。
 set -eu
 MARKER="${1:?MARKER required}"
+# 测试模型：big-pickle（免费 + 存活；muse-spark 上游 503 中，见 #335）。
+MODEL="${E2E_MODEL:-big-pickle}"
 SID="ses_k3s$(printf '%s' "$MARKER" | tr -cd '0-9A-Za-z' | tail -c 9)"
 K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
 KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
@@ -23,7 +25,7 @@ case "$GWCODE" in 200|400|401|404) echo "gw alive: $GWCODE";; *) echo "E2E-GW-FA
 
 # 0.5 烟雾（纯模型，不碰记忆：分清模型路 vs 记忆路）
 set +e
-S_OUT="$(timeout 120 $KX opencode run "1+1等于几？只答数字" 2>&1)"; S_RC=$?
+S_OUT="$(timeout 120 $KX opencode run --model "$MODEL" "1+1等于几？只答数字" 2>&1)"; S_RC=$?
 set -e
 echo "$S_OUT" | tail -n 10
 echo "smoke rc=$S_RC"
@@ -32,7 +34,7 @@ echo SMOKE-OK
 
 echo "=== session A（写 marker=$MARKER） ==="
 set +e
-A_OUT="$(timeout 150 $KX opencode run "记住：我养了一只猫叫$MARKER" 2>&1)"; A_RC=$?
+A_OUT="$(timeout 150 $KX opencode run --model "$MODEL" "记住：我养了一只猫叫$MARKER" 2>&1)"; A_RC=$?
 set -e
 echo "$A_OUT" | tail -n 25
 [ "$A_RC" = 0 ] || { echo "E2E-A-FAIL rc=$A_RC"; exit 1; }
@@ -42,7 +44,7 @@ B_OK=0
 for attempt in 1 2; do
   echo "=== session B（新会话 ${SID}${attempt}，第 $attempt 次） ==="
   set +e
-  B_OUT="$(timeout 150 $KX opencode run --session "${SID}${attempt}" "我养的猫叫什么名字？" 2>&1)"; B_RC=$?
+  B_OUT="$(timeout 150 $KX opencode run --model "$MODEL" --session "${SID}${attempt}" "我养的猫叫什么名字？" 2>&1)"; B_RC=$?
   set -e
   echo "$B_OUT" | tail -n 25
   echo "B rc=$B_RC"
