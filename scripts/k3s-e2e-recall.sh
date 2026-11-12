@@ -5,8 +5,8 @@
 # 注意：会在 .69 卷里留下 2~3 条 ses_k3s* 测试会话（canary 同款惯例，批量清，不逐条删）。
 set -eu
 MARKER="${1:?MARKER required}"
-# 测试模型：big-pickle（免费 + 存活；muse-spark 上游 503 中，见 #335）。
-MODEL="${E2E_MODEL:-big-pickle}"
+# 测试模型：默认 muse-spark（用户真实路径，经 app-connector 出）；上游抽风时可 E2E_MODEL=big-pickle 降级验证链路。
+MODEL="${E2E_MODEL:-muse-spark-1.3-contributor}"
 SID="ses_k3s$(printf '%s' "$MARKER" | tr -cd '0-9A-Za-z' | tail -c 9)"
 K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
 KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
