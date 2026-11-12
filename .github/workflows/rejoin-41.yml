@@ -20,6 +20,7 @@ jobs:
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
+      - uses: actions/checkout@v4
       - name: 现签 41 上线 key（persistent，非 ephemeral，一次性 600s）
         id: mint
         run: |
@@ -66,23 +67,16 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          # 安装脚本走仓里文件（scripts/ts-static-install.sh），只传文件+调，不 inline 拼。
+          scp -P 2244 -i ~/.ssh/ci_key scripts/ts-static-install.sh root@100.91.222.51:/tmp/ts-install.sh
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
           set -euo pipefail
-          # 41 已重装并绑定 hw21-jump 密钥对：HW21 默认 key 直连，无密码。
-          # 重装后 host key 必变：先清残留旧 key，否则 255。
           ssh-keygen -R "$FRESH_IP" 2>/dev/null || true
-          RSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@$FRESH_IP"
-          # install.sh 不认 EulerOS：静态二进制直装（现场取最新版，不 pin）。
-          \$RSH "set -euo pipefail; cd /tmp;
-          TGZ=\$(curl -fsSL https://pkgs.tailscale.com/stable/ | grep -oE 'tailscale_[0-9]+[.][0-9]+[.][0-9]+_amd64[.]tgz' | sort -uV | tail -1); [ -n \"\$TGZ\" ];
-          curl -fsSL -o ts.tgz \"https://pkgs.tailscale.com/stable/\$TGZ\";
-          tar xzf ts.tgz; D=\$(ls -d tailscale_*_amd64 | head -1);
-          cp \"\$D/tailscaled\" \"\$D/tailscale\" /usr/local/bin/; mkdir -p /var/lib/tailscale;
-          printf '[Unit]\nDescription=Tailscale node agent\nAfter=network-online.target\nWants=network-online.target\n[Service]\nExecStart=/usr/local/bin/tailscaled --state=/var/lib/tailscale/tailscaled.state\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/tailscaled.service;
-          systemctl daemon-reload; systemctl enable --now tailscaled; sleep 3;
-          tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/ts-install.sh root@$FRESH_IP:/tmp/ts-install.sh
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@$FRESH_IP "bash /tmp/ts-install.sh \"$JOINKEY\" mesh-hw-41"
           echo "--- 新 41 已在网，对端自报 ---"
-          \$RSH "tailscale status --self | head -2"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@$FRESH_IP "tailscale status --self | head -2"
+          shred -u /tmp/ts-install.sh
           EOF
           shred -u /tmp/join.key
       - name: 收尾提醒
