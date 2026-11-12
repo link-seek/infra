@@ -6,6 +6,8 @@ metadata:
   namespace: opencode-restore
 spec:
   restartPolicy: Never
+  imagePullSecrets:
+    - name: swr-pull
   containers:
     - name: sleep
       image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01

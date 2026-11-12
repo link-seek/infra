@@ -33,6 +33,8 @@ echo "control-plane backup ok: $(ls "$BKDIR" | tr '\n' ' ')"
 # 2. scratch 恢复（幂等：先清）
 $R69 "kubectl delete ns opencode-restore --ignore-not-found && kubectl wait --for=delete ns/opencode-restore --timeout=120s" 2>/dev/null || true
 $R69 "kubectl apply -f /tmp/k3s-restore-ns.yaml && kubectl apply -f /tmp/k3s-restore-pvc.yaml && kubectl apply -f /tmp/k3s-restore-consumer.yaml"
+# swr-pull 只在 opencode ns 有，复制一份到 scratch（免 workflow 传密钥）
+$R69 "kubectl -n opencode get secret swr-pull -o yaml | sed 's/namespace: opencode/namespace: opencode-restore/' | kubectl apply -f -"
 if ! $R69 "kubectl -n opencode-restore wait --for=condition=Ready pod/restore-consumer --timeout=180s"; then
   $R69 "kubectl -n opencode-restore get pvc,pods; kubectl -n opencode-restore describe pod restore-consumer | tail -20"
   echo "FAIL: consumer Pod 不 Ready（上为现场）"; exit 1
