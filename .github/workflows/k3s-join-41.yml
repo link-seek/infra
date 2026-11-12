@@ -43,8 +43,8 @@ jobs:
           if $R test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroupv2 已是，无需切换"; exit 0; fi
           echo "当前 v1，切 v2（grubby 改 BLS + 重生成 BIOS grub.cfg，两步缺一不可）..."
           $R "grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 && grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1 | tail -1 && grep -q unified_cgroup_hierarchy /boot/grub2/grub.cfg && echo GRUB-OK"
-          echo "发重启（nohup 脱钩）..."
-          $R "nohup sh -c 'sleep 3; systemctl reboot' >/dev/null 2>&1 & sleep 2; true"
+          echo "发重启（前台 reboot，ssh 断开是正常的，掉线证明随后）..."
+          $R "systemctl reboot" || true
           EOF
           echo "验掉线（fail-closed：22 不掉=没重启，直接失败）..."
           DROPPED=no
