@@ -22,5 +22,6 @@ printf '[Unit]\nDescription=Tailscale node agent\nAfter=network-online.target\nW
 systemctl daemon-reload
 systemctl enable --now tailscaled
 sleep 3
-tailscale up --tun=userspace-networking --authkey="$AUTHKEY" --hostname="$HOSTNAME" --ssh --accept-routes=false --accept-dns=false
+tailscale up --authkey="$AUTHKEY" --hostname="$HOSTNAME" --ssh --accept-routes=false --accept-dns=false
+# 注意：--tun 是 tailscaled 的 daemon flag（见上面 unit），tailscale up 没有这个 flag。
 tailscale ip -4
