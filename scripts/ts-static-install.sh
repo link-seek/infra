@@ -17,13 +17,10 @@ if command -v nmcli >/dev/null 2>&1; then
   CONN="$(nmcli -t -f NAME,DEVICE connection show 2>/dev/null | grep ":${DEV}$" | head -1 | cut -d: -f1)"
   if [ -n "$CONN" ]; then
     nmcli connection modify "$CONN" ipv4.ignore-auto-dns yes ipv4.dns "114.114.114.114,8.8.8.8"
-    nmcli connection up "$CONN" >/dev/null 2>&1 || true
-  else
-    printf 'nameserver 114.114.114.114\nnameserver 8.8.8.8\n' > /etc/resolv.conf
   fi
-else
-  printf 'nameserver 114.114.114.114\nnameserver 8.8.8.8\n' > /etc/resolv.conf
 fi
+# 直写立即生效（不做 connection up，避免 live 机闪断；NM 持久化靠上面那行）
+printf 'nameserver 114.114.114.114\nnameserver 8.8.8.8\n' > /etc/resolv.conf
 getent hosts pkgs.tailscale.com >/dev/null || { echo "FAIL: DNS 仍不通"; exit 1; }
 
 # 1. 取最新静态包并安装
