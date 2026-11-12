@@ -10,27 +10,23 @@ K69="ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
 KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
 
 echo "=== session A（写 marker=$MARKER） ==="
-if timeout 100 $KX opencode run "记住：我养了一只猫叫$MARKER" 2>&1 | tail -n 15; then
-  echo "OK: session A 结束"
-else
-  echo "E2E-A-FAIL"
-  exit 1
-fi
+A_OUT="$(timeout 150 $KX opencode run "记住：我养了一只猫叫$MARKER" 2>&1)"; A_RC=$?
+echo "$A_OUT" | tail -n 25
+[ "$A_RC" = 0 ] || { echo "E2E-A-FAIL rc=$A_RC"; exit 1; }
+echo "OK: session A 结束"
 sleep 8
 B_OK=0
 for attempt in 1 2; do
   echo "=== session B（新会话 ${SID}${attempt}，第 $attempt 次） ==="
-  if OUT="$(timeout 100 $KX opencode run --session "${SID}${attempt}" "我养的猫叫什么名字？" 2>&1)"; then
-    echo "$OUT" | tail -n 15
-    if printf '%s' "$OUT" | grep -Fq "$MARKER"; then
-      echo "OK: 新会话召回 $MARKER"
-      B_OK=1
-      break
-    fi
-    echo "NOTE: 未回显（attempt $attempt）"
-  else
-    echo "NOTE: B 退出非零（attempt $attempt）"
+  B_OUT="$(timeout 150 $KX opencode run --session "${SID}${attempt}" "我养的猫叫什么名字？" 2>&1)"; B_RC=$?
+  echo "$B_OUT" | tail -n 25
+  echo "B rc=$B_RC"
+  if [ "$B_RC" = 0 ] && printf '%s' "$B_OUT" | grep -Fq "$MARKER"; then
+    echo "OK: 新会话召回 $MARKER"
+    B_OK=1
+    break
   fi
+  echo "NOTE: 未回显或非零（attempt $attempt）"
   [ "$attempt" -lt 2 ] && sleep 8
 done
 [ "$B_OK" = "1" ] || { echo "E2E-B-FAIL: 新会话未召回"; exit 1; }
