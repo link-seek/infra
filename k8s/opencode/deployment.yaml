@@ -42,7 +42,10 @@ spec:
           env:
             - {name: PIPELINE_MANAGED, value: "true"}
             - {name: TS_HOSTNAME, value: opencode-k3s}
-            - {name: LITELLM_BASE_URL, value: "http://100.91.222.51:4000"}
+            # 网关走 #181 独立身份（ACL 已对 tag:opencode 放行）；IP 由 k3s-apply 现场解析渲染
+            # （pod DNS 不认 MagicDNS；IP 稳定数月，每次发版刷新）。不用 HW41 式 .51 直连。
+            - name: LITELLM_BASE_URL
+              valueFrom: {secretKeyRef: {name: opencode-env, key: LITELLM_BASE_URL}}
             - {name: SSH_TARGETS, value: "mesh-hw-21 mesh-hw-41"}
             - {name: SMTP_HOST, value: smtp.163.com}
             - {name: SMTP_PORT, value: "465"}
@@ -73,6 +76,12 @@ spec:
             - {name: prod-data, mountPath: /root/.local/share/opencode}
             - {name: ts-state, mountPath: /var/lib/tailscale}
             - {name: entrypoint, mountPath: /entrypoint}
+            - {name: tun, mountPath: /dev/net/tun}
+          # TUN 模式出网（官方 sidecar 正统；userspace 只管进不管出，gw:000 实锤）。
+          # 单租户节点，NET_ADMIN 可接受。
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
           readinessProbe:
             httpGet: {path: /, port: 4097}
             initialDelaySeconds: 90
@@ -107,6 +116,8 @@ spec:
           persistentVolumeClaim: {claimName: ts-state}
         - name: entrypoint
           configMap: {name: opencode-entrypoint, defaultMode: 0755}
+        - name: tun
+          hostPath: {path: /dev/net/tun, type: CharDevice}
 ---
 apiVersion: v1
 kind: Service
