@@ -1,0 +1,23 @@
+# 演练占位 Pod：只为触发 WaitForFirstConsumer 绑定（sleep，不干活）。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restore-consumer
+  namespace: opencode-restore
+spec:
+  restartPolicy: Never
+  containers:
+    - name: sleep
+      image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - {name: work, mountPath: /mnt/work}
+        - {name: data, mountPath: /mnt/data}
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 200m, memory: 256Mi}
+  volumes:
+    - name: work
+      persistentVolumeClaim: {claimName: restore-work}
+    - name: data
+      persistentVolumeClaim: {claimName: restore-data}

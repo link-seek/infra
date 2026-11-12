@@ -32,10 +32,10 @@ echo "control-plane backup ok: $(ls "$BKDIR" | tr '\n' ' ')"
 
 # 2. scratch 恢复（幂等：先清）
 $R69 "kubectl delete ns opencode-restore --ignore-not-found && kubectl wait --for=delete ns/opencode-restore --timeout=120s" 2>/dev/null || true
-$R69 "kubectl apply -f /tmp/k3s-restore-ns.yaml && kubectl apply -f /tmp/k3s-restore-pvc.yaml"
-if ! $R69 "kubectl -n opencode-restore wait --for=jsonpath='{.status.phase}'=Bound pvc/restore-work pvc/restore-data --timeout=180s"; then
-  $R69 "kubectl -n opencode-restore get pvc; kubectl -n opencode-restore describe pvc restore-work | tail -20; kubectl -n kube-system get pods -l app=local-path-provisioner 2>/dev/null || kubectl get pods -A | grep -i 'local-path\|provisioner' | head -5"
-  echo "FAIL: scratch PVC 不 Bound（上为现场）"; exit 1
+$R69 "kubectl apply -f /tmp/k3s-restore-ns.yaml && kubectl apply -f /tmp/k3s-restore-pvc.yaml && kubectl apply -f /tmp/k3s-restore-consumer.yaml"
+if ! $R69 "kubectl -n opencode-restore wait --for=condition=Ready pod/restore-consumer --timeout=180s"; then
+  $R69 "kubectl -n opencode-restore get pvc,pods; kubectl -n opencode-restore describe pod restore-consumer | tail -20"
+  echo "FAIL: consumer Pod 不 Ready（上为现场）"; exit 1
 fi
 RWPV="$($R69 "kubectl -n opencode-restore get pvc restore-work -o jsonpath={.spec.volumeName}")"
 RDPV="$($R69 "kubectl -n opencode-restore get pvc restore-data -o jsonpath={.spec.volumeName}")"
