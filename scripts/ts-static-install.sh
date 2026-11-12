@@ -35,6 +35,8 @@ curl -fsSL -o ts.tgz "https://pkgs.tailscale.com/stable/$TGZ"
 rm -rf tailscale_*_amd64
 tar xzf ts.tgz
 D="$(ls -d tailscale_*_amd64 | head -1)"
+# 运行中的二进制不可覆盖：先停服再拷（幂等重跑必需）。
+systemctl stop tailscaled 2>/dev/null || true
 cp "$D/tailscaled" "$D/tailscale" /usr/local/bin/
 mkdir -p /var/lib/tailscale
 printf '[Unit]\nDescription=Tailscale node agent\nAfter=network-online.target\nWants=network-online.target\n[Service]\nExecStart=/usr/local/bin/tailscaled --state=/var/lib/tailscale/tailscaled.state\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/tailscaled.service
