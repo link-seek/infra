@@ -1,17 +1,24 @@
-name: rejoin-41-tailnet
-# 41 重装后经 HW21 跳板拉回 tailnet（一次性流程）。
-# 前置（用户控制台+网页完成）：41 已重装（保留 192.168.1.41 内网 IP，设好 root 密码），
-# GH repo Settings→Secrets→Actions 已加 HW41_TEMP_PASS（重装时设的 root 密码）。
-# 本 workflow：现签 persistent 非 ephemeral 一次性 key（10 分钟过期）→ HW21 跳 → 新 41 装 tailscale 上线。
+name: rejoin-node-tailnet
+# 重装/新机器经 HW21 跳板拉回 tailnet（一次性流程，41/.69 通用）。
+# 本 workflow：现签 persistent 非 ephemeral 一次性 key（10 分钟过期）→ HW21 跳 → 目标机装 tailscale 上线。
+# 目标机需已绑定 hw21-jump 密钥对（重装时选），全程 key 直连，无密码。
 on:
   workflow_dispatch:
     inputs:
       fresh_ip:
-        description: "重装后 41 内网 IP（默认保持 192.168.1.41）"
+        description: "目标机内网 IP"
         required: false
         default: "192.168.1.41"
+      ts_hostname:
+        description: "tailnet hostname（如 mesh-hw-41 / mesh-hw-69）"
+        required: false
+        default: "mesh-hw-41"
+      ts_tags:
+        description: "逗号分隔（如 tag:mesh,tag:prod；签不出时自动降级无 tag 进网）"
+        required: false
+        default: "tag:mesh,tag:opencode-hw41,tag:prod"
 concurrency:
-  group: rejoin-41
+  group: rejoin-node
   cancel-in-progress: false
 jobs:
   rejoin:
@@ -21,14 +28,15 @@ jobs:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: 现签 41 上线 key（persistent，非 ephemeral，一次性 600s）
+      - name: 现签上线 key（persistent，非 ephemeral，一次性 600s）
         id: mint
         run: |
           set -euo pipefail
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
           mint() { curl -sS -m 30 -o /tmp/mint.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" \
             -H 'Content-Type: application/json' -d "$1" https://api.tailscale.com/api/v2/tailnet/-/keys; }
-          BODY_TAGGED='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":["tag:mesh","tag:opencode-hw41","tag:prod"]}}},"expirySeconds":600}'
+          TAGS_JSON="$(printf '%s' "${{ inputs.ts_tags }}" | python3 -c "import json,sys; print(json.dumps([t.strip() for t in sys.stdin.read().split(',') if t.strip()]))")"
+          BODY_TAGGED="$(python3 -c "import json; print(json.dumps({'capabilities':{'devices':{'create':{'reusable':False,'ephemeral':False,'preauthorized':True,'tags':json.loads('$TAGS_JSON')}}},'expirySeconds':600}))")"
           CODE="$(mint "$BODY_TAGGED")"
           KEY="$(python3 -c "import json; print(json.load(open('/tmp/mint.json')).get('key',''))" 2>/dev/null || true)"
           if [ -n "$KEY" ]; then
@@ -57,13 +65,14 @@ jobs:
           [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-rejoin41-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-      - name: 经 HW21 跳到新 41，装 tailscale 上线（key 直连，无密码）
+      - name: 经 HW21 跳到目标机，装 tailscale 上线（key 直连，无密码）
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
           set -euo pipefail
           JOINKEY="$(cat /tmp/join.key)"; echo "::add-mask::$JOINKEY"
           FRESH_IP="${{ inputs.fresh_ip }}"
+          TS_HOST="${{ inputs.ts_hostname }}"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
@@ -73,8 +82,8 @@ jobs:
           set -euo pipefail
           ssh-keygen -R "$FRESH_IP" 2>/dev/null || true
           scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/ts-install.sh root@$FRESH_IP:/tmp/ts-install.sh
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@$FRESH_IP "bash /tmp/ts-install.sh \"$JOINKEY\" mesh-hw-41"
-          echo "--- 新 41 已在网，对端自报 ---"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@$FRESH_IP "bash /tmp/ts-install.sh \"$JOINKEY\" $TS_HOST"
+          echo "--- $TS_HOST 已在网，对端自报 ---"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@$FRESH_IP "tailscale status --self | head -2"
           shred -u /tmp/ts-install.sh
           EOF
@@ -82,6 +91,5 @@ jobs:
       - name: 收尾提醒
         run: |
           echo "NEEDS_TAG=${{ steps.mint.outputs.needs_tag }}"
-          echo "1) 去 tailscale admin 台删掉旧 mesh-hw-41 残留节点（同名会加数字后缀）。"
-          echo "2) needs_tag=true 时给新节点拖回 tag:mesh/tag:opencode-hw41/tag:prod。"
-          echo "3) GH 的 HW41_TEMP_PASS secret 已无用，可删（本次改 key 直连）。"
+          echo "1) 去 tailscale admin 台删掉旧 ${{ inputs.ts_hostname }} 残留节点（同名会加数字后缀）。"
+          echo "2) needs_tag=true 时给新节点拖回 ${{ inputs.ts_tags }}。"
