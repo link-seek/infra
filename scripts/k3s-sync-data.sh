@@ -43,11 +43,8 @@ DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath={.spec.local.path}")"
 [ -n "$WPATH" ] || WPATH="$($R69 "kubectl get pv $WPVNAME -o json" | sed -n 's/^[[:space:]]*"path": "\(.*\)".*/\1/p' | head -1)"
 [ -n "$DPATH" ] || DPATH="$($R69 "kubectl get pv $DPVNAME -o json" | sed -n 's/^[[:space:]]*"path": "\(.*\)".*/\1/p' | head -1)"
 echo "volpath: work=[$WPATH] data=[$DPATH]"
-WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath='{.spec.hostPath.path}'")"
-DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 [ -n "$WPATH" ] || { echo "FAIL: 取不到 work 卷路径"; exit 1; }
 [ -n "$DPATH" ] || { echo "FAIL: 取不到 data 卷路径"; exit 1; }
-echo "work: $WPATH data: $DPATH"
 
 # 5. .69 现状备份（trial 渣，留回退）→ 清空 → 解包
 $R69 "tar czf /tmp/k3s-vol-backup-work.tgz -C '$WPATH' . && tar czf /tmp/k3s-vol-backup-data.tgz -C '$DPATH' . && ls -lh /tmp/k3s-vol-backup-*.tgz"
