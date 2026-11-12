@@ -6,11 +6,16 @@
 set -eu
 MARKER="${1:?MARKER required}"
 SID="ses_k3s$(printf '%s' "$MARKER" | tr -cd '0-9A-Za-z' | tail -c 9)"
-K69="ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
 KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
 
+# 0. 网关预检（pod→网关，fail-fast；分清网关不通 vs 召回失败）
+$K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 15 -o /dev/null -w 'gw:%{http_code}\n' http://100.91.222.51:4000/" || { echo "E2E-GW-FAIL"; exit 1; }
+
 echo "=== session A（写 marker=$MARKER） ==="
+set +e
 A_OUT="$(timeout 150 $KX opencode run "记住：我养了一只猫叫$MARKER" 2>&1)"; A_RC=$?
+set -e
 echo "$A_OUT" | tail -n 25
 [ "$A_RC" = 0 ] || { echo "E2E-A-FAIL rc=$A_RC"; exit 1; }
 echo "OK: session A 结束"
@@ -18,7 +23,9 @@ sleep 8
 B_OK=0
 for attempt in 1 2; do
   echo "=== session B（新会话 ${SID}${attempt}，第 $attempt 次） ==="
+  set +e
   B_OUT="$(timeout 150 $KX opencode run --session "${SID}${attempt}" "我养的猫叫什么名字？" 2>&1)"; B_RC=$?
+  set -e
   echo "$B_OUT" | tail -n 25
   echo "B rc=$B_RC"
   if [ "$B_RC" = 0 ] && printf '%s' "$B_OUT" | grep -Fq "$MARKER"; then
