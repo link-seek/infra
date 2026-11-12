@@ -28,6 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: resolve stack (NS/APP/DEPLOY/PORT/HEALTH/JOIN_TAG)
+        run: |
+          APP="$(basename "${{ inputs.stack }}")"
+          case "$APP" in
+            litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway;;
+            *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode;;
+          esac
+          { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; } >> "$GITHUB_ENV"
+          echo "stack=$APP deploy=$DEPLOY port=$PORT join=$JT"
+
       - name: join tailnet (guest, mint-only)
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
@@ -55,10 +65,23 @@ jobs:
           S_SMTP: ${{ secrets.PROD_SMTP_PASS }}
         run: |
           set -euo pipefail
+          if [ "$K3S_NS" = "litellm" ]; then
+            # 网关：隻要 TS key（tag:gateway）+ 现场随机 master key；无状态，不吃业务 secret。
+            [ -n "${TS_API_KEY:-}" ] || { echo "FAIL: TS_API_KEY missing"; exit 1; }
+            BODY="$(printf '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["%s"]}}},"expirySeconds":7776000}' "$K3S_JOIN_TAG")"
+            TS_JOIN="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+              -H 'Content-Type: application/json' -d "$BODY" \
+              https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+            [ -n "$TS_JOIN" ] || { echo "FAIL: TS mint"; exit 1; }
+            MASTER="sk-$(python3 -c 'import secrets;print(secrets.token_hex(16))')"
+            { echo "TS_JOIN_KEY=$TS_JOIN"; echo "LITELLM_MASTER_KEY=$MASTER"; } > /tmp/opencode-env.txt
+            echo "litellm identity: $K3S_JOIN_TAG (TS_HOSTNAME 由 manifest 定)"
+            exit 0
+          fi
           for v in S_LITELLM S_GH S_PWD S_AK S_SK S_SMTP CF_TOKEN TS_API_KEY; do
             [ -n "${!v:-}" ] || { echo "FAIL: $v missing (fail-closed)"; exit 1; }
           done
-          BODY="$(printf '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["tag:opencode"]}}},"expirySeconds":7776000}')"
+          BODY="$(printf '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["%s"]}}},"expirySeconds":7776000}' "$K3S_JOIN_TAG")"
           TS_JOIN="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
             -H 'Content-Type: application/json' -d "$BODY" \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
@@ -84,33 +107,32 @@ jobs:
           # runner 为 tag:user（user→mesh 有 accept）；2244 key 路已死（43063036641 实锤）。
           SSH41="sudo tailscale ssh root@100.111.231.85"
           if [ "${{ inputs.action }}" = "rollback" ]; then
-            $SSH41 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n opencode rollout undo deploy/opencode && kubectl -n opencode rollout status deploy/opencode --timeout=600s'"
+            $SSH41 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n $K3S_NS rollout undo deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s'"
           else
             tar czf /tmp/stack.tgz "${{ inputs.stack }}"
             $SSH41 "cat > /tmp/stack.tgz" < /tmp/stack.tgz
             $SSH41 "cat > /tmp/opencode-env.txt && chmod 600 /tmp/opencode-env.txt" < /tmp/opencode-env.txt
             $SSH41 "scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/stack.tgz /tmp/opencode-env.txt root@192.168.1.69:/tmp/ && ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 \
               'set -e; mkdir -p /tmp/k3s-apply && tar xzf /tmp/stack.tgz -C /tmp/k3s-apply && cd /tmp/k3s-apply && kubectl apply -f ${{ inputs.stack }}/namespace.yaml && \
-               kubectl create secret docker-registry swr-pull -n opencode --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username=\"$SWR_LOGIN_USER\" --docker-password=\"$SWR_LOGIN_PASS\" --dry-run=client -o yaml | kubectl apply -f - && \
-               kubectl create secret generic opencode-env -n opencode --from-env-file=/tmp/opencode-env.txt --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt && \
-               kubectl apply -R -f ${{ inputs.stack }} && kubectl -n opencode rollout status deploy/opencode --timeout=900s'"
+               kubectl create secret docker-registry swr-pull -n $K3S_NS --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username=\"$SWR_LOGIN_USER\" --docker-password=\"$SWR_LOGIN_PASS\" --dry-run=client -o yaml | kubectl apply -f - && \
+               kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt && \
+               kubectl apply -R -f ${{ inputs.stack }} && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=900s'"
           fi
       - name: verify in-cluster (fail-closed)
         if: inputs.action != 'rollback'
         run: |
           set -euo pipefail
           # 远端整段必须整体非零即红：禁止尾随 ; echo 吞退出码。
-          # browser 侧无 curl（43067087861 实锤），改认 kubelet 探针：wait Ready 覆盖双容器。
           # $ 须转义：外层双引号，否则 $(...) 被 runner 本地展开（kubectl 连 localhost:8080 实锤）。
           sudo tailscale ssh root@100.111.231.85 \
             "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 \
             'set -euo pipefail; \
-            code=\$(kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -o /dev/null -w \"%{http_code}\" --max-time 15 http://127.0.0.1:4097/); \
+            code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_NS -- curl -s -o /dev/null -w \"%{http_code}\" --max-time 15 http://127.0.0.1:$K3S_PORT$K3S_HEALTH); \
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
-            kubectl -n opencode wait --for=condition=Ready pod -l app=opencode --timeout=180s'"
+            kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s'"
           echo V-SERVING
       - name: probe tailnet ingress (Caddy视角, fail-closed)
-        if: inputs.action != 'rollback'
+        if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
         run: |
           set -euo pipefail
           # runner 与 Caddy 同为 tailnet 普通节点：直连 pod 身份，验证切流前可达。
@@ -128,7 +150,7 @@ jobs:
           # 附带打印卷位置，给数据同步步骤用（只读）。
           sudo tailscale ssh root@100.111.231.85 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n opencode get pvc && kubectl get pv'"
       - name: gateway POST 诊断（runner 直调，只 WARN 不拦门）
-        if: inputs.action != 'rollback'
+        if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
         env:
           S_LITELLM: ${{ secrets.OPENCODE_API_KEY }}
         run: |
@@ -137,13 +159,13 @@ jobs:
           echo "::add-mask::$S_LITELLM"
           CODE=$(curl -s -m 90 -o /tmp/gw-post.out -w '%{http_code}' -X POST https://litellm.linkseek.net.cn/v1/chat/completions \
             -H "Authorization: Bearer $S_LITELLM" -H 'Content-Type: application/json' \
-            -d '{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"1+1=?"}],"max_tokens":5,"stream":false}' || true)
+            -d '{"model":"big-pickle","messages":[{"role":"user","content":"1+1=?"}],"max_tokens":5,"stream":false}' || true)
           echo "GW-POST http=$CODE"
           head -c 300 /tmp/gw-post.out; echo
           rm -f /tmp/gw-post.out
           true
       - name: e2e memory recall（内容级门，#338 健康门，fail-closed）
-        if: inputs.action != 'rollback'
+        if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
         run: |
           set -euo pipefail
           # A 写 marker → B 新会话召回。模型走容器内网关，数据走 .69 卷。
@@ -151,3 +173,16 @@ jobs:
           SSH41="sudo tailscale ssh root@100.111.231.85"
           $SSH41 "cat > /tmp/k3s-e2e-recall.sh" < "$GITHUB_WORKSPACE/scripts/k3s-e2e-recall.sh"
           $SSH41 "chmod +x /tmp/k3s-e2e-recall.sh && /tmp/k3s-e2e-recall.sh '$MARK' && rm -f /tmp/k3s-e2e-recall.sh"
+      - name: litellm verify（网关内容门，对标 goss 黑名单 400，fail-closed）
+        if: inputs.action != 'rollback' && inputs.stack == 'k8s/litellm'
+        run: |
+          set -euo pipefail
+          # runner（tag:user→tag:gateway:4000 已放行）直连 pod 身份：models 200 + 黑名单模型 400。
+          IP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if 'litellm-gateway-k3s' in str(p.get('DNSName','')) or 'litellm-gateway-k3s' in str(p.get('HostName',''))),''))")
+          [ -n "$IP" ] || { echo LITELLM-NOT-VISIBLE-FAIL; exit 1; }
+          echo "gateway-k3s tailnet ip=$IP"
+          CODE=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://$IP:4000/v1/models" || true)
+          [ "$CODE" = 200 ] || { echo "LITELLM-MODELS-FAIL http=$CODE"; exit 1; }
+          BCODE=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST "http://$IP:4000/v1/chat/completions" -H 'Content-Type: application/json' -d '{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' || true)
+          [ "$BCODE" = "400" ] || { echo "LITELLM-BLACKLIST-FAIL http=$BCODE"; exit 1; }
+          echo LITELLM-OK
