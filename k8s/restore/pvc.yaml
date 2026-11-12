@@ -1,0 +1,22 @@
+# 恢复演练专用卷（scratch，演练完删 ns 即回收；local-path）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restore-work
+  namespace: opencode-restore
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restore-data
+  namespace: opencode-restore
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,0 +1,50 @@
+name: k3s-restore-drill（恢复演练，#338 验收项）
+
+# 只碰 scratch（opencode-restore）+ 备份文件；生产 ns 不动，HW21/OCI/阿里不在链上。
+# 前置：.69 /tmp 有 sync-data 备份 tgz（缺失则先跑 k3s-sync-data）。
+# 触发：手动 workflow_dispatch + confirm=yes。
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "填 yes 才跑演练"
+        required: false
+        default: ""
+
+concurrency:
+  group: k3s-restore-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: join tailnet (user, mint-only)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="k3s-drill-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale ip -4
+
+      - name: drill via HW41 jump (fail-closed)
+        run: |
+          set -euo pipefail
+          [ "${{ inputs.confirm }}" = "yes" ] || { echo "need confirm=yes"; exit 1; }
+          SSH41="sudo tailscale ssh root@100.111.231.85"
+          tar czf /tmp/restore.tgz k8s/restore
+          $SSH41 "cat > /tmp/restore.tgz" < /tmp/restore.tgz
+          $SSH41 "cat > /tmp/k3s-restore-drill.sh" < "$GITHUB_WORKSPACE/scripts/k3s-restore-drill.sh"
+          $SSH41 "mkdir -p /tmp/k3s-restore && tar xzf /tmp/restore.tgz -C /tmp/k3s-restore && chmod +x /tmp/k3s-restore-drill.sh && sh /tmp/k3s-restore-drill.sh && rm -f /tmp/k3s-restore-drill.sh /tmp/restore.tgz && rm -rf /tmp/k3s-restore"

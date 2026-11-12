@@ -16,12 +16,13 @@ opencode.xieyucheng.top {
 	}
 }
 
-# mesh-ali-gz 入口 opencode.yingxin.net.cn：Caddy → tailnet → hw41:4097（容器在 hw41）
+# mesh-ali-gz 入口 opencode.yingxin.net.cn：Caddy → tailnet → k3s pod（P4 直切，2026-11-12）。
+# 旧后端 hw41:4097 保留 7 天（compose 栈原地不动，回滚=改回即发）；7 天无异常再下。
 # 后端用 MagicDNS 全称＋dynamic a（refresh 5s＋被动健康检查；deliver-caddy 保证本机首选 100.100.100.100）。
 opencode.yingxin.net.cn {
 	reverse_proxy {
 		dynamic a {
-			name mesh-hw-41.mackarel-polaris.ts.net.
+			name opencode-k3s.mackarel-polaris.ts.net.
 			port 4097
 			refresh 5s
 			resolvers 100.100.100.100
