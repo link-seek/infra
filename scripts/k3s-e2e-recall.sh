@@ -23,6 +23,17 @@ for i in 1 2; do
 done
 case "$GWCODE" in 200|400|401|404) echo "gw alive: $GWCODE";; *) echo "E2E-GW-FAIL http=$GWCODE"; exit 1;; esac
 
+# 0.6 直调对照（绕开 opencode CLI：pod 直 POST 网关，key 只进内存不落地不打印）
+# 用途：CLI 挂而直调通 => CLI/配置问题；直调也挂 => 网关/上游问题。
+# 注意：LITELLM_API_KEY 只在 curl 参数里展开，脚本全程 set +x 关闭，日志只留状态码。
+DKEY="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_API_KEY" | tr -d '[:space:]')"
+[ -n "$DKEY" ] || { echo "E2E-KEY-FAIL"; exit 1; }
+echo "::add-mask::$DKEY"
+for DM in big-pickle muse-spark-1.3-contributor; do
+  DCODE="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 60 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H \"Authorization: Bearer $DKEY\" -H 'Content-Type: application/json' -d '{\"model\":\"$DM\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}'" || true)"
+  echo "direct model=$DM http=$DCODE"
+done
+
 # 0.5 烟雾（纯模型，不碰记忆：分清模型路 vs 记忆路）
 set +e
 S_OUT="$(timeout 120 $KX opencode run --model "$MODEL" "1+1等于几？只答数字" 2>&1)"; S_RC=$?
