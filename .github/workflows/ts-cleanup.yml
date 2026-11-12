@@ -90,6 +90,7 @@ jobs:
           # 永不删（精确 hostname，pattern 对上也不删）
           NEVER = {
               "mesh-hw-21", "mesh-hw-41", "mesh-ali-gz", "mesh-oci-vpn",
+              "mesh-oci-proxy", "mesh-hw-69",
               "mesh-xyc-pc", "mesh-yx-mac", "opencode-prod", "opencode-prod-canary",
           }
           try:

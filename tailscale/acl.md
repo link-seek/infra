@@ -12,6 +12,8 @@
 | mesh-ali-gz | 100.85.128.116 | `tag:mesh` | 公网入口机；Caddy → hw-21 走 tailnet |
 | mesh-hw-41 | 100.111.231.85 | `tag:mesh` | 普通机器，**不再是 trial 靶子** |
 | mesh-oci-vpn | 100.103.182.112 | `tag:connector` | 出口节点（exit node） |
+| mesh-hw-69 | 100.93.119.21 | `tag:mesh` + `tag:prod` | k3s server |
+| mesh-oci-proxy | 100.73.221.121 | `tag:mesh` | k3s edge agent（dedicated=edge taint） |
 | mesh-xyc-pc | 100.69.220.112 | `tag:mesh` | 个人 PC |
 | mesh-yx-mac | 100.78.144.89 | `tag:mesh` | macOS（偶尔离线） |
 | opencode-prod（容器） | 自动分配 | `tag:opencode` | userspace tailscaled，hostname 固定 `opencode-prod`，随容器起停 |

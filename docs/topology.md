@@ -11,6 +11,8 @@
 | mesh-ali-gz（120） | 120.77.76.20（阿里广州） | 100.85.128.116 | 公网入口：Caddy 终止 TLS | 只走 tailnet（22 公网关闭） |
 | mesh-hw-41 | — | 100.111.231.85 | 业务（langfuse 等） | 经 hw21 |
 | mesh-oci-vpn | 152.70.105.106 | 100.103.182.112 | tailnet 出口节点 | — |
+| mesh-hw-69（hw69） | —（同 LAN 192.168.1.69） | 100.93.119.21 | k3s server | 经 hw21 跳 LAN |
+| mesh-oci-proxy | 168.110.36.240 | 100.73.221.121 | k3s edge agent | 走 tailnet（公钥在 OBS robotwin-assets/key/） |
 | mesh-xyc-pc | — | 100.69.220.112 | 个人 PC | — |
 | mesh-yx-mac | — | 100.78.144.89 | macOS（偶尔离线） | — |
 
