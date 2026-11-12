@@ -21,7 +21,12 @@ DDIR="$(docker volume inspect -f '{{.Mountpoint}}' "$DVOL")"
 $R69 "kubectl -n opencode scale deploy/opencode --replicas=0"
 $R69 "kubectl -n opencode wait --for=delete pod -l app=opencode --timeout=180s"
 
-# 2. HW41 打包（Mountpoint 直读，不另拉镜像）
+# 2. HW41 打包（Mountpoint 直读，不另拉镜像；记源字节+文件数，对账用，源为 live 卷取下限）
+SRC_WN="$(find "$WDIR" | wc -l)"
+SRC_DN="$(find "$DDIR" | wc -l)"
+SRC_WB="$(du -sb "$WDIR" | cut -f1)"
+SRC_DB="$(du -sb "$DDIR" | cut -f1)"
+echo "src: work files=$SRC_WN bytes=$SRC_WB data files=$SRC_DN bytes=$SRC_DB"
 du -sh "$WDIR" "$DDIR"
 tar czf /tmp/k3s-sync-work.tgz -C "$WDIR" .
 tar czf /tmp/k3s-sync-data.tgz -C "$DDIR" .
@@ -46,10 +51,20 @@ echo "volpath: work=[$WPATH] data=[$DPATH]"
 [ -n "$WPATH" ] || { echo "FAIL: 取不到 work 卷路径"; exit 1; }
 [ -n "$DPATH" ] || { echo "FAIL: 取不到 data 卷路径"; exit 1; }
 
-# 5. .69 现状备份（trial 渣，留回退）→ 清空 → 解包
+# 5. .69 现状备份（trial 渣，留回退）→ 清空 → 解包 → 对账（源 live，取 90% 下限）
 $R69 "tar czf /tmp/k3s-vol-backup-work.tgz -C '$WPATH' . && tar czf /tmp/k3s-vol-backup-data.tgz -C '$DPATH' . && ls -lh /tmp/k3s-vol-backup-*.tgz"
 $R69 "find '$WPATH' -mindepth 1 -delete && find '$DPATH' -mindepth 1 -delete"
 $R69 "tar xzf /tmp/k3s-sync-work.tgz -C '$WPATH' && tar xzf /tmp/k3s-sync-data.tgz -C '$DPATH' && du -sh '$WPATH' '$DPATH'"
+DST_WN="$($R69 "find '$WPATH' | wc -l" | tr -d '[:space:]')"
+DST_DN="$($R69 "find '$DPATH' | wc -l" | tr -d '[:space:]')"
+DST_WB="$($R69 "du -sb '$WPATH' | cut -f1" | tr -d '[:space:]')"
+DST_DB="$($R69 "du -sb '$DPATH' | cut -f1" | tr -d '[:space:]')"
+echo "dst: work files=$DST_WN bytes=$DST_WB data files=$DST_DN bytes=$DST_DB"
+[ "$DST_WN" -ge $((SRC_WN * 9 / 10)) ] || { echo "FAIL: work 文件数 $DST_WN < 源 $SRC_WN*0.9"; exit 1; }
+[ "$DST_DN" -ge $((SRC_DN * 9 / 10)) ] || { echo "FAIL: data 文件数 $DST_DN < 源 $SRC_DN*0.9"; exit 1; }
+[ "$DST_WB" -ge $((SRC_WB * 9 / 10)) ] || { echo "FAIL: work 字节 $DST_WB < 源 $SRC_WB*0.9"; exit 1; }
+[ "$DST_DB" -ge $((SRC_DB * 9 / 10)) ] || { echo "FAIL: data 字节 $DST_DB < 源 $SRC_DB*0.9"; exit 1; }
+echo RECONCILE-OK
 
 # 6. 拉起 + rollout（深验证走 k3s-apply apply）
 $R69 "kubectl -n opencode scale deploy/opencode --replicas=1 && kubectl -n opencode rollout status deploy/opencode --timeout=900s"
