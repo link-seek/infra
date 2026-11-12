@@ -9,8 +9,11 @@ SID="ses_k3s$(printf '%s' "$MARKER" | tr -cd '0-9A-Za-z' | tail -c 9)"
 K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
 KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
 
-# 0. 网关预检（pod→网关，fail-fast；分清网关不通 vs 召回失败）
-$K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 15 -o /dev/null -w 'gw:%{http_code}\n' http://100.91.222.51:4000/" || { echo "E2E-GW-FAIL"; exit 1; }
+# 0. 网关预检（读 pod 内渲染好的 URL，直调 IP；fail-fast；分清网关不通 vs 召回失败）
+GWURL="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_BASE_URL" | tr -d '[:space:]')"
+[ -n "$GWURL" ] || { echo "E2E-GW-URL-FAIL"; exit 1; }
+echo "gw url=$GWURL"
+$K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 15 -o /dev/null -w 'gw:%{http_code}\n' '$GWURL'" || { echo "E2E-GW-FAIL"; exit 1; }
 
 echo "=== session A（写 marker=$MARKER） ==="
 set +e

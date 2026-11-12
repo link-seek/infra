@@ -18,7 +18,8 @@ data:
     yes | hcloud configure set --cli-access-key="${HCLOUD_AK}" --cli-secret-key="${HCLOUD_SK}" --cli-region=cn-north-4 >/dev/null 2>&1 || true
     sed -i 's/"agreePrivacy": "false"/"agreePrivacy": "true"/' /root/.hcloud/config.json 2>/dev/null || true
     mkdir -p /var/lib/tailscale /var/run/tailscale
-    tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/var/log/tailscaled.log 2>&1 &
+    # TUN 模式（出网必备；userspace 只管进不管出）。需 NET_ADMIN + /dev/net/tun（见 deployment）。
+    tailscaled --tun=tailscale0 --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock >/var/log/tailscaled.log 2>&1 &
     i=0
     while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ "$i" -lt 30 ]; do
       i=$((i+1))
