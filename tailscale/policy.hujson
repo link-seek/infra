@@ -71,8 +71,6 @@
 		{"src": ["tag:mesh", "tag:opencode", "tag:user", "tag:guest", "autogroup:member"], "dst": ["tag:gateway"], "ip": ["4000"]},
 		// opencode-prod 容器只登 .21/.41 两个等价节点；人（tag:mesh）可登容器排障。
 		{"src": ["tag:opencode"], "dst": ["100.91.222.51", "100.111.231.85"], "ip": ["22"]},
-		// k3s pod 经 TUN 直调 HW21 网关 :4000（HW41 容器靠宿主机代转，.69 无代转，pod 必须自带 grant；跟 user/guest 对齐）。
-		{"src": ["tag:opencode"], "dst": ["100.91.222.51"], "ip": ["4000"]},
 		{"src": ["tag:mesh"],     "dst": ["tag:opencode"], "ip": ["22"]},
 		// 入口 Caddy（mesh）到 opencode 系容器 4097；现有 mesh→opencode:22 不动。
 		{"src": ["tag:mesh"], "dst": ["tag:opencode"], "ip": ["4097"]},

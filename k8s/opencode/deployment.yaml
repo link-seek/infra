@@ -42,8 +42,9 @@ spec:
           env:
             - {name: PIPELINE_MANAGED, value: "true"}
             - {name: TS_HOSTNAME, value: opencode-k3s}
-            # 网关在 HW21 宿主（mesh-hw-21=.51，#181 独立身份尚未落地）；pod 经 TUN 直连，需 ACL 放行（见 policy）。
-            - {name: LITELLM_BASE_URL, value: "http://100.91.222.51:4000"}
+            # 网关走公网域名（pod 经 CNI 出公网直连；过渡方案，网关迁 k3s 后改集群内 Service）。
+            # 不走 tailnet：userspace 只管进不管出，TUN/grant/IP 渲染一律不要（2026-11-12 简化）。
+            - {name: LITELLM_BASE_URL, value: "https://litellm.linkseek.net.cn"}
             - {name: SSH_TARGETS, value: "mesh-hw-21 mesh-hw-41"}
             - {name: SMTP_HOST, value: smtp.163.com}
             - {name: SMTP_PORT, value: "465"}
@@ -74,12 +75,6 @@ spec:
             - {name: prod-data, mountPath: /root/.local/share/opencode}
             - {name: ts-state, mountPath: /var/lib/tailscale}
             - {name: entrypoint, mountPath: /entrypoint}
-            - {name: tun, mountPath: /dev/net/tun}
-          # TUN 模式出网（官方 sidecar 正统；userspace 只管进不管出，gw:000 实锤）。
-          # 单租户节点，NET_ADMIN 可接受。
-          securityContext:
-            capabilities:
-              add: ["NET_ADMIN"]
           readinessProbe:
             httpGet: {path: /, port: 4097}
             initialDelaySeconds: 90
@@ -114,8 +109,6 @@ spec:
           persistentVolumeClaim: {claimName: ts-state}
         - name: entrypoint
           configMap: {name: opencode-entrypoint, defaultMode: 0755}
-        - name: tun
-          hostPath: {path: /dev/net/tun, type: CharDevice}
 ---
 apiVersion: v1
 kind: Service
