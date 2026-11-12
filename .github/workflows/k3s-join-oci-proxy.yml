@@ -77,7 +77,11 @@ jobs:
           TOKEN="$($R69 'cat /var/lib/rancher/k3s/server/node-token')"
           [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
           SRV=100.93.119.21
-          $RP "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC='agent --server https://$SRV:6443 --token \"$TOKEN\" --node-ip \$(tailscale ip -4 | head -1) --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -"
+          # node-ip 必须先算成字面量：systemd 不跑 shell，$() 会原样传给 k3s 炸掉（flag -4 实锤）。
+          PIP="$($RP 'tailscale ip -4 | head -1')"
+          [ -n "$PIP" ] || { echo "FAIL: proxy tailnet IP 为空"; exit 1; }
+          echo "proxy tailnet IP: $PIP"
+          $RP "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC='agent --server https://$SRV:6443 --token \"$TOKEN\" --node-ip $PIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -"
           echo "== 等 agent Ready =="
           for i in $(seq 1 24); do
             sleep 15
