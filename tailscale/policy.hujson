@@ -26,6 +26,8 @@
 			"ip":  ["22", "41641"]
 		},
 		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4097"]},
+		// K3S：hw-69 server ↔ oci-proxy agent（agent→server 6443，server→agent 10250/8472，22 排障；flannel UDP 与 grants ip 同口径）。
+		{"src": ["tag:mesh"], "dst": ["100.93.119.21", "100.73.221.121"], "ip": ["22", "6443", "10250", "8472"]},
 		// yingxin：ali-gz Caddy（tag:mesh）反代 hw41:4097（opencode-prod-ali-gz 落点）。
 		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["4097"]},
 		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["2222"]},
@@ -206,6 +208,7 @@
 		{"src": "tag:mesh", "allow": ["100.91.222.51:22"]},
 		{"src": "tag:mesh", "allow": ["100.111.231.85:22"]},
 		{"src": "tag:mesh", "allow": ["100.103.182.112:22"]},
+		{"src": "tag:mesh", "allow": ["100.93.119.21:6443", "100.73.221.121:10250"]},
 		{
 			"src":   "xieyucheng123@github",
 			"allow": ["100.85.128.116:22", "100.91.222.51:22"]
