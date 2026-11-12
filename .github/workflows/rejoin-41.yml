@@ -66,18 +66,22 @@ jobs:
         run: |
           set -euo pipefail
           JOINKEY="$(cat /tmp/join.key)"; echo "::add-mask::$JOINKEY"
-          PASSQ="$(printf '%s' "${HW41_PASS:-}" | sed "s/'/'\\\\''/g")"
+          PASSB64="$(printf '%s' "${HW41_PASS:-}" | base64 -w0)"
           FRESH_IP="${{ inputs.fresh_ip }}"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
           set -euo pipefail
-          export SSHPASS='$PASSQ'
-          command -v sshpass >/dev/null || { sudo dnf install -y sshpass 2>/dev/null || sudo apt-get install -y sshpass; }
-          sshpass -e ssh -o StrictHostKeyChecking=no root@$FRESH_IP "curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
+          # 无 sshpass 包：密码放文件 + SSH_ASKPASS（全系统自带），用完 shred。
+          echo '$PASSB64' | base64 -d > /tmp/.p41; chmod 600 /tmp/.p41
+          printf '#!/bin/sh\ncat /tmp/.p41\n' > /tmp/.ask41; chmod 700 /tmp/.ask41
+          export SSH_ASKPASS=/tmp/.ask41 SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          RSH="setsid -w ssh -o StrictHostKeyChecking=no root@$FRESH_IP"
+          \$RSH "curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
           echo "--- 新 41 已在网，对端自报 ---"
-          sshpass -e ssh -o StrictHostKeyChecking=no root@$FRESH_IP "tailscale status --self | head -2"
+          \$RSH "tailscale status --self | head -2"
+          shred -u /tmp/.p41 /tmp/.ask41 || true
           EOF
           shred -u /tmp/join.key
       - name: 收尾提醒
