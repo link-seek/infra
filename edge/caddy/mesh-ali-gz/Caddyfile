@@ -65,23 +65,13 @@ litellm.linkseek.net.cn {
 		}
 	}
 	reverse_proxy {
-		# 双挂灰度 50/50（用户拍板）：HW21 正式身份 + k3s 新身份，加权轮询各 1。
-		# dynamic multi 按源顺序拼 upstreams，权重一一对应；reload 失败不生效（fail-closed）。
-		dynamic multi {
-			a {
-				name litellm-gateway.mackarel-polaris.ts.net.
-				port 4000
-				refresh 5s
-				resolvers 100.100.100.100
-			}
-			a {
-				name litellm-gateway-k3s.mackarel-polaris.ts.net.
-				port 4000
-				refresh 5s
-				resolvers 100.100.100.100
-			}
+		# 回退单后端（k3s 网关 muse-spark 未通，50/50 暂停；恢复 HW21 100%）。
+		dynamic a {
+			name litellm-gateway.mackarel-polaris.ts.net.
+			port 4000
+			refresh 5s
+			resolvers 100.100.100.100
 		}
-		lb_policy weighted_round_robin 1 1
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
