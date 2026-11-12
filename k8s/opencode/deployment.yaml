@@ -22,13 +22,8 @@ spec:
     spec:
       imagePullSecrets:
         - name: swr-pull
-      # DNS 走 pod 内 tailscaled（100.100.100.100）：app-connector 域名（opencode.ai 等）
-      # 必须经 tailnet 解析才会走连接器出口；kube-dns 返回公网 IP，直连即被区域拦。
-      # 副作用：cluster.local 不可用（本 pod 不用 k8s 服务发现）；公网域名由 tailscaled 转发上游。
-      dnsPolicy: None
-      dnsConfig:
-        nameservers:
-          - 100.100.100.100
+      # DNS 保持 kube-dns 默认：网关走公网域名，pod 不需要 tailnet 解析。
+      # （quad-100 方案已验证不可行：tailscaled 转发公网自环，E2E-GW-FAIL 000 实锤。）
       initContainers:
         - name: init-dirs
           image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
