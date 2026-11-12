@@ -1,0 +1,49 @@
+name: k3s-sync-data (hw41 → .69，一次性)
+
+# P4 前置：把 HW41 compose 卷（prod-work/prod-data）搬进 .69 k3s 卷。
+# 只动 HW41（源，打包只读）+ .69（目标）；HW21/OCI/阿里不在链上。
+# 有意不同步：tailscale-state（k3s 已有独立身份）、aliyun/oci、/old-workspace（README 既有缺口）。
+# 触发：手动 workflow_dispatch + confirm=yes（覆盖 .69 卷，不可逆——备份留 .69 /tmp）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "填 yes 才真写 .69 卷"
+        required: false
+        default: ""
+
+concurrency:
+  group: k3s-sync-data
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: join tailnet (user, mint-only)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="k3s-sync-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale ip -4
+
+      - name: sync via HW41 jump (fail-closed)
+        run: |
+          set -euo pipefail
+          [ "${{ inputs.confirm }}" = "yes" ] || { echo "need confirm=yes"; exit 1; }
+          SSH41="sudo tailscale ssh root@100.111.231.85"
+          $SSH41 "cat > /tmp/k3s-sync-data.sh" < "$GITHUB_WORKSPACE/scripts/k3s-sync-data.sh"
+          $SSH41 "chmod +x /tmp/k3s-sync-data.sh && sh /tmp/k3s-sync-data.sh && rm -f /tmp/k3s-sync-data.sh /tmp/k3s-sync-*.tgz"
