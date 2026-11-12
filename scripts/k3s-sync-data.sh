@@ -30,9 +30,15 @@ ls -lh /tmp/k3s-sync-work.tgz /tmp/k3s-sync-data.tgz
 # 3. 传 .69（同机房 LAN，HW41 直传）
 scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/k3s-sync-work.tgz /tmp/k3s-sync-data.tgz root@192.168.1.69:/tmp/
 
-# 4. .69 目标路径（PV hostPath 动态查，不写死）
-WPVNAME="$($R69 "kubectl -n opencode get pvc prod-work -o jsonpath='{.spec.volumeName}'")"
-DPVNAME="$($R69 "kubectl -n opencode get pvc prod-data -o jsonpath='{.spec.volumeName}'")"
+# 4. .69 目标路径（PV hostPath 动态查，不写死；jsonpath 不套引号，防多层 ssh 吃引号）
+$R69 "kubectl -n opencode get pvc"
+WPVNAME="$($R69 "kubectl -n opencode get pvc prod-work -o jsonpath={.spec.volumeName}")"
+DPVNAME="$($R69 "kubectl -n opencode get pvc prod-data -o jsonpath={.spec.volumeName}")"
+echo "pv: work=$WPVNAME data=$DPVNAME"
+[ -n "$WPVNAME" ] || { echo "FAIL: 取不到 work 卷名"; exit 1; }
+[ -n "$DPVNAME" ] || { echo "FAIL: 取不到 data 卷名"; exit 1; }
+WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath={.spec.hostPath.path}")"
+DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath={.spec.hostPath.path}")"
 WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 [ -n "$WPATH" ] || { echo "FAIL: 取不到 work 卷路径"; exit 1; }
