@@ -39,6 +39,10 @@ echo "pv: work=$WPVNAME data=$DPVNAME"
 [ -n "$DPVNAME" ] || { echo "FAIL: 取不到 data 卷名"; exit 1; }
 WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath={.spec.local.path}")"
 DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath={.spec.local.path}")"
+# jsonpath 为空则 sed 兜底（local-path PV 的 path 行唯一）
+[ -n "$WPATH" ] || WPATH="$($R69 "kubectl get pv $WPVNAME -o json" | sed -n 's/^[[:space:]]*"path": "\(.*\)".*/\1/p' | head -1)"
+[ -n "$DPATH" ] || DPATH="$($R69 "kubectl get pv $DPVNAME -o json" | sed -n 's/^[[:space:]]*"path": "\(.*\)".*/\1/p' | head -1)"
+echo "volpath: work=[$WPATH] data=[$DPATH]"
 WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 [ -n "$WPATH" ] || { echo "FAIL: 取不到 work 卷路径"; exit 1; }
