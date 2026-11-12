@@ -1,0 +1,88 @@
+name: rejoin-41-tailnet
+# 41 重装后经 HW21 跳板拉回 tailnet（一次性流程）。
+# 前置（用户控制台+网页完成）：41 已重装（保留 192.168.1.41 内网 IP，设好 root 密码），
+# GH repo Settings→Secrets→Actions 已加 HW41_TEMP_PASS（重装时设的 root 密码）。
+# 本 workflow：现签 persistent 非 ephemeral 一次性 key（10 分钟过期）→ HW21 跳 → 新 41 装 tailscale 上线。
+on:
+  workflow_dispatch:
+    inputs:
+      fresh_ip:
+        description: "重装后 41 内网 IP（默认保持 192.168.1.41）"
+        required: false
+        default: "192.168.1.41"
+concurrency:
+  group: rejoin-41
+  cancel-in-progress: false
+jobs:
+  rejoin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      HW41_PASS: ${{ secrets.HW41_TEMP_PASS }}
+    steps:
+      - name: 现签 41 上线 key（persistent，非 ephemeral，一次性 600s）
+        id: mint
+        run: |
+          set -euo pipefail
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          PASS="$(printf '%s' "${HW41_PASS:-}" | tr -d '\r\n ')"; [ -n "$PASS" ] || { echo "FAIL: 先在 GH 网页加 HW41_TEMP_PASS（重装 41 时设的 root 密码）"; exit 1; }
+          echo "::add-mask::$PASS"
+          mint() { curl -sS -m 30 -o /tmp/mint.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" \
+            -H 'Content-Type: application/json' -d "$1" https://api.tailscale.com/api/v2/tailnet/-/keys; }
+          BODY_TAGGED='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":["tag:mesh","tag:opencode-hw41","tag:prod"]}}},"expirySeconds":600}'
+          CODE="$(mint "$BODY_TAGGED")"
+          KEY="$(python3 -c "import json; print(json.load(open('/tmp/mint.json')).get('key',''))" 2>/dev/null || true)"
+          if [ -n "$KEY" ]; then
+            echo "tagged key minted (HTTP $CODE)"
+            echo "needs_tag=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagged mint 拒 (HTTP $CODE)：降级无 tag 进网，进网后去 admin 台手动拖 tag"
+            BODY_BARE='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true}}},"expirySeconds":600}'
+            CODE2="$(mint "$BODY_BARE")"
+            KEY="$(python3 -c "import json; print(json.load(open('/tmp/mint.json')).get('key',''))" 2>/dev/null || true)"
+            [ -n "$KEY" ] || { echo "FAIL: 无 tag 也签不出 (HTTP $CODE2)"; head -c 300 /tmp/mint.json; exit 1; }
+            echo "bare key minted (HTTP $CODE2)"
+            echo "needs_tag=true" >> "$GITHUB_OUTPUT"
+          fi
+          [ -n "$KEY" ] && echo "::add-mask::$KEY"
+          printf '%s' "$KEY" > /tmp/join.key; chmod 600 /tmp/join.key
+          rm -f /tmp/mint.json
+      - name: runner 进 tailnet（ephemeral CI 身份，老套路）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-rejoin41-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+      - name: 经 HW21 跳到新 41，装 tailscale 上线
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          JOINKEY="$(cat /tmp/join.key)"; echo "::add-mask::$JOINKEY"
+          PASSQ="$(printf '%s' "${HW41_PASS:-}" | sed "s/'/'\\\\''/g")"
+          FRESH_IP="${{ inputs.fresh_ip }}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
+          set -euo pipefail
+          export SSHPASS='$PASSQ'
+          command -v sshpass >/dev/null || { sudo dnf install -y sshpass 2>/dev/null || sudo apt-get install -y sshpass; }
+          sshpass -e ssh -o StrictHostKeyChecking=no root@$FRESH_IP "curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --authkey=\"$JOINKEY\" --hostname=mesh-hw-41 --ssh --accept-routes=false --accept-dns=false && tailscale ip -4"
+          echo "--- 新 41 已在网，对端自报 ---"
+          sshpass -e ssh -o StrictHostKeyChecking=no root@$FRESH_IP "tailscale status --self | head -2"
+          EOF
+          shred -u /tmp/join.key
+      - name: 收尾提醒
+        run: |
+          echo "NEEDS_TAG=${{ steps.mint.outputs.needs_tag }}"
+          echo "1) 去 tailscale admin 台删掉旧 mesh-hw-41 残留节点（同名会加数字后缀）。"
+          echo "2) needs_tag=true 时给新节点拖回 tag:mesh/tag:opencode-hw41/tag:prod。"
+          echo "3) 删掉 HW41_TEMP_PASS secret（密码已用过一次就换/删）。"
