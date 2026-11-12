@@ -11,18 +11,20 @@ WVOL="$(docker volume ls --format '{{.Name}}' | grep -x 'opencode-prod-ali-gz_pr
 DVOL="$(docker volume ls --format '{{.Name}}' | grep -x 'opencode-prod-ali-gz_prod-data' || true)"
 [ -n "$WVOL" ] || { echo "FAIL: hw41 prod-work 卷名对不上"; docker volume ls | head -20; exit 1; }
 [ -n "$DVOL" ] || { echo "FAIL: hw41 prod-data 卷名对不上"; docker volume ls | head -20; exit 1; }
-for v in "$WVOL" "$DVOL"; do
-  [ -d "/var/lib/docker/volumes/$v/_data" ] || { echo "FAIL: /var/lib/docker/volumes/$v/_data 不在"; docker volume inspect "$v"; exit 1; }
-done
+# Mountpoint 动态取（HW41 docker 根在 /data/docker，不写死 /var/lib/docker）
+WDIR="$(docker volume inspect -f '{{.Mountpoint}}' "$WVOL")"
+DDIR="$(docker volume inspect -f '{{.Mountpoint}}' "$DVOL")"
+[ -d "$WDIR" ] || { echo "FAIL: $WDIR 不在"; exit 1; }
+[ -d "$DDIR" ] || { echo "FAIL: $DDIR 不在"; exit 1; }
 
 # 1. k3s 停写（trial 无流量也停，防 untar 竞态）
 $R69 "kubectl -n opencode scale deploy/opencode --replicas=0"
 $R69 "kubectl -n opencode wait --for=delete pod -l app=opencode --timeout=180s"
 
-# 2. HW41 打包（host 直读 _data，不另拉镜像）
-du -sh "/var/lib/docker/volumes/$WVOL/_data" "/var/lib/docker/volumes/$DVOL/_data"
-tar czf /tmp/k3s-sync-work.tgz -C "/var/lib/docker/volumes/$WVOL/_data" .
-tar czf /tmp/k3s-sync-data.tgz -C "/var/lib/docker/volumes/$DVOL/_data" .
+# 2. HW41 打包（Mountpoint 直读，不另拉镜像）
+du -sh "$WDIR" "$DDIR"
+tar czf /tmp/k3s-sync-work.tgz -C "$WDIR" .
+tar czf /tmp/k3s-sync-data.tgz -C "$DDIR" .
 ls -lh /tmp/k3s-sync-work.tgz /tmp/k3s-sync-data.tgz
 
 # 3. 传 .69（同机房 LAN，HW41 直传）
