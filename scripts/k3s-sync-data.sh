@@ -39,6 +39,8 @@ echo "pv: work=$WPVNAME data=$DPVNAME"
 [ -n "$DPVNAME" ] || { echo "FAIL: 取不到 data 卷名"; exit 1; }
 WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath={.spec.hostPath.path}")"
 DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath={.spec.hostPath.path}")"
+echo "pvpath: work=[$WPATH] data=[$DPATH]"
+$R69 "kubectl get pv $WPVNAME -o json | head -c 1200; echo; ls /var/lib/rancher/k3s/storage/ 2>/dev/null || echo no-storage-dir"
 WPATH="$($R69 "kubectl get pv $WPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 DPATH="$($R69 "kubectl get pv $DPVNAME -o jsonpath='{.spec.hostPath.path}'")"
 [ -n "$WPATH" ] || { echo "FAIL: 取不到 work 卷路径"; exit 1; }
