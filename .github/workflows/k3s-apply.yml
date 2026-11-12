@@ -63,11 +63,6 @@ jobs:
             -H 'Content-Type: application/json' -d "$BODY" \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$TS_JOIN" ] || { echo "FAIL: TS mint"; exit 1; }
-          # 网关 IP 现场解析（runner netmap；user→gateway ACL 已放行）。
-          # pod DNS 不认 MagicDNS，IP 渲染进 Secret；IP 稳定数月，每次发版刷新。
-          GWIP="$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if 'litellm-gateway' in str(p.get('DNSName','')) or 'litellm-gateway' in str(p.get('HostName',''))),''))")"
-          [ -n "$GWIP" ] || { echo "FAIL: gateway not visible in netmap"; exit 1; }
-          echo "gateway tailnet ip=$GWIP"
           CF_CHILD="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="47ce24ced58f17c9fb15351adcbe67d4" python3 "$GITHUB_WORKSPACE/scripts/cf-mint-child.py" | grep '^CF_MINTED_VALUE=' | cut -d= -f2-)"
           CF_AI="$(CF_PARENT_TOKEN_SANITIZED="$(printf '%s' "$CF_TOKEN" | tr -d '\r\n ')" CF_ACCOUNT_ID="47ce24ced58f17c9fb15351adcbe67d4" python3 "$GITHUB_WORKSPACE/scripts/cf-mint-ai.py" | grep '^CF_MINTED_VALUE=' | cut -d= -f2-)"
           [ -n "$CF_CHILD" ] && [ -n "$CF_AI" ] || { echo "FAIL: CF mint"; exit 1; }
@@ -76,7 +71,6 @@ jobs:
             echo "OPENCODE_SERVER_PASSWORD=$S_PWD"; echo "CLOUDFLARE_API_TOKEN=$CF_CHILD"
             echo "CF_AI_TOKEN=$CF_AI"; echo "HCLOUD_AK=$S_AK"; echo "HCLOUD_SK=$S_SK"
             echo "TS_JOIN_KEY=$TS_JOIN"; echo "SMTP_PASS=$S_SMTP"
-            echo "LITELLM_BASE_URL=http://$GWIP:4000"
           } > /tmp/opencode-env.txt
           chmod 600 /tmp/opencode-env.txt
           echo "secret-render-ok: $(grep -c '' /tmp/opencode-env.txt) entries (values masked)"

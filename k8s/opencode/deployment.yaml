@@ -42,10 +42,8 @@ spec:
           env:
             - {name: PIPELINE_MANAGED, value: "true"}
             - {name: TS_HOSTNAME, value: opencode-k3s}
-            # 网关走 #181 独立身份（ACL 已对 tag:opencode 放行）；IP 由 k3s-apply 现场解析渲染
-            # （pod DNS 不认 MagicDNS；IP 稳定数月，每次发版刷新）。不用 HW41 式 .51 直连。
-            - name: LITELLM_BASE_URL
-              valueFrom: {secretKeyRef: {name: opencode-env, key: LITELLM_BASE_URL}}
+            # 网关在 HW21 宿主（mesh-hw-21=.51，#181 独立身份尚未落地）；pod 经 TUN 直连，需 ACL 放行（见 policy）。
+            - {name: LITELLM_BASE_URL, value: "http://100.91.222.51:4000"}
             - {name: SSH_TARGETS, value: "mesh-hw-21 mesh-hw-41"}
             - {name: SMTP_HOST, value: smtp.163.com}
             - {name: SMTP_PORT, value: "465"}
