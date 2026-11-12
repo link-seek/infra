@@ -32,7 +32,7 @@ echo "control-plane backup ok: $(ls "$BKDIR" | tr '\n' ' ')"
 
 # 2. scratch 恢复（幂等：先清）
 $R69 "kubectl delete ns opencode-restore --ignore-not-found && kubectl wait --for=delete ns/opencode-restore --timeout=120s" 2>/dev/null || true
-$R69 "kubectl apply -f /tmp/k3s-restore/namespace.yaml && kubectl apply -f /tmp/k3s-restore/pvc.yaml && kubectl -n opencode-restore wait --for=jsonpath='{.status.phase}'=Bound pvc/restore-work pvc/restore-data --timeout=180s"
+$R69 "kubectl apply -f /tmp/k3s-restore-ns.yaml && kubectl apply -f /tmp/k3s-restore-pvc.yaml && kubectl -n opencode-restore wait --for=jsonpath='{.status.phase}'=Bound pvc/restore-work pvc/restore-data --timeout=180s"
 RWPV="$($R69 "kubectl -n opencode-restore get pvc restore-work -o jsonpath={.spec.volumeName}")"
 RDPV="$($R69 "kubectl -n opencode-restore get pvc restore-data -o jsonpath={.spec.volumeName}")"
 RWPATH="$($R69 "kubectl get pv $RWPV -o jsonpath={.spec.local.path}")"

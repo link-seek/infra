@@ -44,7 +44,7 @@ jobs:
           set -euo pipefail
           [ "${{ inputs.confirm }}" = "yes" ] || { echo "need confirm=yes"; exit 1; }
           SSH41="sudo tailscale ssh root@100.111.231.85"
-          tar czf /tmp/restore.tgz -C k8s/restore .
-          $SSH41 "cat > /tmp/restore.tgz" < /tmp/restore.tgz
+          $SSH41 "cat > /tmp/k3s-restore-ns.yaml" < "$GITHUB_WORKSPACE/k8s/restore/namespace.yaml"
+          $SSH41 "cat > /tmp/k3s-restore-pvc.yaml" < "$GITHUB_WORKSPACE/k8s/restore/pvc.yaml"
           $SSH41 "cat > /tmp/k3s-restore-drill.sh" < "$GITHUB_WORKSPACE/scripts/k3s-restore-drill.sh"
-          $SSH41 "mkdir -p /tmp/k3s-restore && tar xzf /tmp/restore.tgz -C /tmp/k3s-restore && chmod +x /tmp/k3s-restore-drill.sh && sh /tmp/k3s-restore-drill.sh && rm -f /tmp/k3s-restore-drill.sh /tmp/restore.tgz && rm -rf /tmp/k3s-restore"
+          $SSH41 "chmod +x /tmp/k3s-restore-drill.sh && sh /tmp/k3s-restore-drill.sh && rm -f /tmp/k3s-restore-drill.sh /tmp/k3s-restore-ns.yaml /tmp/k3s-restore-pvc.yaml"
