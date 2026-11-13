@@ -1,0 +1,82 @@
+name: k3s-etcd-s3-backup
+# etcd 快照异机备份（OBS，同 region north-9）。
+# 用法：先 dispatch 一次（mode=configure）：写 S3 配置+定时（6h 一次，保留 28 份≈7 天）+ sequential 重启 + 强制快照一次并计时验桶。
+# 之后 k3s 按 cron 自动快照并直传 OBS，无需再跑。
+# 密钥走 org PROD_HCLOUD_AK/SK（标准 IAM 格式），只在内存和 k3s env 文件（600）里出现。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "configure=下发+验证；verify=只验桶里最新快照"
+        required: false
+        default: "configure"
+concurrency:
+  group: k3s-etcd-s3
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: runner 进 tailnet（ephemeral CI 身份）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-etcd-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+      - name: 下发 S3 配置 + 定时快照（逐台重启，保 quorum）
+        if: inputs.mode == 'configure'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          S3AK: ${{ secrets.PROD_HCLOUD_AK }}
+          S3SK: ${{ secrets.PROD_HCLOUD_SK }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          AK="$(printf '%s' "${S3AK:-}" | tr -d '\r\n ')"; [ -n "$AK" ] || { echo "FAIL: PROD_HCLOUD_AK 未配"; exit 1; }
+          echo "::add-mask::$AK"
+          SK="$(printf '%s' "${S3SK:-}" | tr -d '\r\n ')"; [ -n "$SK" ] || { echo "FAIL: PROD_HCLOUD_SK 未配"; exit 1; }
+          echo "::add-mask::$SK"
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
+          set -euo pipefail
+          for IP in 192.168.1.69 192.168.1.41; do
+            echo "== \$IP =="
+            R="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@\$IP"
+            # S3 直写 config.yaml（免改 unit；secret 落盘 600；grep 幂等）
+            \$R "grep -q etcd-s3-endpoint /etc/rancher/k3s/config.yaml 2>/dev/null || printf '%s\n' 'etcd-s3: true' 'etcd-s3-endpoint: obs.cn-north-9.myhuaweicloud.com' 'etcd-s3-region: cn-north-9' 'etcd-s3-bucket: linkseek-k3s-etcd' 'etcd-s3-folder: etcd-auto' 'etcd-s3-access-key: \"$AK\"' 'etcd-s3-secret-key: \"$SK\"' >> /etc/rancher/k3s/config.yaml; chmod 600 /etc/rancher/k3s/config.yaml"
+            \$R "grep -q etcd-snapshot-schedule-cron /etc/rancher/k3s/config.yaml 2>/dev/null || printf '\netcd-snapshot-schedule-cron: \"0 */6 * * *\"\netcd-snapshot-retention: 28\n' >> /etc/rancher/k3s/config.yaml"
+            \$R "systemctl restart k3s"
+            echo "等 \$IP API 回来..."
+            for i in \$(seq 1 20); do
+              sleep 15
+              \$R "kubectl get nodes >/dev/null 2>&1" && break
+              [ "\$i" = 20 ] && { echo "FAIL: \$IP API 未回来"; exit 1; }
+            done
+          done
+          echo CONFIG-OK
+          EOF
+      - name: 强制快照一次并计时 + 验桶
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          set -euo pipefail
+          R69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+          echo "手动触发一次 S3 快照并计时..."
+          $R69 "time k3s etcd-snapshot save 2>&1 | tail -3"
+          echo "== 桶里对象 =="
+          obsutil ls obs://linkseek-k3s-etcd/etcd-auto/ 2>/dev/null | grep -iE "snapshot|\.db" | tail -5 || obsutil ls obs://linkseek-k3s-etcd/ 2>/dev/null | tail -8
+          echo VERIFY-DONE
+          EOF
