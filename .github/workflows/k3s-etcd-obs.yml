@@ -60,11 +60,11 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak && tar xzf /tmp/etcd-bak.tgz -C /tmp/etcd-bak
           cd /tmp/etcd-bak
-          DIGEST="\$(kubectl get deploy -n opencode opencode -o jsonpath='{.spec.template.spec.containers[?(@.name=="opencode")].image}' 2>/dev/null)"
-          [ -n "\$DIGEST" ] || { echo "FAIL: 取不到 opencode-tools digest"; exit 1; }
-          echo "tools image: \$DIGEST"
-          sed -i "s#swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:IMAGE_DIGEST_PLACEHOLDER#\$DIGEST#" k8s/etcd-backup/cronjob.yaml
-          grep -q IMAGE_DIGEST_PLACEHOLDER k8s/etcd-backup/cronjob.yaml && { echo "FAIL: digest 未钉上"; exit 1; }
+          echo STAGE-verify-image
+          WANT="\$(grep -oE 'opencode-tools@sha256:[0-9a-f]+' k8s/etcd-backup/cronjob.yaml | head -1 | cut -d: -f2 | cut -c1-12)"
+          [ -n "\$WANT" ] || { echo "FAIL: 取不到 cronjob digest"; exit 1; }
+          crictl images --digests 2>/dev/null | grep -q "\$WANT" || { echo "FAIL: digest \$WANT 未在 .69 缓存（先 crictl pull 或换节点）"; exit 1; }
+          echo "image cached: \$WANT"
           echo STAGE-apply
           kubectl create secret docker-registry swr-pull -n kube-system \
             --docker-server=swr.cn-north-9.myhuaweicloud.com \

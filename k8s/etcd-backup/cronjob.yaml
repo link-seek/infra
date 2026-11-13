@@ -1,5 +1,7 @@
 # 钥匙刷新 CronJob：快照在整点（0 */6 * * *），刷新错开半小时（30 */6 * * *）。
-# image digest 下发时从簇内现取现钉（跟 opencode-tools 走，不另起镜像管线）。
+# image 就钉在两处一致的 digest（deployment 现跑 + .69 已缓存，免拉）。
+# 注意：SWR 的 pull 凭证当前 401（待修），在此之前不要换 digest；换 digest 前先确认目标节点已缓存（crictl images --digests）。
+# 调度钉在 .69（有 tools 镜像缓存的节点）；SWR 凭证修好后可去掉 nodeSelector。
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -16,13 +18,15 @@ spec:
       backoffLimit: 2
       template:
         spec:
+          nodeSelector:
+            kubernetes.io/hostname: ecs-ies-euleros-jmupervm-zhangzhirui
           serviceAccountName: etcd-s3-refresher
           restartPolicy: OnFailure
           imagePullSecrets:
             - name: swr-pull
           containers:
             - name: refresh
-              image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:IMAGE_DIGEST_PLACEHOLDER
+              image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
               imagePullPolicy: IfNotPresent
               command: ["python3", "/scripts/refresh.py"]
               volumeMounts:
