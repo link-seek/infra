@@ -22,13 +22,9 @@ for IP in 192.168.1.69 192.168.1.41; do
   TMP="/tmp/etcd-$NAME-latest"
   scp -o BatchMode=yes -o StrictHostKeyChecking=no "root@$IP:/var/lib/rancher/k3s/server/db/snapshots/$LATEST" "$TMP"
   DEST="obs://$BUCKET/etcd-auto/$NAME/$LATEST"
-  # 注意：obsutil ls 不存在的 key 也 exit 0，必须 grep 文件名判定
-  if obsutil ls "$DEST" 2>/dev/null | grep -q "$LATEST"; then
-    echo "already in bucket: $LATEST"
-  else
-    obsutil cp "$TMP" "$DEST" >/dev/null 2>&1 || { echo "FAIL: upload $LATEST"; rm -f "$TMP"; exit 1; }
-    echo "uploaded: $LATEST"
-  fi
+  # 直接传（幂等覆盖；obsutil 存在性判定不可靠：ls 空 key 也 exit 0 且回显自带 key 名）
+  obsutil cp "$TMP" "$DEST" >/dev/null 2>&1 || { echo "FAIL: upload $LATEST"; rm -f "$TMP"; exit 1; }
+  echo "uploaded: $LATEST"
   rm -f "$TMP"
   # OBS 端每节点只留最新 KEEP_OBS 个
   DEL="$(obsutil ls "obs://$BUCKET/etcd-auto/$NAME/" 2>/dev/null | grep -oE '(etcd-snapshot|on-demand)-[^ /]*' | sort -r | tail -n +"$((KEEP_OBS + 1))" || true)"
