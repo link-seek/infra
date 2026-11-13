@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           # runner 为 tag:user（user→mesh 有 accept）；2244 key 路已死（43063036641 实锤）。
-          SSH41="sudo tailscale ssh root@100.111.231.85"
+          SSH41="sudo tailscale ssh root@100.73.182.4"
           if [ "${{ inputs.action }}" = "rollback" ]; then
             $SSH41 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n $K3S_NS rollout undo deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s'"
           else
@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           # 远端整段必须整体非零即红：禁止尾随 ; echo 吞退出码。
           # $ 须转义：外层双引号，否则 $(...) 被 runner 本地展开（kubectl 连 localhost:8080 实锤）。
-          sudo tailscale ssh root@100.111.231.85 \
+          sudo tailscale ssh root@100.73.182.4 \
             "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 \
             'set -euo pipefail; \
             # 探针用 python3（网关/browser 镜像里无 curl；opencode-tools 有 python3 实锤）。
@@ -138,7 +138,7 @@ jobs:
           set -euo pipefail
           # runner 与 Caddy 同为 tailnet 普通节点：直连 pod 身份，验证切流前可达。
           # 先 pod 侧自报（只读诊断，放门前，红了也能看）。
-          sudo tailscale ssh root@100.111.231.85 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n opencode exec deploy/opencode -c opencode -- sh -c \"tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null | head -c 600; echo; tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip\"'"
+          sudo tailscale ssh root@100.73.182.4 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n opencode exec deploy/opencode -c opencode -- sh -c \"tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null | head -c 600; echo; tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip\"'"
           # L3 可见性：netmap 里有没有这个 peer（ACL 过滤的真相；tailscale ping 走系统 DNS，
           # --accept-dns=false 的 runner 上必挂，不能当门，43067087861 系误判已修正）。
           IP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if 'opencode-k3s' in str(p.get('DNSName','')) or 'opencode-k3s' in str(p.get('HostName',''))),''))")
@@ -149,7 +149,7 @@ jobs:
           [ "$CODE" = 200 ] || { echo "INGRESS-HTTP-FAIL http=$CODE"; exit 1; }
           echo INGRESS-OK
           # 附带打印卷位置，给数据同步步骤用（只读）。
-          sudo tailscale ssh root@100.111.231.85 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n opencode get pvc && kubectl get pv'"
+          sudo tailscale ssh root@100.73.182.4 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n opencode get pvc && kubectl get pv'"
       - name: gateway POST 诊断（runner 直调，只 WARN 不拦门）
         if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
         env:
@@ -171,7 +171,7 @@ jobs:
           set -euo pipefail
           # A 写 marker → B 新会话召回。模型走容器内网关，数据走 .69 卷。
           MARK="k3s$(echo "$GITHUB_RUN_ID" | tr -cd '0-9' | tail -c 6)"
-          SSH41="sudo tailscale ssh root@100.111.231.85"
+          SSH41="sudo tailscale ssh root@100.73.182.4"
           $SSH41 "cat > /tmp/k3s-e2e-recall.sh" < "$GITHUB_WORKSPACE/scripts/k3s-e2e-recall.sh"
           $SSH41 "chmod +x /tmp/k3s-e2e-recall.sh && /tmp/k3s-e2e-recall.sh '$MARK' && rm -f /tmp/k3s-e2e-recall.sh"
       - name: litellm verify（网关内容门，对标 goss 黑名单 400，fail-closed）
