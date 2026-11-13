@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           [ "${{ inputs.confirm }}" = "yes" ] || { echo "need confirm=yes"; exit 1; }
-          SSH41="sudo tailscale ssh root@100.111.231.85"
+          SSH41="sudo tailscale ssh root@100.73.182.4"
           $SSH41 "cat > /tmp/k3s-restore-ns.yaml" < "$GITHUB_WORKSPACE/k8s/restore/namespace.yaml"
           $SSH41 "cat > /tmp/k3s-restore-pvc.yaml" < "$GITHUB_WORKSPACE/k8s/restore/pvc.yaml"
           $SSH41 "cat > /tmp/k3s-restore-consumer.yaml" < "$GITHUB_WORKSPACE/k8s/restore/consumer.yaml"

@@ -44,6 +44,6 @@ jobs:
         run: |
           set -euo pipefail
           [ "${{ inputs.confirm }}" = "yes" ] || { echo "need confirm=yes"; exit 1; }
-          SSH41="sudo tailscale ssh root@100.111.231.85"
+          SSH41="sudo tailscale ssh root@100.73.182.4"
           $SSH41 "cat > /tmp/k3s-sync-data.sh" < "$GITHUB_WORKSPACE/scripts/k3s-sync-data.sh"
           $SSH41 "chmod +x /tmp/k3s-sync-data.sh && sh /tmp/k3s-sync-data.sh && rm -f /tmp/k3s-sync-data.sh /tmp/k3s-sync-*.tgz"
