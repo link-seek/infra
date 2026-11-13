@@ -58,10 +58,10 @@ jobs:
           echo STAGE-wait-relay
           for i in $(seq 1 20); do
             sleep 15
-            READY="$(kubectl get pods -n egress -l app=sni-egress -o jsonpath='{.items[*].status.containerStatuses[0].ready}' 2>/dev/null || true)"
+            READY="$(kubectl get daemonset -n egress sni-egress -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled}' 2>/dev/null || true)"
             echo "relay ready=$READY"
-            [ "$READY" = "true" ] && break
-            [ "$i" = 20 ] && { echo "FAIL: relay pod 未 Ready（可能 443 被占或镜像拉不到）"; kubectl get pods -n egress -o wide; exit 1; }
+            [ "$READY" = "1/1" ] && break
+            [ "$i" = 20 ] && { echo "FAIL: relay pod 未 Ready"; kubectl get pods -n egress -o wide; exit 1; }
           done
           echo EGRESS-APPLY-OK
           INNEREOF
