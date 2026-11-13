@@ -7,7 +7,7 @@ metadata:
   namespace: kube-system
 data:
   refresh.py: |
-    import base64, json, os, ssl, urllib.request
+    import base64, datetime, json, os, ssl, urllib.request
 
     META = "http://169.254.169.254/openstack/latest/securitykey"
     API = "https://kubernetes.default.svc"
@@ -30,7 +30,7 @@ data:
             return e.code, e.read()
 
     def main():
-        import datetime
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         md = json.load(urllib.request.urlopen(META, timeout=10))
         c = md.get("credential", md)
         for k in ("access", "secret", "securitytoken"):
@@ -57,7 +57,7 @@ data:
         if st == 404:
             body = {"apiVersion": "v1", "kind": "Secret",
                     "metadata": {"name": SECRET, "namespace": NS,
-                                 "annotations": {"refreshed-at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}},
+                                 "annotations": {"refreshed-at": now}},
                     "type": "etcd.k3s.cattle.io/s3-config-secret", "data": data}
             st, _ = api("POST", f"/api/v1/namespaces/{NS}/secrets", body)
             assert st in (200, 201), f"create secret failed: {st}"
@@ -65,7 +65,7 @@ data:
         else:
             assert st == 200, f"get secret failed: {st}"
             st, _ = api("PATCH", f"/api/v1/namespaces/{NS}/secrets/{SECRET}", {
-                "metadata": {"annotations": {"refreshed-at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}},
+                "metadata": {"annotations": {"refreshed-at": now}},
                 "data": data})
             assert st == 200, f"patch secret failed: {st}"
             print("patched secret")
