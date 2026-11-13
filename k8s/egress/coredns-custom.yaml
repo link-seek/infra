@@ -1,0 +1,11 @@
+# CoreDNS 自定义导入（k3s 官方扩展点：Corefile 里 import /etc/coredns/custom/*.override）。
+# opencode.ai 改写到东京 SNI 中转；簇内 pod 零配置，TLS 端到端不断。
+# 注意：这是 ConfigMap coredns-custom，不是改 Corefile 本体（升级不丢）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  opencode.override: |
+    rewrite name exact opencode.ai sni-egress.egress.svc.cluster.local
