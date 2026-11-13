@@ -47,6 +47,7 @@ spec:
           volumeMounts:
             - {name: ts-state, mountPath: /var/lib/tailscale}
             - {name: entrypoint, mountPath: /entrypoint}
+            - {name: config, mountPath: /app/config.yaml, subPath: config.yaml, readOnly: true}
           readinessProbe:
             httpGet: {path: /v1/models, port: 4000}
             initialDelaySeconds: 30
@@ -65,6 +66,8 @@ spec:
           persistentVolumeClaim: {claimName: ts-state}
         - name: entrypoint
           configMap: {name: litellm-entrypoint, defaultMode: 0755}
+        - name: config
+          configMap: {name: litellm-config}
 ---
 apiVersion: v1
 kind: Service

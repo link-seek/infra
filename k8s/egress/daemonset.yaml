@@ -42,8 +42,8 @@ spec:
           image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 443
-              hostPort: 443
+            - containerPort: 8443
+              hostPort: 8443
               protocol: TCP
           volumeMounts:
             - name: conf
