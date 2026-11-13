@@ -1,0 +1,36 @@
+# 钥匙刷新 CronJob：快照在整点（0 */6 * * *），刷新错开半小时（30 */6 * * *）。
+# image digest 下发时从簇内现取现钉（跟 opencode-tools 走，不另起镜像管线）。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: etcd-s3-refresh
+  namespace: kube-system
+spec:
+  schedule: "30 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: etcd-s3-refresher
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: swr-pull
+          containers:
+            - name: refresh
+              image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:IMAGE_DIGEST_PLACEHOLDER
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/scripts/refresh.py"]
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: etcd-s3-refresh-script
+                defaultMode: 0444
