@@ -71,6 +71,7 @@ jobs:
               [ "\$i" = 20 ] && { echo "FAIL: quorum 未恢复"; exit 1; }
             done
             # 5) 本台立刻跑一次上传脚本验证
+            \$R "k3s etcd-snapshot save 2>&1 | tail -2"
             \$R "/usr/local/bin/k3s-etcd-obsupload.sh linkseek-k3s-etcd 14"
           done
           echo DEPLOY-OK
