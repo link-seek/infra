@@ -107,24 +107,14 @@ jobs:
             echo "FAIL: quorum 未恢复"; return 1
           }
           apply_config() {
-            # $1=IP $2=schedule cron。注意：带 heredoc 的 ssh 不能加 -n（否则 python 读到空 stdin 静默跳过）。
+            # $1=IP $2=schedule cron。只用 sed 单引号写文件（不经过 python/argv/heredoc 传值，杜绝截断），写完必验。
             local IP="$1" CRON="$2"
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" python3 - "$CRON" <<'PYEOF'
-          import re,sys
-          cron = sys.argv[1]
-          p = "/etc/rancher/k3s/config.yaml"
-          s = open(p).read()
-          s = re.sub(r"(?m)^etcd-snapshot-schedule-cron:.*$", f"etcd-snapshot-schedule-cron: \"{cron}\"", s)
-          s = re.sub(r"(?m)^etcd-s3:.*$", "etcd-s3: true", s)
-          for line in ['etcd-s3: true',
-                        'etcd-s3-config-secret: k3s-etcd-snapshot-s3-config',
-                        'etcd-s3-retention: 28']:
-              key = line.split(":")[0]
-              if not re.search(rf"(?m)^{key}:", s):
-                  s = s.rstrip("\n") + "\n" + line + "\n"
-          open(p, "w").write(s)
-          PYEOF
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "chmod 600 /etc/rancher/k3s/config.yaml && grep -E '^etcd-(s3|snapshot)' /etc/rancher/k3s/config.yaml && systemctl restart k3s"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "sed -i 's#^etcd-snapshot-schedule-cron:.*#etcd-snapshot-schedule-cron: \"$CRON\"#' /etc/rancher/k3s/config.yaml"
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "grep -q '^etcd-s3: true$' /etc/rancher/k3s/config.yaml || printf 'etcd-s3: true\netcd-s3-config-secret: k3s-etcd-snapshot-s3-config\netcd-s3-retention: 28\n' >> /etc/rancher/k3s/config.yaml"
+            LINE="$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "grep '^etcd-snapshot-schedule-cron:' /etc/rancher/k3s/config.yaml")"
+            [ "$LINE" = "etcd-snapshot-schedule-cron: \"$CRON\"" ] || { echo "FAIL: config 落盘不对: [$LINE]"; exit 1; }
+            echo "config ok: $LINE"
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "chmod 600 /etc/rancher/k3s/config.yaml && systemctl restart k3s"
           }
           echo "== 测试节拍（*/7）+ S3 开：先 .41 再 .69 =="
           apply_config 192.168.1.41 "*/7 * * * *"
