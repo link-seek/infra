@@ -45,7 +45,7 @@ spec:
             - {name: PIPELINE_MANAGED, value: "true"}
             - {name: TS_HOSTNAME, value: opencode-k3s}
             # 网关走公网域名（用户已修复公网后端；网关迁 k3s 后改集群内 Service）。
-            - {name: LITELLM_BASE_URL, value: "https://litellm.linkseek.net.cn"}
+            - {name: LITELLM_BASE_URL, value: "http://litellm-gateway.litellm.svc.cluster.local:4000"}
             - {name: SSH_TARGETS, value: "mesh-hw-21 mesh-hw-41"}
             - {name: SMTP_HOST, value: smtp.163.com}
             - {name: SMTP_PORT, value: "465"}
