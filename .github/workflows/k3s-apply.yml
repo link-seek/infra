@@ -132,7 +132,7 @@ jobs:
             # 探针用 python3（网关/browser 镜像里无 curl；opencode-tools 有 python3 实锤）。
             code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_NS -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>/dev/null || echo FAIL); \
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
-            kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s'"
+            kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
       - name: probe tailnet ingress (Caddy视角, fail-closed)
         if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
