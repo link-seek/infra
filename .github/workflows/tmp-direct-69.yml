@@ -1,0 +1,44 @@
+name: tmp-direct-69
+
+# 一次性：验证 runner(tag:user) 直登 mesh-hw-69(100.93.119.21) 是否通
+# 测完即删，不进终局。
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: join tailnet (tag:user, ephemeral)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="direct69-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale ip -4
+          echo "--- status ---"
+          sudo tailscale status | head -n 30 || true
+
+      - name: ping + netmap visibility
+        run: |
+          set -euo pipefail
+          sudo tailscale ping --c=2 100.93.119.21 || true
+          echo "--- netmap grep 69 ---"
+          sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; [print(v.get('DNSName'),v.get('TailscaleIPs'),','.join(v.get('Tags') or [])) for v in peers.values() if '69' in str(v)]" || true
+
+      - name: direct TS SSH to .69
+        run: |
+          set -euo pipefail
+          echo "=== try direct TS SSH root@100.93.119.21 ==="
+          timeout 30 sudo tailscale ssh root@100.93.119.21 "hostname; echo SSH-OK; kubectl get nodes 2>&1 | head -n 10" && echo DIRECT-OK || echo DIRECT-FAIL
+          echo "=== try by name mesh-hw-69 ==="
+          timeout 30 sudo tailscale ssh root@mesh-hw-69 "hostname; echo SSH-OK-NAME" && echo NAME-OK || echo NAME-FAIL
+          true
