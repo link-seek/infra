@@ -1,0 +1,90 @@
+name: k3s-egress
+# 东京出海（SNI 路由，k8s 版 app connector）：opencode.ai 的 TLS 原样穿透，
+# 东京节点上的 nginx 只按 SNI 转发。不解密、不改头、无钥匙、无公网面。
+# 用法：dispatch 一次 mode=deploy（下发+验证）；之后靠 CronJob/定时快照自转。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "deploy=下发+验证；verify=只验"
+        required: false
+        default: "deploy"
+  schedule:
+    - cron: "17 2 * * *"
+concurrency:
+  group: k3s-egress
+  cancel-in-progress: false
+jobs:
+  egress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: runner 进 tailnet（ephemeral CI 身份）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-egress-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+      - name: 下发（namespace+relay+coredns-custom+重启 coredns）
+        if: inputs.mode == 'deploy'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          tar czf /tmp/egress.tgz k8s/egress
+          scp -P 2244 -i ~/.ssh/ci_key /tmp/egress.tgz root@100.91.222.51:/tmp/egress.tgz < /dev/null
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          set -euo pipefail
+          echo STAGE-fwd
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/egress.tgz root@192.168.1.69:/tmp/egress.tgz < /dev/null
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 bash -s <<'INNEREOF'
+          set -euo pipefail
+          rm -rf /tmp/egress && mkdir -p /tmp/egress && tar xzf /tmp/egress.tgz -C /tmp/egress && cd /tmp/egress
+          echo STAGE-apply
+          kubectl apply -f k8s/egress/namespace.yaml
+          kubectl apply -f k8s/egress/nginx-conf.yaml
+          kubectl apply -f k8s/egress/deployment.yaml
+          kubectl apply -f k8s/egress/coredns-custom.yaml
+          echo STAGE-coredns-reload
+          kubectl rollout restart deploy/coredns -n kube-system
+          kubectl rollout status deploy/coredns -n kube-system --timeout=180s
+          echo EGRESS-APPLY-OK
+          INNEREOF
+          EOF
+      - name: 验（DNS 指中转 + pod 直调 200 + relay 日志见 SNI）
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          set -euo pipefail
+          K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+          echo "== DNS 指中转 =="
+          SVCIP="$($K69 "kubectl get svc -n egress sni-egress -o jsonpath='{.spec.clusterIP}'")"
+          [ -n "$SVCIP" ] || { echo "FAIL: relay Service 无 ClusterIP"; exit 1; }
+          GOT="$($K69 "kubectl exec -n opencode deploy/opencode -c opencode -- python3 -c \"import socket;print(socket.gethostbyname('opencode.ai'))\" 2>/dev/null | tail -1")"
+          echo "pod 视角 opencode.ai => $GOT"
+          echo "$GOT" | grep -q "$SVCIP" || { echo "FAIL: DNS 没指到中转（want $SVCIP）"; exit 1; }
+          echo "== pod 直调（之前 403） =="
+          CODE="$($K69 "kubectl exec -n opencode deploy/opencode -c opencode -- python3 -c \"import urllib.request;print(urllib.request.urlopen('https://opencode.ai',timeout=15).getcode())\" 2>&1 | tail -1")"
+          [ "$CODE" = "200" ] || { echo "FAIL: pod 直调 opencode.ai http=$CODE（之前 403）"; exit 1; }
+          echo "POD-DIRECT-OK http=200"
+          echo "== relay 日志见 SNI =="
+          $K69 "kubectl logs -n egress deploy/sni-egress --tail=5 | grep -q 'sni=opencode.ai' || (sleep 5; kubectl logs -n egress deploy/sni-egress --tail=8 | grep -q 'sni=opencode.ai')"
+          echo "RELAY-SNI-OK"
+          echo EGRESS-VERIFY-DONE
+          EOF

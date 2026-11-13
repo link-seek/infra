@@ -1,0 +1,71 @@
+# SNI 出海路由（k8s 版 app connector）：opencode.ai 的 TLS 原样穿透，
+# 只按 ClientHello 里的域名转发。不解密、不改头、无钥匙、无公网面。
+# 调度钉死东京节点（vm-proxy）；阿里节点以后同形再加一份。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sni-egress
+  namespace: egress
+  labels:
+    app: sni-egress
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sni-egress
+  template:
+    metadata:
+      labels:
+        app: sni-egress
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: vm-proxy
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: edge
+          effect: NoSchedule
+      initContainers:
+        # 无解密 SNI 路由依赖 ssl_preread 模块；官方镜像自带，起不来就地拦（fail-closed）。
+        - name: conf-test
+          image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
+          imagePullPolicy: IfNotPresent
+          command: ["nginx", "-t", "-c", "/etc/nginx/nginx.conf"]
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+      containers:
+        - name: relay
+          image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8443
+              name: sni
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+      volumes:
+        - name: conf
+          configMap:
+            name: sni-egress-conf
+            defaultMode: 0444
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sni-egress
+  namespace: egress
+spec:
+  selector:
+    app: sni-egress
+  ports:
+    - port: 443
+      targetPort: 8443
+      protocol: TCP
