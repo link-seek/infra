@@ -1,5 +1,5 @@
 #!/bin/sh
-# k3s-e2e-recall：在 HW41 上跑（root），经 .69 kubectl exec 进 k3s pod 做记忆召回 E2E。
+# k3s-e2e-recall：在 .69 上直跑（root，本地 kubectl）；兼容旧 HW41 跳板（无本地 kubectl 时 ssh 到 .69）。
 # 复刻 stacks/opencode/probes/50-memory-recall.sh 的门（A 写 marker → B 新会话问 → grep 回显）。
 # 用法：k3s-e2e-recall.sh <MARKER>（MARKER 由 workflow 传 run 号尾巴）。
 # 注意：会在 .69 卷里留下 2~3 条 ses_k3s* 测试会话（canary 同款惯例，批量清，不逐条删）。
@@ -8,16 +8,23 @@ MARKER="${1:?MARKER required}"
 # 测试模型：默认 muse-spark（用户真实路径，经 app-connector 出）；上游抽风时可 E2E_MODEL=big-pickle 降级验证链路。
 MODEL="${E2E_MODEL:-muse-spark-1.3-contributor}"
 SID="ses_k3s$(printf '%s' "$MARKER" | tr -cd '0-9A-Za-z' | tail -c 9)"
-K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
-KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
+# 直连后脚本落 .69 本地：有本地 kubectl 就直调，无才 ssh（旧 HW41 链路兼容）。
+if kubectl get nodes >/dev/null 2>&1; then
+  k69() { sh -c "$1"; }
+  KX="kubectl -n opencode exec deploy/opencode -c opencode --"
+else
+  K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+  k69() { $K69 "$1"; }
+  KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
+fi
 
 # 0. 网关预检（读 pod 内 URL；POST 无 key 打一次：200/400/401/404=网关活着，其余/超时=FAIL，两次机会）
-GWURL="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_BASE_URL" | tr -d '[:space:]')"
+GWURL="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_BASE_URL" | tr -d '[:space:]')"
 [ -n "$GWURL" ] || { echo "E2E-GW-URL-FAIL"; exit 1; }
 echo "gw url=$GWURL"
 GWCODE=""
 for i in 1 2; do
-  GWCODE="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H 'Content-Type: application/json' -d '{\"model\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'" || true)"
+  GWCODE="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H 'Content-Type: application/json' -d '{\"model\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'" || true)"
   echo "gw post try$i: $GWCODE"
   case "$GWCODE" in 200|400|401|404) break;; *) sleep 10;; esac
 done
@@ -26,11 +33,11 @@ case "$GWCODE" in 200|400|401|404) echo "gw alive: $GWCODE";; *) echo "E2E-GW-FA
 # 0.6 直调对照（绕开 opencode CLI：pod 直 POST 网关，key 只进内存不落地不打印）
 # 用途：CLI 挂而直调通 => CLI/配置问题；直调也挂 => 网关/上游问题。
 # 注意：LITELLM_API_KEY 只在 curl 参数里展开，脚本全程 set +x 关闭，日志只留状态码。
-DKEY="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_API_KEY" | tr -d '[:space:]')"
+DKEY="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_API_KEY" | tr -d '[:space:]')"
 [ -n "$DKEY" ] || { echo "E2E-KEY-FAIL"; exit 1; }
 echo "::add-mask::$DKEY"
 for DM in big-pickle muse-spark-1.3-contributor; do
-  DCODE="$($K69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 60 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H \"Authorization: Bearer $DKEY\" -H 'Content-Type: application/json' -d '{\"model\":\"$DM\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}'" || true)"
+  DCODE="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 60 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H \"Authorization: Bearer $DKEY\" -H 'Content-Type: application/json' -d '{\"model\":\"$DM\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":5}'" || true)"
   echo "direct model=$DM http=$DCODE"
 done
 
