@@ -98,7 +98,7 @@ jobs:
           chmod 600 /tmp/opencode-env.txt
           echo "secret-render-ok: $(grep -c '' /tmp/opencode-env.txt) entries (values masked)"
 
-      - name: ship + apply via HW41 jump（ephemeral key，现生现种）
+      - name: ship + apply via 41 jump（ephemeral key，现生现种）
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
           SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
@@ -107,13 +107,14 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          # 现生现种：runner 生 ed25519，经 HW21 跳板种进 41（jump-41 只活这一轮，不进 GH secrets）。
-          ssh-keygen -t ed25519 -N '' -f ~/.ssh/jump-41 -q
-          PUB="$(cat ~/.ssh/jump-41.pub)"
-          SEEDFILE="$(mktemp)"; printf "%s\\n" "$PUB" > "$SEEDFILE"; scp -o BatchMode=yes -P 2244 -i ~/.ssh/ci_key -o StrictHostKeyChecking=no "$SEEDFILE" root@100.91.222.51:/tmp/seed.pub < /dev/null; rm -f "$SEEDFILE"
-          # 注意：此处的三层引号是刻意设计（runner→HW21→41），改动前先数清脱衣层数。
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key -o StrictHostKeyChecking=no root@100.91.222.51 "cat /tmp/seed.pub | ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && rm -f /tmp/seed.pub'"
-          # runner 为 tag:user（user→mesh 有 accept）；2244 key 路已死（43063036641 实锤）。
+          # 现生现取（fix）：jump-41 由本 job 现场生成，经 HW21(2244) 种进 41，再直连 41。
+          # 41 不被 runner 直连（user→mesh 无 41 accept，无 IP grant）→ 必须经 HW21 跳板一种。
+          # jump-41 只活这一轮（ephemeral runner），不进 GH secrets、不落盘留存。
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/jump-41 -q && chmod 600 ~/.ssh/jump-41
+          SEEDPUB="$(cat ~/.ssh/jump-41.pub)"
+          SEEDFILE="$(mktemp)"; printf '%s\n' "$SEEDPUB" > "$SEEDFILE"
+          scp -P 2244 -o BatchMode=yes -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "$SEEDFILE" root@100.91.222.51:/tmp/seed-j41.pub < /dev/null; rm -f "$SEEDFILE"
+          ssh -p 2244 -o BatchMode=yes -o StrictHostKeyChecking=no -i ~/.ssh/ci_key root@100.91.222.51 "cat /tmp/seed-j41.pub | ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && rm -f /tmp/seed-j41.pub'"
           SSH41="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i ~/.ssh/jump-41 root@192.168.1.41"
           if [ "${{ inputs.action }}" = "rollback" ]; then
             $SSH41 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 'kubectl -n $K3S_NS rollout undo deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s'"
