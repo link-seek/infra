@@ -1,9 +1,8 @@
 name: k3s-etcd-obs-backup
-# etcd 快照异机备份（OBS north-9，同 region）。
-# 链路：k3s 定时本地快照（6h，保留 28）→ cron 每小时 obsutil cp 最新的一份到桶 → 桶内各节点保留 14 份。
-# 不用 k3s 原生 S3（minio 与 OBS 钥匙体系对不上，AccessDenied 实锤；改走已验证的 obsutil）。
-# 用法：dispatch 一次（mode=deploy）：摘 S3 段 → 发 obsutil+凭证+脚本+cron → 两节点各跑一次验证。
-# 之后全自动；mode=verify 只列桶里对象。
+# etcd 异机备份（OBS north-9，同 region）。
+# 链路：k3s 定时本地快照（6h，保留 28）→ HW21 每小时拉取→传 OBS（每节点保留 14）。
+# 凭证只在 HW21（其 obsutil 已验证 north-9 可写）；k3s 节点不碰云凭证。
+# 用法：dispatch 一次 mode=deploy（下发+验证）；之后全自动。mode=verify 只验桶。
 on:
   workflow_dispatch:
     inputs:
@@ -33,7 +32,7 @@ jobs:
           [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-etcd-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-      - name: 下发 obs 链（逐台，保 quorum）
+      - name: 下发（清 S3 段 + HW21 拉取脚本 + cron）
         if: inputs.mode == 'deploy'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
@@ -42,51 +41,51 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          scp -P 2244 -i ~/.ssh/ci_key scripts/k3s-etcd-obsupload.sh root@100.91.222.51:/tmp/k3s-etcd-obsupload.sh
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
+          scp -P 2244 -i ~/.ssh/ci_key scripts/k3s-etcd-fetch-upload.sh root@100.91.222.51:/tmp/k3s-etcd-fetch-upload.sh
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
-          R69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
           for IP in 192.168.1.69 192.168.1.41; do
-            echo "== \$IP =="
-            R="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@\$IP"
-            # 1) 摘 S3 段（原生 S3 走不通，改 obsutil；定时保留留下）
-            \$R "grep -v '^etcd-s3' /etc/rancher/k3s/config.yaml > /tmp/k3s.yaml.new && mv /tmp/k3s.yaml.new /etc/rancher/k3s/config.yaml; chmod 600 /etc/rancher/k3s/config.yaml; grep -c etcd-s3 /etc/rancher/k3s/config.yaml || echo S3-CLEAN"
-            # 2) obsutil 二进制+凭证（文件直传，不打印；HW21 的已验证可用）
-            \$R "mkdir -p /usr/local/bin /root/.obs" || true
-            scp -o BatchMode=yes -o StrictHostKeyChecking=no /usr/local/bin/obsutil root@\$IP:/usr/local/bin/obsutil
-            scp -o BatchMode=yes -o StrictHostKeyChecking=no /root/.obsutilconfig root@\$IP:/root/.obsutilconfig
-            # 服务端只跟 north-9 备份桶打交道：endpoint 永久指 north-9（与 HW21 的 north-4 互不干扰）
-            \$R "sed -i s#obs.cn-north-4.myhuaweicloud.com#obs.cn-north-9.myhuaweicloud.com# /root/.obsutilconfig && chmod 600 /root/.obsutilconfig && grep -c north-9 /root/.obsutilconfig"
-            # 3) 上传脚本 + cron（整点 17 分）
-            scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/k3s-etcd-obsupload.sh root@\$IP:/usr/local/bin/k3s-etcd-obsupload.sh
-            \$R "chmod +x /usr/local/bin/k3s-etcd-obsupload.sh /usr/local/bin/obsutil"
-            \$R "printf 'SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n17 * * * * root /usr/local/bin/k3s-etcd-obsupload.sh linkseek-k3s-etcd 14\n' > /etc/cron.d/k3s-etcd-obs && chmod 644 /etc/cron.d/k3s-etcd-obs && systemctl enable --now crond 2>/dev/null || service crond start 2>/dev/null || true"
-            # 4) 重启 k3s 吃新 config（摘 S3 段），经 .69 验 quorum>=2
-            \$R "systemctl restart k3s"
-            for i in \$(seq 1 20); do
+            echo "== $IP =="
+            R="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@$IP"
+            # S3 段已证伪（minio 与 obsutil 钥匙体系不通）：摘掉，只留定时+保留
+            $R "grep -v '^etcd-s3' /etc/rancher/k3s/config.yaml > /tmp/k3s.yaml.new && mv /tmp/k3s.yaml.new /etc/rancher/k3s/config.yaml; chmod 600 /etc/rancher/k3s/config.yaml; grep -c '^etcd-' /etc/rancher/k3s/config.yaml"
+            # 服务端 obs 残留清理（凭证只留 HW21）
+            $R "rm -f /root/.obsutilconfig; ls /usr/local/bin/obsutil >/dev/null 2>&1 && echo obs-bin-keep || true"
+            $R "grep -q 'etcd-snapshot-schedule-cron' /etc/rancher/k3s/config.yaml || printf '\netcd-snapshot-schedule-cron: \"0 */6 * * *\"\netcd-snapshot-retention: 28\n' >> /etc/rancher/k3s/config.yaml"
+            $R "systemctl restart k3s"
+            echo "等 quorum>=2..."
+            for i in $(seq 1 20); do
               sleep 15
-              READY=\$(\$R69 "kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready'" || true)
-              READY="\$(printf '%s' "\$READY" | head -1 | tr -cd '0-9')"; [ -n "\$READY" ] || READY=0
-              echo "ready=\$READY"
-              [ "\$READY" -ge 2 ] && break
-              [ "\$i" = 20 ] && { echo "FAIL: quorum 未恢复"; exit 1; }
+              READY=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 "kubectl get nodes --no-headers 2>/dev/null" | grep -c ' Ready' || true)
+              READY="$(printf '%s' "$READY" | head -1 | tr -cd '0-9')"; [ -n "$READY" ] || READY=0
+              echo "ready=$READY"
+              [ "$READY" -ge 2 ] && break
+              [ "$i" = 20 ] && { echo "FAIL: quorum 未恢复"; exit 1; }
             done
-            # 5) 本台立刻跑一次上传脚本验证
-            \$R "k3s etcd-snapshot save 2>&1 | tail -2"
-            \$R "/usr/local/bin/k3s-etcd-obsupload.sh linkseek-k3s-etcd 14"
           done
+          echo "== HW21 拉取脚本 + cron =="
+          cp /tmp/k3s-etcd-fetch-upload.sh /usr/local/bin/k3s-etcd-fetch-upload.sh
+          chmod +x /usr/local/bin/k3s-etcd-fetch-upload.sh
+          printf 'SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n17 * * * * root /usr/local/bin/k3s-etcd-fetch-upload.sh\n' > /etc/cron.d/k3s-etcd-fetch-upload
+          chmod 644 /etc/cron.d/k3s-etcd-fetch-upload
+          echo "== 立刻跑一遍验证 =="
+          /usr/local/bin/k3s-etcd-fetch-upload.sh
           echo DEPLOY-OK
           EOF
-      - name: 验桶（在 .69 上验，endpoint 已是 north-9）
-        env:
-          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      - name: 验桶（HW21 上验，endpoint 已是 north-4？改走 north-9 视角）
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
-          echo "== 桶里 etcd-auto 下的对象（两节点的最新快照） =="
-          ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 "obsutil ls obs://linkseek-k3s-etcd/etcd-auto/ 2>/dev/null | grep -E 'etcd-snapshot|on-demand|obs://' | tail -8"
+          cp /root/.obsutilconfig /tmp/oc.bak
+          sed -i s#obs.cn-north-4.myhuaweicloud.com#obs.cn-north-9.myhuaweicloud.com# /root/.obsutilconfig
+          echo "== 桶里 etcd-auto 下的对象 =="
+          OUT="$(obsutil ls obs://linkseek-k3s-etcd/etcd-auto/ 2>/dev/null | grep -E 'etcd-snapshot|on-demand|obs://' || true)"
+          cp /tmp/oc.bak /root/.obsutilconfig; rm -f /tmp/oc.bak
+          [ -n "$OUT" ] || { echo "FAIL: 桶里没东西"; exit 1; }
+          printf '%s\n' "$OUT" | tail -8
           echo VERIFY-DONE
           EOF
