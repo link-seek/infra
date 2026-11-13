@@ -90,7 +90,8 @@ jobs:
           K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
           K41="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41"
           kexec() { $K69 "kubectl $*" 2>/dev/null || $K41 "kubectl $*"; }
-          echo "== 首刷（手动 Job） =="
+          echo "== 首刷（Secret 先由管理面预建，refresher 只要 get/patch） =="
+          $K69 "kubectl create secret generic k3s-etcd-snapshot-s3-config -n kube-system --type=etcd.k3s.cattle.io/s3-config-secret --dry-run=client -o yaml | kubectl apply -f -"
           $K69 "JOB=etcd-s3-refresh-manual-$(date +%s); kubectl create job --from=cronjob/etcd-s3-refresh -n kube-system \$JOB >/dev/null && echo \$JOB > /tmp/refresh-job-name && kubectl wait --for=condition=complete -n kube-system job/\$JOB --timeout=180s"
           LOG="$($K69 "kubectl logs -n kube-system \$(cat /tmp/refresh-job-name) --tail=5" | tr -d '\r')"
           echo "$LOG" | grep -q REFRESH-OK || { echo "FAIL: 首刷没过"; echo "$LOG"; exit 1; }

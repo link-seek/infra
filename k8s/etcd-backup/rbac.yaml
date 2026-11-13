@@ -13,10 +13,12 @@ metadata:
   name: etcd-s3-refresher
   namespace: kube-system
 rules:
+# 注意：create 不能配 resourceNames（apiserver 对 CREATE 不做名字匹配，会 403）；
+# Secret 由部署链路（cluster-admin）预建，refresher 只要 get/patch。
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["k3s-etcd-snapshot-s3-config"]
-    verbs: ["get", "create", "patch"]
+    verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
