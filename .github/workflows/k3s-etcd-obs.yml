@@ -60,7 +60,7 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak && tar xzf /tmp/etcd-bak.tgz -C /tmp/etcd-bak
           cd /tmp/etcd-bak
-          DIGEST="swr.cn-north-9.myhuaweicloud.com/\$(kubectl get deploy -n opencode opencode -o jsonpath='{.spec.template.spec.containers[?(@.name=="opencode")].image}' 2>/dev/null)"
+          DIGEST="\$(kubectl get deploy -n opencode opencode -o jsonpath='{.spec.template.spec.containers[?(@.name=="opencode")].image}' 2>/dev/null)"
           [ -n "\$DIGEST" ] || { echo "FAIL: 取不到 opencode-tools digest"; exit 1; }
           echo "tools image: \$DIGEST"
           sed -i "s#swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:IMAGE_DIGEST_PLACEHOLDER#\$DIGEST#" k8s/etcd-backup/cronjob.yaml
