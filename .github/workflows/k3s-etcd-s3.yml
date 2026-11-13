@@ -48,18 +48,24 @@ jobs:
           echo "::add-mask::$SK"
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
           set -euo pipefail
+          R69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
           for IP in 192.168.1.69 192.168.1.41; do
             echo "== \$IP =="
             R="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@\$IP"
             # S3 直写 config.yaml（免改 unit；secret 落盘 600；grep 幂等）
             \$R "grep -q etcd-s3-endpoint /etc/rancher/k3s/config.yaml 2>/dev/null || printf '%s\n' 'etcd-s3: true' 'etcd-s3-endpoint: obs.cn-north-9.myhuaweicloud.com' 'etcd-s3-region: cn-north-9' 'etcd-s3-bucket: linkseek-k3s-etcd' 'etcd-s3-folder: etcd-auto' 'etcd-s3-access-key: \"$AK\"' 'etcd-s3-secret-key: \"$SK\"' >> /etc/rancher/k3s/config.yaml; chmod 600 /etc/rancher/k3s/config.yaml"
             \$R "grep -q etcd-snapshot-schedule-cron /etc/rancher/k3s/config.yaml 2>/dev/null || printf '\netcd-snapshot-schedule-cron: \"0 */6 * * *\"\netcd-snapshot-retention: 28\n' >> /etc/rancher/k3s/config.yaml"
+            # 调试 symlink（server 安装不自带）
+            \$R "ln -sf /usr/local/bin/k3s /usr/local/bin/kubectl; ln -sf /usr/local/bin/k3s /usr/local/bin/crictl"
             \$R "systemctl restart k3s"
-            echo "等 \$IP API 回来..."
+            echo "等 \$IP 回来（经 .69 API 验，不依赖本机 kubectl）..."
             for i in \$(seq 1 20); do
               sleep 15
-              \$R "kubectl get nodes >/dev/null 2>&1" && break
-              [ "\$i" = 20 ] && { echo "FAIL: \$IP API 未回来"; exit 1; }
+              READY=\$(\$R69 "kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready'" || true)
+              READY="\$(printf '%s' "\$READY" | head -1 | tr -cd '0-9')"; [ -n "\$READY" ] || READY=0
+              echo "ready=\$READY"
+              [ "\$READY" -ge 2 ] && break
+              [ "\$i" = 20 ] && { echo "FAIL: quorum 未恢复"; \$R69 "kubectl get nodes 2>/dev/null || true"; exit 1; }
             done
           done
           echo CONFIG-OK
