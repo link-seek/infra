@@ -1,22 +1,24 @@
 name: k3s-etcd-obs-backup
-# etcd 异机备份（OBS north-9，同 region）。
-# 链路：k3s 定时本地快照（6h，保留 28）→ HW21 每小时拉取→传 OBS（每节点保留 14）。
-# 凭证只在 HW21（其 obsutil 已验证 north-9 可写）；k3s 节点不碰云凭证。
-# 用法：dispatch 一次 mode=deploy（下发+验证）；之后全自动。mode=verify 只验桶。
+# etcd 异机备份（OBS north-9，同 region）：k3s 原生 S3 直传，零中转。
+# 链路：k3s 定时快照（6h）→ server 读 kube-system Secret（三元组临时钥匙）→ 直传 OBS。
+# 钥匙：CronJob（k8s/etcd-backup）每 6h 从 metadata 取 24h 临时钥匙刷 Secret；HW21 已出局。
+# 用法：dispatch mode=deploy（全量下发+验证）；每天定时只跑 verify（新增对象 30h 内必须有）。
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "deploy=下发+验证；verify=只验桶"
+        description: "deploy=下发+验证；verify=只验"
         required: false
         default: "deploy"
+  schedule:
+    - cron: "0 1 * * *"
 concurrency:
   group: k3s-etcd-obs
   cancel-in-progress: false
 jobs:
   backup:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
@@ -32,7 +34,47 @@ jobs:
           [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-etcd-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-      - name: 下发（清 S3 段 + HW21 拉取脚本 + cron）
+      - name: 下发 RBAC+CronJob（digest 现取现钉）
+        if: inputs.mode == 'deploy'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          tar czf /tmp/etcd-bak.tgz k8s/etcd-backup
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
+          set -euo pipefail
+          J="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+          $J 'rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak'
+          EOF
+          scp -P 2244 -i ~/.ssh/ci_key /tmp/etcd-bak.tgz root@100.91.222.51:/tmp/etcd-bak.tgz
+          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
+          set -euo pipefail
+          scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/etcd-bak.tgz root@192.168.1.69:/tmp/etcd-bak.tgz
+          ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 bash -s <<'INNEREOF'
+          set -euo pipefail
+          rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak && tar xzf /tmp/etcd-bak.tgz -C /tmp/etcd-bak
+          cd /tmp/etcd-bak
+          DIGEST="swr.cn-north-9.myhuaweicloud.com/\$(kubectl get deploy -n opencode opencode -o jsonpath='{.spec.template.spec.containers[?(@.name=="opencode")].image}' 2>/dev/null)"
+          [ -n "\$DIGEST" ] || { echo "FAIL: 取不到 opencode-tools digest"; exit 1; }
+          echo "tools image: \$DIGEST"
+          sed -i "s#swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:IMAGE_DIGEST_PLACEHOLDER#\$DIGEST#" k8s/etcd-backup/cronjob.yaml
+          grep -q IMAGE_DIGEST_PLACEHOLDER k8s/etcd-backup/cronjob.yaml && { echo "FAIL: digest 未钉上"; exit 1; }
+          kubectl create secret docker-registry swr-pull -n kube-system \
+            --docker-server=swr.cn-north-9.myhuaweicloud.com \
+            --docker-username="$SWR_LOGIN_USER" --docker-password="$SWR_LOGIN_PASS" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/etcd-backup/rbac.yaml
+          kubectl apply -f k8s/etcd-backup/refresh-script.yaml
+          kubectl apply -f k8s/etcd-backup/cronjob.yaml
+          echo RBAC-CRONJOB-OK
+          INNEREOF
+          EOF
+      - name: 首刷 + config 下发 + 滚动重启 + 实传验证
         if: inputs.mode == 'deploy'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
@@ -41,51 +83,128 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          scp -P 2244 -i ~/.ssh/ci_key scripts/k3s-etcd-fetch-upload.sh root@100.91.222.51:/tmp/k3s-etcd-fetch-upload.sh
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
-          for IP in 192.168.1.69 192.168.1.41; do
-            echo "== $IP =="
-            R="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@$IP"
-            # S3 段已证伪（minio 与 obsutil 钥匙体系不通）：摘掉，只留定时+保留
-            $R "grep -v '^etcd-s3' /etc/rancher/k3s/config.yaml > /tmp/k3s.yaml.new && mv /tmp/k3s.yaml.new /etc/rancher/k3s/config.yaml; chmod 600 /etc/rancher/k3s/config.yaml; grep -c '^etcd-' /etc/rancher/k3s/config.yaml"
-            # 服务端 obs 残留清理（凭证只留 HW21）
-            $R "rm -f /root/.obsutilconfig; ls /usr/local/bin/obsutil >/dev/null 2>&1 && echo obs-bin-keep || true"
-            $R "grep -q 'etcd-snapshot-schedule-cron' /etc/rancher/k3s/config.yaml || printf '\netcd-snapshot-schedule-cron: \"0 */6 * * *\"\netcd-snapshot-retention: 28\n' >> /etc/rancher/k3s/config.yaml"
-            $R "systemctl restart k3s"
-            echo "等 quorum>=2..."
+          K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+          K41="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41"
+          kexec() { $K69 "kubectl $*" 2>/dev/null || $K41 "kubectl $*"; }
+          echo "== 首刷（手动 Job） =="
+          $K69 "JOB=etcd-s3-refresh-manual-$(date +%s); kubectl create job --from=cronjob/etcd-s3-refresh -n kube-system \$JOB >/dev/null && echo \$JOB > /tmp/refresh-job-name && kubectl wait --for=condition=complete -n kube-system job/\$JOB --timeout=180s"
+          LOG="$($K69 "kubectl logs -n kube-system \$(cat /tmp/refresh-job-name) --tail=5" | tr -d '\r')"
+          echo "$LOG" | grep -q REFRESH-OK || { echo "FAIL: 首刷没过"; echo "$LOG"; exit 1; }
+          echo "首刷 OK"
+          wait_ready() {
             for i in $(seq 1 20); do
               sleep 15
-              READY=$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 "kubectl get nodes --no-headers 2>/dev/null" | grep -c ' Ready' || true)
+              READY="$(kexec "get nodes --no-headers" | grep -c ' Ready' || true)"
               READY="$(printf '%s' "$READY" | head -1 | tr -cd '0-9')"; [ -n "$READY" ] || READY=0
               echo "ready=$READY"
-              [ "$READY" -ge 2 ] && break
-              [ "$i" = 20 ] && { echo "FAIL: quorum 未恢复"; exit 1; }
+              [ "$READY" -ge 2 ] && return 0
             done
+            echo "FAIL: quorum 未恢复"; return 1
+          }
+          apply_config() {
+            # $1=schedule cron
+            local IP="$1" CRON="$2"
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" python3 - "$CRON" <<'PYEOF'
+          import re,sys
+          cron = sys.argv[1]
+          p = "/etc/rancher/k3s/config.yaml"
+          s = open(p).read()
+          s = re.sub(r"(?m)^etcd-snapshot-schedule-cron:.*$", f"etcd-snapshot-schedule-cron: \"{cron}\"", s)
+          s = re.sub(r"(?m)^etcd-s3:.*$", "etcd-s3: true", s)
+          for line in ['etcd-s3: true',
+                        'etcd-s3-config-secret: k3s-etcd-snapshot-s3-config',
+                        'etcd-s3-retention: 28']:
+              key = line.split(":")[0]
+              if not re.search(rf"(?m)^{key}:", s):
+                  s = s.rstrip("\n") + "\n" + line + "\n"
+          open(p, "w").write(s)
+          PYEOF
+            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "chmod 600 /etc/rancher/k3s/config.yaml && grep -E '^etcd-(s3|snapshot)' /etc/rancher/k3s/config.yaml && systemctl restart k3s"
+          }
+          echo "== 测试节拍（*/7）+ S3 开：先 .41 再 .69 =="
+          apply_config 192.168.1.41 "*/7 * * * *"
+          wait_ready
+          apply_config 192.168.1.69 "*/7 * * * *"
+          wait_ready
+          echo "== 等 S3 client 就绪 =="
+          for i in $(seq 1 12); do
+            sleep 10
+            if $K69 "journalctl -u k3s --since '15 min ago' --no-pager 2>/dev/null | grep -q 'S3 bucket linkseek-k3s-etcd exists'"; then
+              echo "S3-CLIENT-OK"; break
+            fi
+            [ "$i" = 12 ] && { echo "FAIL: S3 client 没起来"; exit 1; }
           done
-          echo "== HW21 拉取脚本 + cron =="
-          cp /tmp/k3s-etcd-fetch-upload.sh /usr/local/bin/k3s-etcd-fetch-upload.sh
-          chmod +x /usr/local/bin/k3s-etcd-fetch-upload.sh
-          printf 'SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n17 * * * * root /usr/local/bin/k3s-etcd-fetch-upload.sh\n' > /etc/cron.d/k3s-etcd-fetch-upload
-          chmod 644 /etc/cron.d/k3s-etcd-fetch-upload
-          echo "== 立刻跑一遍验证 =="
-          /usr/local/bin/k3s-etcd-fetch-upload.sh
+          echo "== 等一次实传（CR 为证） =="
+          for i in $(seq 1 12); do
+            sleep 60
+            if kexec "get etcdsnapshotfile -o json" 2>/dev/null | python3 -c "
+          import json,sys,datetime
+          now = datetime.datetime.now(datetime.timezone.utc)
+          for it in json.load(sys.stdin).get('items', []):
+              loc = ((it.get('spec') or {}).get('location')) or ''
+              ts = ((it.get('status') or {}).get('creationTime')) or ((it.get('metadata') or {}).get('creationTimestamp')) or ''
+              if loc.startswith('s3://'):
+                  try:
+                      age = (now - datetime.datetime.fromisoformat(ts.replace('Z','+00:00'))).total_seconds()
+                  except Exception:
+                      continue
+                  if age < 1800:
+                      print('fresh-s3-snapshot: ' + loc); sys.exit(0)
+          sys.exit(1)"; then
+              echo "S3-UPLOAD-OK"; break
+            fi
+            echo "wait upload... $i/12"
+            [ "$i" = 12 ] && { echo "FAIL: 12 分钟没等到 S3 实传"; exit 1; }
+          done
+          echo "== 切回正式节拍（0 */6 * * *） =="
+          apply_config 192.168.1.41 "0 */6 * * *"
+          wait_ready
+          apply_config 192.168.1.69 "0 */6 * * *"
+          wait_ready
+          echo "== 清 HW21 旧链 =="
+          rm -f /usr/local/bin/k3s-etcd-fetch-upload.sh /etc/cron.d/k3s-etcd-fetch-upload /tmp/k3s-etcd-fetch-upload.sh /tmp/etcd-bak.tgz
           echo DEPLOY-OK
           EOF
-      - name: 验桶（HW21 上验，endpoint 已是 north-4？改走 north-9 视角）
+      - name: 验（CR + 刷新新鲜度，不碰钥匙值）
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
-          cp /root/.obsutilconfig /tmp/oc.bak
-          sed -i s#obs.cn-north-4.myhuaweicloud.com#obs.cn-north-9.myhuaweicloud.com# /root/.obsutilconfig
-          echo "== 桶里 etcd-auto 下的对象 =="
-          OUT="$(obsutil ls obs://linkseek-k3s-etcd/etcd-auto/ 2>/dev/null | grep -E 'etcd-snapshot|on-demand|obs://' || true)"
-          cp /tmp/oc.bak /root/.obsutilconfig; rm -f /tmp/oc.bak
-          [ -n "$OUT" ] || { echo "FAIL: 桶里没东西"; exit 1; }
-          printf '%s\n' "$OUT" | tail -8
+          K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
+          kexec() { $K69 "kubectl $*" 2>/dev/null || ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41 "kubectl $*"; }
+          echo "== Secret 刷新新鲜度（<12h） =="
+          kexec "get secret -n kube-system k3s-etcd-snapshot-s3-config -o jsonpath='{.metadata.annotations.refreshed-at}'" | python3 -c "
+          import sys,datetime
+          ts = sys.stdin.read().strip()
+          age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(ts.replace('Z','+00:00'))).total_seconds()
+          print('refreshed-at=' + ts + ' age_h=%.1f' % (age/3600))
+          sys.exit(0 if age < 43200 else 1)" || { echo "FAIL: Secret 超 12h 没刷"; exit 1; }
+          echo "== S3 快照新鲜度（<30h） =="
+          kexec "get etcdsnapshotfile -o json" | python3 -c "
+          import json,sys,datetime
+          now = datetime.datetime.now(datetime.timezone.utc)
+          best = None
+          for it in json.load(sys.stdin).get('items', []):
+              loc = ((it.get('spec') or {}).get('location')) or ''
+              if not loc.startswith('s3://'):
+                  continue
+              ts = ((it.get('status') or {}).get('creationTime')) or ((it.get('metadata') or {}).get('creationTimestamp')) or ''
+              try:
+                  age = (now - datetime.datetime.fromisoformat(ts.replace('Z','+00:00'))).total_seconds()
+              except Exception:
+                  continue
+              if best is None or age < best[0]:
+                  best = (age, loc)
+          if best is None:
+              print('FAIL: 没有 S3 快照 CR'); sys.exit(1)
+          print('newest s3 snapshot age_h=%.1f %s' % (best[0]/3600, best[1]))
+          sys.exit(0 if best[0] < 108000 else 1)" || { echo "FAIL: 30h 内无 S3 快照"; exit 1; }
           echo VERIFY-DONE
           EOF
