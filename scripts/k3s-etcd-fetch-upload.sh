@@ -6,6 +6,13 @@ set -euo pipefail
 BUCKET=linkseek-k3s-etcd
 KEEP_LOCAL=28
 KEEP_OBS=14
+# HW21 默认 endpoint 是 north-4；备份桶在 north-9：临时切换，用完必还原（trap 兜底）。
+CFG=/root/.obsutilconfig
+BAK="$(mktemp /tmp/.obsutilconfig.bak.XXXXXX)"
+cp "$CFG" "$BAK"
+sed -i s#obs.cn-north-4.myhuaweicloud.com#obs.cn-north-9.myhuaweicloud.com# "$CFG"
+restore_cfg() { cp "$BAK" "$CFG"; rm -f "$BAK"; }
+trap restore_cfg EXIT
 for IP in 192.168.1.69 192.168.1.41; do
   NAME="$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@$IP 'hostname' | tr -d '\r\n ')"
   [ -n "$NAME" ] || { echo "FAIL: $IP 不可达"; exit 1; }
