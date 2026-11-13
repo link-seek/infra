@@ -1,0 +1,41 @@
+name: tmp-gw-probe
+
+# 一次性：只读探针，看 litellm-gateway-k3s 是否 500。测完即删。
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: join tailnet (tag:user, ephemeral)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="gwprobe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+
+      - name: probe gateway (read-only)
+        run: |
+          set -euo pipefail
+          IP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if 'litellm-gateway-k3s' in str(p.get('DNSName','')) or 'litellm-gateway-k3s' in str(p.get('HostName',''))),''))")
+          [ -n "$IP" ] || { echo GW-NOT-VISIBLE-FAIL; exit 1; }
+          echo "gateway-k3s ip=$IP"
+          echo "--- models ---"
+          curl -s -m 15 -o /tmp/models.out -w 'models http=%{http_code}\n' "http://$IP:4000/v1/models" || true
+          head -c 300 /tmp/models.out; echo
+          echo "--- blacklist kimi-k3 (expect 400) ---"
+          curl -s -m 30 -o /tmp/bl.out -w 'blacklist http=%{http_code}\n' -X POST "http://$IP:4000/v1/chat/completions" -H 'Content-Type: application/json' -d '{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' || true
+          head -c 500 /tmp/bl.out; echo
+          echo "--- unknown model x no key (e2e probe, expect 200/400/401/404) ---"
+          curl -s -m 20 -o /tmp/x.out -w 'unknown http=%{http_code}\n' -X POST "http://$IP:4000/v1/chat/completions" -H 'Content-Type: application/json' -d '{"model":"x","messages":[{"role":"user","content":"hi"}]}' || true
+          head -c 1000 /tmp/x.out; echo
+          true
