@@ -1,15 +1,15 @@
-# SNI 出海路由（k8s 版 app connector）：opencode.ai 的 TLS 原样穿透，
-# 只按 ClientHello 里的域名转发。不解密、不改头、无钥匙、无公网面。
-# 调度钉死东京节点（vm-proxy）；阿里节点以后同形再加一份。
+# SNI 出海中转（hostNetwork DaemonSet，钉边缘节点）。
+# 为什么不用普通 Deployment：edge agent 的 pod 网络是断的（flannel 到不了 edge）；
+# hostNetwork 绕开 flannel，直走宿主机出海（东京 IP）。TLS 端到端透传，不解密。
+# 未来阿里节点：同一 DaemonSet 用 nodeAffinity 再加 selector 即可横向扩展。
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: sni-egress
   namespace: egress
   labels:
     app: sni-egress
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: sni-egress
@@ -18,6 +18,8 @@ spec:
       labels:
         app: sni-egress
     spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
         kubernetes.io/hostname: vm-proxy
       tolerations:
@@ -26,7 +28,6 @@ spec:
           value: edge
           effect: NoSchedule
       initContainers:
-        # 无解密 SNI 路由依赖 ssl_preread 模块；官方镜像自带，起不来就地拦（fail-closed）。
         - name: conf-test
           image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
           imagePullPolicy: IfNotPresent
@@ -41,8 +42,9 @@ spec:
           image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8443
-              name: sni
+            - containerPort: 443
+              hostPort: 443
+              protocol: TCP
           volumeMounts:
             - name: conf
               mountPath: /etc/nginx/nginx.conf
@@ -56,16 +58,3 @@ spec:
           configMap:
             name: sni-egress-conf
             defaultMode: 0444
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: sni-egress
-  namespace: egress
-spec:
-  selector:
-    app: sni-egress
-  ports:
-    - port: 443
-      targetPort: 8443
-      protocol: TCP
