@@ -86,6 +86,6 @@ jobs:
           ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
           set -euo pipefail
           echo "== 桶里 etcd-auto 下的对象（两节点的最新快照） =="
-          obsutil ls -r obs://linkseek-k3s-etcd/etcd-auto/ 2>/dev/null | grep -E 'etcd-snapshot|on-demand' | tail -8
+          obsutil ls obs://linkseek-k3s-etcd/etcd-auto/ 2>/dev/null | grep -E 'etcd-snapshot|on-demand' | tail -8
           echo VERIFY-DONE
           EOF
