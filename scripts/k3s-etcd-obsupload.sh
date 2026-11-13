@@ -8,12 +8,12 @@ KEEP="${2:-14}"
 NODE="$(hostname -s 2>/dev/null || hostname)"
 SRC_DIR="/var/lib/rancher/k3s/server/db/snapshots"
 DST="obs://${BUCKET}/etcd-auto/${NODE}/"
-NEWEST="$(ls -t "$SRC_DIR" 2>/dev/null | grep -E '\.(db|zip)$' | head -1 || true)"
+NEWEST="$(ls -t "$SRC_DIR" 2>/dev/null | grep -E '^(etcd-snapshot|on-demand)-' | head -1 || true)"
 [ -n "$NEWEST" ] || { echo "no local snapshot yet"; exit 0; }
 echo "upload: $NEWEST"
 obsutil cp "$SRC_DIR/$NEWEST" "$DST" >/dev/null 2>&1 || { echo "FAIL: upload"; exit 1; }
 echo "prune: keep newest $KEEP in $DST"
-DEL="$(obsutil ls "$DST" 2>/dev/null | grep -oE '[^ /]+\.(db|zip)' | sort -r | tail -n +"$((KEEP + 1))" || true)"
+DEL="$(obsutil ls "$DST" 2>/dev/null | grep -oE '(etcd-snapshot|on-demand)-[^ /]*' | sort -r | tail -n +"$((KEEP + 1))" || true)"
 for f in $DEL; do
   obsutil rm "${DST}${f}" >/dev/null 2>&1 || true
   echo "pruned: $f"
