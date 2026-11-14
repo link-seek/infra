@@ -28,7 +28,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/promote-stack.yml
     with:
-      images: ghcr.io/link-seek/opencode-tools swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools
+      images: ghcr.io/link-seek/opencode-tools swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools
       digest: ${{ inputs.digest }}
       tag: ${{ inputs.tag }}
       reason: ${{ inputs.reason }}

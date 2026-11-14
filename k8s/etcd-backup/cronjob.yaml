@@ -26,7 +26,7 @@ spec:
             - name: swr-pull
           containers:
             - name: refresh
-              image: swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
+              image: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools@sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
               imagePullPolicy: IfNotPresent
               command: ["python3", "/scripts/refresh.py"]
               volumeMounts:

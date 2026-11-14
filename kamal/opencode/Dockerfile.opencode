@@ -2,6 +2,6 @@
 # pin = HW41 线上现跑 tools digest（已知好）；换版=改 ARG 发 PR。
 # trial 仓走 SWR（AGENT token 对 opencode-tools 包无 GHCR push 权）；提速以后再议。
 ARG TOOLS_DIGEST=sha256:bb7c1087742175ba93df3745e748cfef852de3879de98140bdc05d845038da01
-FROM swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools@${TOOLS_DIGEST}
+FROM swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools@${TOOLS_DIGEST}
 ARG TOOLS_DIGEST
 LABEL tools.digest=$TOOLS_DIGEST

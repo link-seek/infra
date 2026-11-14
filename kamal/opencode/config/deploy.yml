@@ -4,7 +4,7 @@
 # canary 异端口、goss 全量探针。trial 只验 serving（200 登录页）。
 # HW41 的 80 不动（nginx-proxy），本线只打 ephemeral。
 service: opencode
-image: linkseed/opencode-trial
+image: link-seek/opencode-trial
 
 servers:
   - SERVER_PLACEHOLDER

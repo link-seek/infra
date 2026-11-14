@@ -2,7 +2,7 @@
 REMOTE_DIR=/root/stacks/opencode-prod
 ENV_CONF=env-sources.conf
 # pin 冻结：只冻 tools（chrome-cjk 无构建线，只跟 pin，不动）
-PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/linkseed/opencode-tools"
+PIN_REPOS="swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools"
 SYNC_FILES="compose.yml README.md .env.example goss-trial.yaml probe-cases"
 # 探针 goss 版本（deliver-remote-core.sh 在 CI 下载后按同一条 tar 路送上靶机，不烘镜像）
 GOSS_VERSION="v0.4.10"
