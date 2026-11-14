@@ -9,6 +9,8 @@ metadata:
   namespace: opencode-xieyucheng
   labels:
     app: opencode
+  annotations:
+    flux-e2e-probe: "2026-11-14-pilot-takeover"
 spec:
   replicas: 1
   strategy:
