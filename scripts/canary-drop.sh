@@ -29,4 +29,7 @@ else
   docker compose -p "$CANARY_PROJECT" down -v 2>/dev/null || true
 fi
 [ -z "$CANARY_CONTAINER" ] || docker rm -f "$CANARY_CONTAINER" 2>/dev/null || true
+# stub 网关同生共死。
+pkill -f 'stub-gateway.py' 2>/dev/null || true
+rm -f /tmp/*-stub-gateway.py /tmp/stub-gateway.log 2>/dev/null || true
 echo "canary dropped"

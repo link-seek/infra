@@ -20,6 +20,8 @@ CANARY_CONTAINER_PORT=4097
 CANARY_BROWSER_SERVICE=browser
 CANARY_BROWSER_CONTAINER=opencode-browser-canary
 CANARY_BROWSER_PORT=19228
+# canary stub 网关端口（探针与生产解耦；canary-run.sh 起，drop.sh 杀；trial override 指这里）。
+STUB_PORT=14099
 CANARY_BROWSER_CONTAINER_PORT=9222
 # goss 文件 / 用例下限（现 13 条：http1+command10+file1+process1）；防删门禁
 GOSS_FILE=goss-trial.yaml
