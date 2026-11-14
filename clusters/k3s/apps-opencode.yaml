@@ -1,0 +1,17 @@
+# Flux Kustomization: yingxin 主实例（prod）。
+# 由 flux-system（path ./clusters/k3s）收编 → 自动建对账链。
+# Secret（opencode-env）不进仓不归 Flux，沿用 pipeline 已建好的。
+# 首同步会重启一次：镜像 linkseed→link-seek 改名，同 digest（下周 linkseed 消失前必须切）。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: opencode
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/opencode
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
