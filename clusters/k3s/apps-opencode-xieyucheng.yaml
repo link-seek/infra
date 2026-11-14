@@ -1,0 +1,16 @@
+# Flux Kustomization: 试点 opencode-xieyucheng（独立对账，不碰 Secret）。
+# 由 flux-system（path ./clusters/k3s）收编 → 自动建第二对账链。
+# Secret 仍走 pipeline mint（Flux 只管 manifest，不碰 Secret）。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: opencode-xieyucheng
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/opencode-xieyucheng
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
