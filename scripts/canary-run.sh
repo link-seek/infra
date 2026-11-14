@@ -83,5 +83,93 @@ OVERRIDE_FILE="/tmp/${CANARY_PROJECT}-override.yml"
   fi
 } > "$OVERRIDE_FILE"
 
+# stub 网关（canary 探针专用；与生产网关解耦，确定性回显；STUB_PORT 未设则跳过）。
+if [ -n "${STUB_PORT:-}" ]; then
+  STUB_PY="/tmp/${CANARY_PROJECT:-canary}-stub-gateway.py"
+  cat > "$STUB_PY" <<'CANARY_STUB_EOF'
+#!/usr/bin/env python3
+"""Canary stub gateway: deterministic OpenAI-compatible echo (test harness)."""
+import json
+import re
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+MARK = re.compile(r'MEM-[A-Z0-9]+')
+
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, obj, code=200):
+        b = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_GET(self):
+        if self.path.startswith('/v1/models'):
+            self._send({"object": "list", "data": [
+                {"id": "muse-spark-1.3-contributor", "object": "model"},
+                {"id": "big-pickle", "object": "model"},
+            ]})
+        else:
+            self._send({"status": "stub-ok"})
+
+    def reply_text(self, body):
+        raw = json.dumps(body)
+        marks = sorted(set(MARK.findall(raw)))
+        last_user = ''
+        msgs = body.get('messages') if isinstance(body, dict) else None
+        if isinstance(msgs, list):
+            for m in reversed(msgs):
+                if isinstance(m, dict) and m.get('role') == 'user' and isinstance(m.get('content'), str):
+                    last_user = m['content']
+                    break
+        text = last_user
+        if marks:
+            text = text + '\n[stub-records: ' + ' '.join(marks) + ']'
+        return text.strip() or 'stub-ok'
+
+    def do_POST(self):
+        n = int(self.headers.get('Content-Length') or 0)
+        try:
+            body = json.loads(self.rfile.read(n) or b'{}')
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        text = self.reply_text(body)
+        if body.get('stream'):
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            i, step = 0, 120
+            while i < len(text):
+                payload = {"id": "stub", "object": "chat.completion.chunk", "choices": [
+                    {"index": 0, "delta": {"content": text[i:i + step]}, "finish_reason": None}]}
+                self.wfile.write(('data: ' + json.dumps(payload) + '\n\n').encode())
+                i += step
+            done = {"id": "stub", "object": "chat.completion.chunk", "choices": [
+                {"index": 0, "delta": {}, "finish_reason": "stop"}]}
+            self.wfile.write(('data: ' + json.dumps(done) + '\n\n').encode())
+            self.wfile.write(b'data: [DONE]\n\n')
+            return
+        self._send({"id": "stub", "object": "chat.completion", "model": body.get('model', 'stub'), "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}})
+
+
+if __name__ == '__main__':
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 14099
+    HTTPServer(('0.0.0.0', port), H).serve_forever()
+CANARY_STUB_EOF
+  (nohup python3 "$STUB_PY" "$STUB_PORT" >/tmp/stub-gateway.log 2>&1 &)
+  sleep 1
+  curl -fsS "http://127.0.0.1:${STUB_PORT}/v1/models" >/dev/null || { echo "FAIL: stub 网关未起来"; exit 1; }
+  echo "stub gateway up on :$STUB_PORT"
+fi
 docker compose -p "$CANARY_PROJECT" -f compose.yml -f "$OVERRIDE_FILE" up -d "${SERVICES[@]}"
 echo "canary started (project=$CANARY_PROJECT services=$CANARY_SERVICES)"
