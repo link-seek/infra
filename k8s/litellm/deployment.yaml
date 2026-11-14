@@ -30,7 +30,7 @@ spec:
           hostnames: ["opencode.ai"]
       containers:
         - name: litellm
-          image: swr.cn-north-9.myhuaweicloud.com/linkseed/litellm-gateway@sha256:29d2b796e48eb7ea5222ef51bc19dc72eb4361323d6a15b4809ee09c752dc767
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/litellm-gateway@sha256:29d2b796e48eb7ea5222ef51bc19dc72eb4361323d6a15b4809ee09c752dc767
           command: ["/bin/sh", "/entrypoint/entrypoint.sh"]
           args: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
           ports:
