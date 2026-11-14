@@ -16,9 +16,12 @@ jobs:
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
-          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+          CODE="$(curl -sS -m 30 -o /tmp/mint.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
             -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}},"expirySeconds":3600}' \
-            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+            https://api.tailscale.com/api/v2/tailnet/-/keys)"
+          echo "mint http=$CODE"
+          MINTED="$(python3 -c "import json; print(json.load(open('/tmp/mint.json')).get('key',''))")"
+          [ "$CODE" = 200 ] || { echo "mint body:"; head -c 300 /tmp/mint.json; echo; exit 1; }
           [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-sync-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
