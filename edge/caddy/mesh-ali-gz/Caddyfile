@@ -65,9 +65,10 @@ litellm.linkseek.net.cn {
 		}
 	}
 	reverse_proxy {
-		# 回退单后端（k3s 网关 muse-spark 未通，50/50 暂停；恢复 HW21 100%）。
+		# #423 步骤三：域名直切 k3s（2026-11-14）。后端 = k3s 网关 tailnet 身份（tag:gateway 已放行，无需 ACL 变更）。
+		# 回滚：改回 dynamic litellm-gateway.mackarel-polaris.ts.net.:4000（HW21 单后端）。
 		dynamic a {
-			name litellm-gateway.mackarel-polaris.ts.net.
+			name litellm-gateway-k3s.mackarel-polaris.ts.net.
 			port 4000
 			refresh 5s
 			resolvers 100.100.100.100

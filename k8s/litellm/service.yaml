@@ -8,12 +8,10 @@ metadata:
   labels:
     app: litellm-gateway
 spec:
-  type: NodePort
   selector:
     app: litellm-gateway
   ports:
     - name: http
       port: 4000
       targetPort: 4000
-      nodePort: 30400
       protocol: TCP
