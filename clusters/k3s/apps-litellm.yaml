@@ -1,0 +1,16 @@
+# Flux Kustomization: 网关 litellm（prod，谨慎）。
+# 由 flux-system（path ./clusters/k3s）收编 → 自动建第二对账链。
+# Secret（litellm-env）不进仓不归 Flux，沿用 pipeline 已建好的。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: litellm
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/litellm
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
