@@ -276,7 +276,7 @@ if grep -q '^TS_JOIN_KEY=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
 fi
 # trial（preflight）分支：LITELLM_BASE_URL 直连上游 Go（组织 key，不经网关，确定性最高）。
 if [ "${ACTION_MODE:-}" = "preflight" ] && grep -q '^LITELLM_BASE_URL=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
-  export S_LITELLM_BASE_URL="https://opencode.ai/inference/go/openai/v1/responses"
+  export S_LITELLM_BASE_URL="https://opencode.ai/inference/go/openai/v1"
   echo "trial override: LITELLM_BASE_URL -> $S_LITELLM_BASE_URL"
 fi
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
