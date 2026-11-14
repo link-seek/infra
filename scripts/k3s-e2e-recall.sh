@@ -18,17 +18,17 @@ else
   KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
 fi
 
-# 0. 网关预检（读 pod 内 URL；POST 无 key 打一次：200/400/401/404=网关活着，其余/超时=FAIL，两次机会）
+# 0. 网关预检（官方指定 big-pickle 为永久测试模型；POST 无 key 打一次：200/400/401/404/429=网关活着，其余/超时=FAIL，两次机会）
 GWURL="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_BASE_URL" | tr -d '[:space:]')"
 [ -n "$GWURL" ] || { echo "E2E-GW-URL-FAIL"; exit 1; }
 echo "gw url=$GWURL"
 GWCODE=""
 for i in 1 2; do
-  GWCODE="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H 'Content-Type: application/json' -d '{\"model\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'" || true)"
+  GWCODE="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H 'Content-Type: application/json' -d '{\"model\":\"big-pickle\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'" || true)"
   echo "gw post try$i: $GWCODE"
-  case "$GWCODE" in 200|400|401|404) break;; *) sleep 10;; esac
+  case "$GWCODE" in 200|400|401|404|429) break;; *) sleep 10;; esac
 done
-case "$GWCODE" in 200|400|401|404) echo "gw alive: $GWCODE";; *) echo "E2E-GW-FAIL http=$GWCODE"; exit 1;; esac
+case "$GWCODE" in 200|400|401|404|429) echo "gw alive: $GWCODE";; *) echo "E2E-GW-FAIL http=$GWCODE"; exit 1;; esac
 
 # 0.6 直调对照（绕开 opencode CLI：pod 直 POST 网关，key 只进内存不落地不打印）
 # 用途：CLI 挂而直调通 => CLI/配置问题；直调也挂 => 网关/上游问题。
