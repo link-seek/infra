@@ -1,6 +1,0 @@
-# spike 力学验证专用：runner 自带 ubuntu 缓存，不碰 Hub 限流；python http 供健康检查。
-FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y --no-install-recommends python3 \
- && rm -rf /var/lib/apt/lists/*
-EXPOSE 80
-CMD ["python3", "-m", "http.server", "80"]
