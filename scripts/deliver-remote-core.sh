@@ -274,9 +274,9 @@ if grep -q '^TS_JOIN_KEY=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
   echo "TS join key minted（reusable+ephemeral+90d, $JOIN_TAG, HTTP $MINT_CODE）"
   set -x # 敏感段结束
 fi
-# trial（preflight）分支：LITELLM_BASE_URL 改道 canary stub 网关（与生产解耦，确定性探针）。
+# trial（preflight）分支：LITELLM_BASE_URL 改道 k3s 生产网关 tailnet 身份（旧 HW21 网关已退役）。
 if [ "${ACTION_MODE:-}" = "preflight" ] && grep -q '^LITELLM_BASE_URL=' "$STACK_DIR/$ENV_CONF" 2>/dev/null; then
-  export S_LITELLM_BASE_URL="http://host.docker.internal:${STUB_PORT:-14099}"
+  export S_LITELLM_BASE_URL="http://litellm-gateway-k3s.mackarel-polaris.ts.net:4000"
   echo "trial override: LITELLM_BASE_URL -> $S_LITELLM_BASE_URL"
 fi
 bash scripts/render-dotenv.sh --map "$STACK_DIR/$ENV_CONF" --example "$STACK_DIR/.env.example" --out /tmp/ci-dotenv
