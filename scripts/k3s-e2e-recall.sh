@@ -5,26 +5,28 @@
 # 注意：会在 .69 卷里留下 2~3 条 ses_k3s* 测试会话（canary 同款惯例，批量清，不逐条删）。
 set -eu
 MARKER="${1:?MARKER required}"
+NS="${K3S_NS:-opencode}"
+DEP="${K3S_DEPLOY:-opencode}"
 # 测试模型：默认 opencode-go/muse-spark（用户真实路径，经 app-connector 出，需带 provider 前缀；裸名 CLI 报 Invalid model reference）；上游抽风时可 E2E_MODEL=opencode/big-pickle 降级验证链路。
 MODEL="${E2E_MODEL:-opencode-go/muse-spark-1.3-contributor}"
 SID="ses_k3s$(printf '%s' "$MARKER" | tr -cd '0-9A-Za-z' | tail -c 9)"
 # 直连后脚本落 .69 本地：有本地 kubectl 就直调，无才 ssh（旧 HW41 链路兼容）。
 if kubectl get nodes >/dev/null 2>&1; then
   k69() { sh -c "$1"; }
-  KX="kubectl -n opencode exec deploy/opencode -c opencode --"
+  KX="kubectl -n $NS exec deploy/$DEP -c opencode --"
 else
   K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
   k69() { $K69 "$1"; }
-  KX="$K69 kubectl -n opencode exec deploy/opencode -c opencode --"
+  KX="$K69 kubectl -n $NS exec deploy/$DEP -c opencode --"
 fi
 
 # 0. 网关预检（官方指定 big-pickle 为永久测试模型；POST 无 key 打一次：200/400/401/404/429=网关活着，其余/超时=FAIL，两次机会）
-GWURL="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_BASE_URL" | tr -d '[:space:]')"
+GWURL="$(k69 "kubectl -n $NS exec deploy/$DEP -c opencode -- printenv LITELLM_BASE_URL" | tr -d '[:space:]')"
 [ -n "$GWURL" ] || { echo "E2E-GW-URL-FAIL"; exit 1; }
 echo "gw url=$GWURL"
 GWCODE=""
 for i in 1 2; do
-  GWCODE="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H 'Content-Type: application/json' -d '{\"model\":\"big-pickle\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'" || true)"
+  GWCODE="$(k69 "kubectl -n $NS exec deploy/$DEP -c opencode -- curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H 'Content-Type: application/json' -d '{\"model\":\"big-pickle\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'" || true)"
   echo "gw post try$i: $GWCODE"
   case "$GWCODE" in 200|400|401|404|429) break;; *) sleep 10;; esac
 done
@@ -33,11 +35,11 @@ case "$GWCODE" in 200|400|401|404|429) echo "gw alive: $GWCODE";; *) echo "E2E-G
 # 0.6 直调对照（绕开 opencode CLI：pod 直 POST 网关，key 只进内存不落地不打印）
 # 用途：CLI 挂而直调通 => CLI/配置问题；直调也挂 => 网关/上游问题。
 # 注意：LITELLM_API_KEY 只在 curl 参数里展开，脚本全程 set +x 关闭，日志只留状态码。
-DKEY="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- printenv LITELLM_API_KEY" | tr -d '[:space:]')"
+DKEY="$(k69 "kubectl -n $NS exec deploy/$DEP -c opencode -- printenv LITELLM_API_KEY" | tr -d '[:space:]')"
 [ -n "$DKEY" ] || { echo "E2E-KEY-FAIL"; exit 1; }
 echo "::add-mask::$DKEY"
 for DM in big-pickle muse-spark-1.3-contributor; do
-  DCODE="$(k69 "kubectl -n opencode exec deploy/opencode -c opencode -- curl -s -m 60 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H \"Authorization: Bearer $DKEY\" -H 'Content-Type: application/json' -d '{\"model\":\"$DM\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":32}'" || true)"
+  DCODE="$(k69 "kubectl -n $NS exec deploy/$DEP -c opencode -- curl -s -m 60 -o /dev/null -w '%{http_code}' -X POST '$GWURL/v1/chat/completions' -H \"Authorization: Bearer $DKEY\" -H 'Content-Type: application/json' -d '{\"model\":\"$DM\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":32}'" || true)"
   echo "direct model=$DM http=$DCODE"
 done
 
