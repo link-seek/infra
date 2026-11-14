@@ -1,5 +1,9 @@
 name: k3s-apply
 
+# DEPRECATED（2026-11-14）：manifest 配送已走 Flux pull（#450）。
+# 本链仅留应急：Secret 轮换（90天现签）手动 dispatch；平时勿点。
+# 下线条件：Secret 改走外部方案后删本文件。
+
 # k3s 通用应用骨架（对标 deliver-stack；旧线一行不动）。
 # 链路：runner 取 tag:user 入 tailnet（配送身份）→ 直登 mesh-hw-69
 #   (100.93.119.21, tag:mesh+tag:prod) TS SSH（零钥匙）→ kubectl apply。
