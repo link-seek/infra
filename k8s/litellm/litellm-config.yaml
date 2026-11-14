@@ -31,11 +31,11 @@ data:
       - model_name: big-pickle
         litellm_params:
           model: openai/big-pickle
-          api_base: https://opencode.ai:14443/inference/openai/v1/chat/completions
+          api_base: https://opencode.ai:14443/inference/openai/v1
           api_key: sk-dummy-overridden-by-callback
       # 其余走新 Go 基座（老 /zen/go 已搬迁；Go 要求 x-opencode-session，网关已 forward_client_headers 转发）。
       - model_name: "*"
         litellm_params:
           model: openai/*
-          api_base: https://opencode.ai:14443/inference/go/openai/v1/chat/completions
+          api_base: https://opencode.ai:14443/inference/go/openai/v1
           api_key: sk-dummy-overridden-by-callback
