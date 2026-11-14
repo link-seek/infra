@@ -34,10 +34,11 @@ jobs:
         run: |
           APP="$(basename "${{ inputs.stack }}")"
           case "$APP" in
-            litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway;;
-            *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode;;
+            litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
+            opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
+            *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
           esac
-          { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; } >> "$GITHUB_ENV"
+          { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; } >> "$GITHUB_ENV"
           echo "stack=$APP deploy=$DEPLOY port=$PORT join=$JT"
 
       - name: join tailnet (guest, mint-only)
@@ -130,28 +131,28 @@ jobs:
           sudo tailscale ssh root@100.93.119.21 \
             "set -euo pipefail; \
             # 探针用 python3（网关/browser 镜像里无 curl；opencode-tools 有 python3 实锤）。
-            code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_NS -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>/dev/null || echo FAIL); \
+            code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>/dev/null || echo FAIL); \
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
             kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
       - name: probe tailnet ingress (Caddy视角, fail-closed)
-        if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
+        if: inputs.action != 'rollback' && startsWith(inputs.stack, 'k8s/opencode')
         run: |
           set -euo pipefail
           # runner 与 Caddy 同为 tailnet 普通节点：直连 pod 身份，验证切流前可达。
           # 先 pod 侧自报（只读诊断，放门前，红了也能看）。直登 .69 单跳。
-          sudo tailscale ssh root@100.93.119.21 'kubectl -n opencode exec deploy/opencode -c opencode -- sh -c "tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null | head -c 600; echo; tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip"'
+          sudo tailscale ssh root@100.93.119.21 "kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- sh -c 'tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null | head -c 600; echo; tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip'"
           # L3 可见性：netmap 里有没有这个 peer（ACL 过滤的真相；tailscale ping 走系统 DNS，
           # --accept-dns=false 的 runner 上必挂，不能当门，43067087861 系误判已修正）。
-          IP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if 'opencode-k3s' in str(p.get('DNSName','')) or 'opencode-k3s' in str(p.get('HostName',''))),''))")
+          IP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if '$K3S_TSHOST' in str(p.get('DNSName','')) or '$K3S_TSHOST' in str(p.get('HostName',''))),''))")
           [ -n "$IP" ] || { echo INGRESS-NOT-VISIBLE-FAIL; exit 1; }
           # L7：直调 pod IP:4097（Host 头对 opencode 无意义，走 IP 即可；数据面 grant 实测）。
           echo "pod tailnet ip=$IP"
-          CODE=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://$IP:4097/" || true)
+          CODE=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://$IP:$K3S_PORT/" || true)
           [ "$CODE" = 200 ] || { echo "INGRESS-HTTP-FAIL http=$CODE"; exit 1; }
           echo INGRESS-OK
           # 附带打印卷位置，给数据同步步骤用（只读）。直登 .69 单跳。
-          sudo tailscale ssh root@100.93.119.21 'kubectl -n opencode get pvc && kubectl get pv'
+          sudo tailscale ssh root@100.93.119.21 "kubectl -n $K3S_NS get pvc && kubectl get pv"
       - name: gateway POST 诊断（runner 直调，只 WARN 不拦门）
         if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
         env:
@@ -168,14 +169,14 @@ jobs:
           rm -f /tmp/gw-post.out
           true
       - name: e2e memory recall（内容级门，#338 健康门，fail-closed）
-        if: inputs.action != 'rollback' && inputs.stack == 'k8s/opencode'
+        if: inputs.action != 'rollback' && startsWith(inputs.stack, 'k8s/opencode')
         run: |
           set -euo pipefail
-          # A 写 marker → B 新会话召回。模型走容器内网关，数据走 .69 卷。直登 .69 单跳。
+          # A 写 marker → B 新会话召回。模型走容器内网关，数据走本栈卷。直登 .69 单跳。
           MARK="k3s$(echo "$GITHUB_RUN_ID" | tr -cd '0-9' | tail -c 6)"
           SSH69="sudo tailscale ssh root@100.93.119.21"
           $SSH69 "cat > /tmp/k3s-e2e-recall.sh" < "$GITHUB_WORKSPACE/scripts/k3s-e2e-recall.sh"
-          $SSH69 "chmod +x /tmp/k3s-e2e-recall.sh && /tmp/k3s-e2e-recall.sh '$MARK' && rm -f /tmp/k3s-e2e-recall.sh"
+          $SSH69 "chmod +x /tmp/k3s-e2e-recall.sh && K3S_NS='$K3S_NS' K3S_DEPLOY='$K3S_DEPLOY' /tmp/k3s-e2e-recall.sh '$MARK' && rm -f /tmp/k3s-e2e-recall.sh"
       - name: litellm verify（网关内容门，对标 goss 黑名单 400，fail-closed）
         if: inputs.action != 'rollback' && inputs.stack == 'k8s/litellm'
         run: |
