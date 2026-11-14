@@ -1,8 +1,8 @@
-# 后端 hw21:4097
+# 后端 k3s xieyucheng pod（2026-11-14 切流；回滚=改回 mesh-hw-21 即发）
 opencode.xieyucheng.top {
 	reverse_proxy {
 		dynamic a {
-			name mesh-hw-21.mackarel-polaris.ts.net.
+			name opencode-xieyucheng.mackarel-polaris.ts.net.
 			port 4097
 			refresh 5s
 			resolvers 100.100.100.100
