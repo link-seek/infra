@@ -1,9 +1,9 @@
-# 后端 k3s xieyucheng：operator 代理身份（2026-11-15 切流；去容器 TS 身份）。
-# 回滚=改回 in-pod 身份 opencode-xieyucheng（需该 pod 仍带 TS；见 git 历史）。
+# 后端 k3s xieyucheng：ProxyGroup Service 身份（HA；2026-11-15）。
+# 回滚=改回单设备代理 opencode-xieyucheng-svc（见 git 历史）。
 opencode.xieyucheng.top {
 	reverse_proxy {
 		dynamic a {
-			name opencode-xieyucheng-svc.mackarel-polaris.ts.net.
+			name opencode-xieyucheng-ha.mackarel-polaris.ts.net.
 			port 4097
 			refresh 5s
 			resolvers 100.100.100.100
@@ -11,6 +11,17 @@ opencode.xieyucheng.top {
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
+		# 主动健康检查：后端 pod 重建窗口内摘掉它，不让用户撞 502。
+		health_uri /
+		health_interval 10s
+		health_timeout 5s
+		# 后端全死时回维护页（别再回空白 502/503）。
+		handle_response {
+			@bad status 502 503 504
+			handle @bad {
+				respond "opencode-xieyucheng 维护中，后端恢复后自动切回（ProxyGroup 双代理）。" 503
+			}
+		}
 	}
 	log {
 		output file /var/log/caddy/opencode.log

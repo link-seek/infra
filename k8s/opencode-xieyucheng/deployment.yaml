@@ -116,12 +116,14 @@ metadata:
   name: opencode
   namespace: opencode-xieyucheng
   annotations:
-    # operator 代理暴露（去容器 TS 身份第一步）：新身份 opencode-xieyucheng-svc，
-    # 与 pod 内 tailscaled 身份（opencode-xieyucheng）并存验证，Caddy 切流后再删旧身份。
-    tailscale.com/expose: "true"
-    tailscale.com/hostname: opencode-xieyucheng-svc
+    # ProxyGroup 入口 HA：经 ingress-proxies 代理组以 Tailscale Service 身份暴露，
+    # 单代理挂了不断流。hostname 即 Service 名（Caddy 指这个名）。
+    tailscale.com/proxy-group: ingress-proxies
+    tailscale.com/hostname: opencode-xieyucheng-ha
     tailscale.com/tags: tag:k8s
 spec:
   selector: {app: opencode}
   ports:
     - {name: http, port: 4097, targetPort: 4097}
+  type: LoadBalancer
+  loadBalancerClass: tailscale
