@@ -46,7 +46,6 @@ spec:
             - {name: http, containerPort: 4097}
           env:
             - {name: PIPELINE_MANAGED, value: "true"}
-            - {name: TS_HOSTNAME, value: opencode-xieyucheng}
             # 网关走公网域名（用户已修复公网后端；网关迁 k3s 后改集群内 Service）。
             - {name: LITELLM_BASE_URL, value: "http://litellm-gateway.litellm.svc.cluster.local:4000"}
             - {name: SSH_TARGETS, value: "mesh-hw-21 mesh-hw-41"}
@@ -70,20 +69,12 @@ spec:
               valueFrom: {secretKeyRef: {name: opencode-xieyucheng-env, key: HCLOUD_AK}}
             - name: HCLOUD_SK
               valueFrom: {secretKeyRef: {name: opencode-xieyucheng-env, key: HCLOUD_SK}}
-            - name: TS_JOIN_KEY
-              valueFrom: {secretKeyRef: {name: opencode-xieyucheng-env, key: TS_JOIN_KEY}}
             - name: SMTP_PASS
               valueFrom: {secretKeyRef: {name: opencode-xieyucheng-env, key: SMTP_PASS}}
           volumeMounts:
             - {name: prod-work, mountPath: /workspace}
             - {name: prod-data, mountPath: /root/.local/share/opencode}
-            - {name: ts-state, mountPath: /var/lib/tailscale}
             - {name: entrypoint, mountPath: /entrypoint}
-            - {name: tun, mountPath: /dev/net/tun}
-          # TUN 出网必需（NET_ADMIN + /dev/net/tun）；单租户节点可接受。
-          securityContext:
-            capabilities:
-              add: ["NET_ADMIN"]
           readinessProbe:
             httpGet: {path: /, port: 4097}
             initialDelaySeconds: 90
@@ -116,12 +107,8 @@ spec:
           hostPath: {path: /var/lib/opencode-xieyucheng/work, type: DirectoryOrCreate}
         - name: prod-data
           hostPath: {path: /var/lib/opencode-xieyucheng/data, type: DirectoryOrCreate}
-        - name: ts-state
-          hostPath: {path: /var/lib/opencode-xieyucheng/tailscale, type: DirectoryOrCreate}
         - name: entrypoint
           configMap: {name: opencode-entrypoint, defaultMode: 0755}
-        - name: tun
-          hostPath: {path: /dev/net/tun, type: CharDevice}
 ---
 apiVersion: v1
 kind: Service
