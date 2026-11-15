@@ -115,15 +115,32 @@ kind: Service
 metadata:
   name: opencode
   namespace: opencode-xieyucheng
+  labels:
+    # ProxyClass 用 label 挂（非 annotation）。
+    tailscale.com/proxy-class: ha-a
   annotations:
-    # ProxyGroup 入口 HA：经 ingress-proxies 代理组以 Tailscale Service 身份暴露，
-    # 单代理挂了不断流。hostname 即 Service 名（Caddy 指这个名）。
-    tailscale.com/proxy-group: ingress-proxies
-    tailscale.com/hostname: opencode-xieyucheng-ha
+    # 设备代理 A（钉 41 节点）：与 ha-b 双活，Caddy 双后端。
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: opencode-xieyucheng-ha-a
     tailscale.com/tags: tag:k8s
 spec:
   selector: {app: opencode}
   ports:
     - {name: http, port: 4097, targetPort: 4097}
-  type: LoadBalancer
-  loadBalancerClass: tailscale
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opencode-ha-b
+  namespace: opencode-xieyucheng
+  labels:
+    tailscale.com/proxy-class: ha-b
+  annotations:
+    # 设备代理 B（钉 69 节点）：与 ha-a 双活，Caddy 双后端。
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: opencode-xieyucheng-ha-b
+    tailscale.com/tags: tag:k8s
+spec:
+  selector: {app: opencode}
+  ports:
+    - {name: http, port: 4097, targetPort: 4097}

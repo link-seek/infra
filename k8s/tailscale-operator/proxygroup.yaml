@@ -1,9 +1,0 @@
-# 入口 HA：ProxyGroup（社区标准）。2 副本代理 + Tailscale Service 身份，
-# 单代理挂了不断流；Caddy 指 Service 名，代理重建换 IP 也不怕。
-apiVersion: tailscale.com/v1alpha1
-kind: ProxyGroup
-metadata:
-  name: ingress-proxies
-spec:
-  type: ingress
-  replicas: 2

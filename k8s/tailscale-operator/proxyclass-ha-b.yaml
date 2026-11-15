@@ -1,0 +1,16 @@
+# 代理钉节点 B（69）：与 ha-a 各守一台，单节点挂了不断流。
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: ha-b
+spec:
+  statefulSet:
+    pod:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [ecs-ies-euleros-jmupervm-zhangzhirui]
