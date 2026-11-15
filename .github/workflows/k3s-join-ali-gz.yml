@@ -1,0 +1,57 @@
+name: k3s-join-ali-gz
+# ali-gz 以 tainted agent 入簇（dedicated=edge，只做统一架构纳管；入口 Caddy 仍在宿主机，不动）。
+# 跳板 .69（runner→tailnet→.69→ali-gz，全程密钥，不经公网 SSH）。
+# 流程：取 server token → ali-gz 装 k3s agent（pin v1.37.2，经 tailnet 指 server）→ taint → 金丝雀 pod 验跨节点。
+on:
+  workflow_dispatch:
+concurrency:
+  group: k3s-join-ali-gz
+  cancel-in-progress: false
+jobs:
+  join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: runner 进 tailnet（ephemeral CI 身份）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-joinagz-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+
+      - name: ali-gz k3s agent 加入 + 金丝雀验证
+        run: |
+          set -euo pipefail
+          R69="sudo tailscale ssh root@100.93.119.21"
+          echo "== ali-gz 基本面 =="
+          $R69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@100.85.128.116 'cat /etc/os-release | head -1; test -f /sys/fs/cgroup/cgroup.controllers && echo CGROUPV2 || echo CGROUPV1; nproc; free -m | head -2'"
+          echo "== k3s agent 装入（pin 1.37.2，flannel 走 tailscale0，taint edge）=="
+          TOKEN="$($R69 'cat /var/lib/rancher/k3s/server/node-token' 2>/dev/null)"
+          [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
+          SRV=100.93.119.21
+          PIP=100.85.128.116
+          $R69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@100.85.128.116 \"curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC='agent --server https://$SRV:6443 --token \\\"$TOKEN\\\" --node-ip $PIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -\""
+          echo "== 等 agent Ready（3→4 节点）=="
+          for i in $(seq 1 24); do
+            sleep 15
+            NODES="$($R69 'kubectl get nodes --no-headers 2>/dev/null' | wc -l)"
+            READY="$($R69 'kubectl get nodes --no-headers 2>/dev/null' | grep -c ' Ready')"
+            echo "nodes=$NODES ready=$READY"
+            [ "$NODES" = 4 ] && [ "$READY" = 4 ] && break
+            [ "$i" = 24 ] && { echo "FAIL: ali-gz 未入簇"; $R69 'kubectl get nodes'; exit 1; }
+          done
+          $R69 'kubectl get nodes -o wide'
+          echo "== 金丝雀：edge 上起 busybox，验 overlay =="
+          $R69 "kubectl run canary-aligz --image=busybox:1.36 --overrides='{\"spec\":{\"nodeSelector\":{\"dedicated\":\"edge\"},\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}],\"affinity\":{\"nodeAffinity\":{\"requiredDuringSchedulingIgnoredDuringExecution\":{\"nodeSelectorTerms\":[{\"matchExpressions\":[{\"key\":\"kubernetes.io/hostname\",\"operator\":\"In\",\"values\":[\"mesh-ali-gz\"]}]}]}}}}}' -- sleep 3600 2>&1 | head -2"
+          $R69 "kubectl wait --for=condition=Ready pod/canary-aligz --timeout=180s 2>&1 | tail -1"
+          $R69 'kubectl get pods -o wide | grep canary-aligz'
+          OPODIP=$($R69 "kubectl get pod -n opencode-xieyucheng -o jsonpath='{.items[0].status.podIP}'")
+          echo "xieyucheng pod IP: $OPODIP（脱敏后两位）" | sed 's/\.[0-9]*\.[0-9]*$/.*.*/'
+          $R69 "kubectl exec canary-aligz -- wget -qO- --timeout=15 http://$OPODIP:4097/ -O /dev/null && echo CANARY-L7-OK || echo CANARY-L7-FAIL"
