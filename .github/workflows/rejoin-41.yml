@@ -1,5 +1,6 @@
 name: rejoin-node-tailnet
 # 重装/新机器经 HW21 跳板拉回 tailnet（一次性流程，41/.69 通用）。
+# HW21 本身重装后跳已死：用 via=direct 从公网直上（ssh_host/ssh_port，默认 121.37.127.187:22）。
 # 本 workflow：现签 persistent 非 ephemeral 一次性 key（10 分钟过期）→ HW21 跳 → 目标机装 tailscale 上线。
 # 目标机需已绑定 hw21-jump 密钥对（重装时选），全程 key 直连，无密码。
 on:
@@ -17,6 +18,20 @@ on:
         description: "逗号分隔（如 tag:mesh,tag:prod；签不出时自动降级无 tag 进网）"
         required: false
         default: "tag:mesh,tag:opencode-hw41,tag:prod"
+      via:
+        description: "jump=经HW21跳（41/.69）；direct=直连公网（重装后HW21本身，跳已死）"
+        required: false
+        default: "jump"
+        type: choice
+        options: [jump, direct]
+      ssh_host:
+        description: "direct 模式目标公网 IP（默认 HW21 公网）"
+        required: false
+        default: "121.37.127.187"
+      ssh_port:
+        description: "direct 模式 SSH 端口（新装系统默认 22）"
+        required: false
+        default: "22"
 concurrency:
   group: rejoin-node
   cancel-in-progress: false
@@ -66,6 +81,7 @@ jobs:
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-rejoin41-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
       - name: 经 HW21 跳到目标机，装 tailscale 上线（key 直连，无密码）
+        if: inputs.via == 'jump'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
@@ -88,8 +104,28 @@ jobs:
           shred -u /tmp/ts-install.sh
           EOF
           shred -u /tmp/join.key
+      - name: 直连公网装 tailscale（HW21 重装后首登，跳已死时用）
+        if: inputs.via == 'direct'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          JOINKEY="$(cat /tmp/join.key)"; echo "::add-mask::$JOINKEY"
+          TS_HOST="${{ inputs.ts_hostname }}"
+          SSH_HOST="${{ inputs.ssh_host }}"
+          SSH_PORT="${{ inputs.ssh_port }}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # 安装脚本走仓里文件（scripts/ts-static-install.sh），只传文件+调，不 inline 拼。
+          scp -P "$SSH_PORT" -o BatchMode=yes -i ~/.ssh/ci_key scripts/ts-static-install.sh "root@$SSH_HOST:/tmp/ts-install.sh"
+          ssh -o BatchMode=yes -p "$SSH_PORT" -i ~/.ssh/ci_key "root@$SSH_HOST" "bash /tmp/ts-install.sh \"$JOINKEY\" $TS_HOST"
+          echo "--- $TS_HOST 已在网，对端自报 ---"
+          ssh -o BatchMode=yes -p "$SSH_PORT" -i ~/.ssh/ci_key "root@$SSH_HOST" "tailscale status --self | head -2"
+          shred -u /tmp/join.key
       - name: 收尾提醒
         run: |
           echo "NEEDS_TAG=${{ steps.mint.outputs.needs_tag }}"
+          echo "VIA=${{ inputs.via }}（direct=HW21 重装后：旧 mesh-hw-21 设备会残留，同名加后缀）"
           echo "1) 去 tailscale admin 台删掉旧 ${{ inputs.ts_hostname }} 残留节点（同名会加数字后缀）。"
           echo "2) needs_tag=true 时给新节点拖回 ${{ inputs.ts_tags }}。"
