@@ -89,7 +89,8 @@
 		// operator 代理版 4097（与上面 pod 直连版并存，切流验证用）。
 		{"src": ["tag:mesh"], "dst": ["tag:k8s"], "ip": ["4097"]},
 		// ProxyGroup Service 版 4097（客户端打的是 Service VIP，按 svc 放行；设备级那条保留排障）。
-		{"src": ["tag:mesh"], "dst": ["svc:*"], "ip": ["4097"]},
+		// Service 名取自 Service 的 tailscale.com/hostname（ProxyGroup 以此建 Tailscale Service）。
+		{"src": ["tag:mesh"], "dst": ["svc:opencode-xieyucheng-ha"], "ip": ["4097"]},
 		// CI 看 canary：trial 靶机/runner 按各自身份（guest/user），netmap 按 ACL 过滤，
 		// 无此条则探针在宿主设备表永远看不到 canary（40616506188/40617554410 实锤）。
 		// 只给网络可见性，不给 ssh 规则（探针用 docker exec），CI 不能 SSH 进 canary。
