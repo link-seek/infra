@@ -23,10 +23,8 @@ opencode.xieyucheng.top {
 		health_interval 10s
 		health_timeout 5s
 	}
-	# 后端全死时回维护页（别再回空白 502/503）：reverse_proxy 无可用 upstream 即进此处。
-	handle_error {
-		respond "opencode-xieyucheng 维护中，后端恢复后自动切回（双代理 HA）。" 503
-	}
+	# 注：本机 caddy 为定制构建，不支持 handle_error/status matcher，维护页不上；
+	# 后端全死时仍是空 502/503（与之前一致），靠双后端+健康检查把概率压到最低。
 	log {
 		output file /var/log/caddy/opencode.log
 	}
