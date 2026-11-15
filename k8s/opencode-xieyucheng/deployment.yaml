@@ -128,6 +128,12 @@ kind: Service
 metadata:
   name: opencode
   namespace: opencode-xieyucheng
+  annotations:
+    # operator 代理暴露（去容器 TS 身份第一步）：新身份 opencode-xieyucheng-svc，
+    # 与 pod 内 tailscaled 身份（opencode-xieyucheng）并存验证，Caddy 切流后再删旧身份。
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: opencode-xieyucheng-svc
+    tailscale.com/tags: tag:k8s
 spec:
   selector: {app: opencode}
   ports:

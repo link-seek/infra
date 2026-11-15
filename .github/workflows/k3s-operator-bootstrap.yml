@@ -1,0 +1,57 @@
+name: k3s-operator-bootstrap
+# operator 身份一键签发（零控制台点击）：用 TS_API_KEY 调 API 建 OAuth client，
+# 当场写 k8s Secret operator-oauth（真值只活 run 日志掩码 + 集群，不进仓）。
+# 前置：#471 已合（tag:k8s-operator/tag:k8s 进 policy）且 ts-acl-apply apply 已跑，
+# 否则建 client 会 400 tag-not-defined，本流水线直接红（fail-closed）。
+# 手动 dispatch；OAuth secret 无过期，轮换/吊销才重跑。
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '确认在 tailnet 建 k3s-operator OAuth client（填 yes）'
+        required: true
+        default: 'no'
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: join tailnet (guest, mint-only)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          [ "${{ inputs.confirm }}" = "yes" ] || { echo "拒绝：confirm!=yes"; exit 1; }
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}},"expires":"2026-11-16T00:00:00Z"}}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c 'import json,sys;print(json.load(sys.stdin)["key"])')"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="k3s-oauth-boot-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+
+      - name: create OAuth client + ship secret
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          RESP="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"keyType":"client","description":"k3s-operator","scopes":["devices:core","auth_keys","services"],"tags":["tag:k8s-operator"]}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys)"
+          ERR="$(printf '%s' "$RESP" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("message",d.get("error","")) if isinstance(d,dict) else "")' 2>/dev/null || true)"
+          if printf '%s' "$ERR" | grep -qi "tag.*not defined"; then
+            echo "FAIL: tag:k8s-operator 控制台不存在——先合 #471 再跑 ts-acl-apply apply"; exit 1
+          fi
+          CID="$(printf '%s' "$RESP" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("id",""))')"
+          CSEC="$(printf '%s' "$RESP" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("key",""))')"
+          [ -n "$CID" ] && [ -n "$CSEC" ] || { echo "FAIL: 建 client 失败: $ERR"; printf '%s' "$RESP" | head -c 300; echo; exit 1; }
+          echo "::add-mask::$CSEC"
+          { echo "client_id=$CID"; echo "client_secret=$CSEC"; } > /tmp/operator-oauth.env
+          chmod 600 /tmp/operator-oauth.env
+          sudo tailscale ssh root@100.93.119.21 "cat > /tmp/operator-oauth.env && chmod 600 /tmp/operator-oauth.env" < /tmp/operator-oauth.env
+          sudo tailscale ssh root@100.93.119.21 \
+            "set -euo pipefail; kubectl create namespace tailscale --dry-run=client -o yaml | kubectl apply -f - >/dev/null && kubectl create secret generic operator-oauth -n tailscale --from-env-file=/tmp/operator-oauth.env --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/operator-oauth.env && kubectl -n tailscale get secret operator-oauth -o jsonpath='{.metadata.name} ok'"
+          rm -f /tmp/operator-oauth.env
+          echo "BOOTSTRAPPED client_id=$CID"
