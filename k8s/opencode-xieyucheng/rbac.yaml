@@ -80,3 +80,29 @@ roleRef:
   kind: ClusterRole
   name: opencode-xieyucheng-backup-readonly
   apiGroup: rbac.authorization.k8s.io
+---
+# 备份 job pod 诊断（限 kube-system 域：读 pod/log 定位 refresh 失败是拉镜像还是钥匙问题）。
+# Role/Binding 的 namespace 都是 kube-system（与 xieyucheng 栈解耦，yingxin 零接触）；只 get/list，不含 exec/delete。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opencode-xieyucheng-backup-diag
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-xieyucheng-backup-diag
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-xieyucheng
+roleRef:
+  kind: Role
+  name: opencode-xieyucheng-backup-diag
+  apiGroup: rbac.authorization.k8s.io
