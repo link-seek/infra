@@ -6925,7 +6925,7 @@ spec:
                     - name: CLIENT_SECRET_FILE
                       value: /oauth/client_secret
                     - name: PROXY_IMAGE
-                      value: swr.cn-north-9.myhuaweicloud.com/link-seek/k8s-proxy:v1.104.7
+                      value: swr.cn-north-9.myhuaweicloud.com/link-seek/tailscale:v1.104.7
                     - name: PROXY_TAGS
                       value: tag:k8s
                     - name: APISERVER_PROXY
