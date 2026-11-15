@@ -24,7 +24,9 @@
 	},
 	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]},
 		// ProxyGroup 入口 HA：允许 tag:k8s 代理发布 Tailscale Service（通配，后续服务免改策略）。
-		"services": {"svc:*": ["tag:k8s"]}},
+		"services": {"tag:k8s": ["tag:k8s"],
+		// 兼容 svc 名写法（官方两处示例各用一种，见 RBAC/tsnet 文档注释）。
+		"svc:opencode-xieyucheng-ha": ["tag:k8s"]}},
 	"grants": [
 		{
 			"src": ["tag:mesh"],
