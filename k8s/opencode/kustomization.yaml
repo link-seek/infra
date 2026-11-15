@@ -5,3 +5,4 @@ resources:
   - entrypoint.yaml
   - pvc.yaml
   - deployment.yaml
+  - rbac.yaml

@@ -1,0 +1,53 @@
+# k8s/opencode 自验只读 RBAC（与 xieyucheng 对称：HW21 下线后去跳板，pod 用 default SA 自查）。
+# 范围：本 ns 读 pod/deploy/rs/event/configmap/svc + flux CR 状态；只 get/list/watch，不含 secrets/exec。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opencode-self-verify
+  namespace: opencode
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "configmaps", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-self-verify
+  namespace: opencode
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode
+roleRef:
+  kind: Role
+  name: opencode-self-verify
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opencode-flux-readonly
+rules:
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opencode-flux-readonly
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode
+roleRef:
+  kind: ClusterRole
+  name: opencode-flux-readonly
+  apiGroup: rbac.authorization.k8s.io
