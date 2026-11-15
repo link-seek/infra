@@ -53,3 +53,30 @@ roleRef:
   kind: ClusterRole
   name: opencode-xieyucheng-flux-readonly
   apiGroup: rbac.authorization.k8s.io
+---
+# 备份链路只读（etcd-backup CronJob 死因定位：定时全红、Secret 停在 11-13 不再刷）。
+# 仅 batch cronjobs/jobs + events 的 get/list/watch；job/pod 规格不含密钥，Secret/钥匙值不碰。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opencode-xieyucheng-backup-readonly
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opencode-xieyucheng-backup-readonly
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-xieyucheng
+roleRef:
+  kind: ClusterRole
+  name: opencode-xieyucheng-backup-readonly
+  apiGroup: rbac.authorization.k8s.io
