@@ -54,11 +54,13 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          FAIL=0
           for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
             echo "===== $H ====="
-            ssh $SOPT "root@$H" 'hostname; grep -E "^(NAME|VERSION)=" /etc/os-release | head -2; k3s --version 2>/dev/null | head -1 || echo "k3s: 未装"; lsblk -d -o NAME,SIZE,TYPE 2>/dev/null | head -8; df -h / /data /var/lib/rancher 2>/dev/null | head -6; if test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroup: v2"; else echo "cgroup: v1"; fi; lsblk -rno NAME,MOUNTPOINT 2>/dev/null | grep -v "^$" | head -8' || echo "$H SSH-FAIL"
+            ssh $SOPT "root@$H" 'hostname; grep -E "^(NAME|VERSION)=" /etc/os-release; KV="$(k3s --version 2>/dev/null)"; [ -n "$KV" ] || KV="k3s: 未装"; echo "$KV"; lsblk -d -o NAME,SIZE,TYPE 2>/dev/null; df -h / /data /var/lib/rancher 2>/dev/null; if test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroup: v2"; else echo "cgroup: v1"; fi; lsblk -rno NAME,MOUNTPOINT 2>/dev/null' || { echo "$H SSH-FAIL"; FAIL=1; }
           done
-          shred -u ~/.ssh/ci_key || true
+          [ "$FAIL" = 0 ] || { echo "FAIL: 有主机巡检失败"; exit 1; }
+          shred -u ~/.ssh/ci_key
       - name: 挂载数据盘到 /data（仅 mount-data）
         if: inputs.mode == 'mount-data'
         env:
@@ -68,8 +70,10 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          FAIL=0
           for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
             echo "===== mount $H ====="
-            ssh $SOPT "root@$H" 'set -euo pipefail; if findmnt -n /data >/dev/null 2>&1; then echo "已挂载，跳过"; findmnt -n -o SOURCE,TARGET,FSTYPE,OPTIONS /data; exit 0; fi; CAND="$(lsblk -rdno NAME,TYPE,SIZE | awk "\$2==\"disk\" && \$1!=\"vda\" {print \$1}" | head -1)"; [ -n "$CAND" ] || { echo "FAIL: 找不到数据盘"; exit 1; }; echo "数据盘: /dev/$CAND"; blkid "/dev/$CAND" | grep -q TYPE || { echo "FAIL: 无文件系统（需先 mkfs，不自动做）"; exit 1; }; UUID="$(blkid -s UUID -o value "/dev/$CAND")"; mkdir -p /data; grep -q "$UUID" /etc/fstab || printf "UUID=%s /data ext4 defaults,nofail 0 2\n" "$UUID" >> /etc/fstab; mount /data; df -h /data | tail -1; echo MOUNT-OK' || echo "$H MOUNT-FAIL"
+            ssh $SOPT "root@$H" 'set -euo pipefail; if findmnt -n /data >/dev/null 2>&1; then echo "已挂载，跳过"; findmnt -n -o SOURCE,TARGET,FSTYPE,OPTIONS /data; exit 0; fi; CANDRAW="$(lsblk -rdno NAME,TYPE | awk "\$2==\"disk\" && \$1!=\"vda\" {print \$1}")"; CAND="${CANDRAW%%$'\n'*}"; [ -n "$CAND" ] || { echo "FAIL: 找不到数据盘"; exit 1; }; echo "数据盘: /dev/$CAND"; blkid "/dev/$CAND" | grep -q TYPE || { echo "FAIL: 无文件系统（需先 mkfs，不自动做）"; exit 1; }; UUID="$(blkid -s UUID -o value "/dev/$CAND")"; [ -n "$UUID" ] || { echo "FAIL: 取不到 UUID"; exit 1; }; mkdir -p /data; grep -q "$UUID" /etc/fstab || printf "UUID=%s /data ext4 defaults,nofail 0 2\n" "$UUID" >> /etc/fstab; mount /data; DFOUT="$(df -h /data)"; LAST="${DFOUT##*$'\n'}"; printf "%s\n" "$LAST"; echo MOUNT-OK' || { echo "$H MOUNT-FAIL"; FAIL=1; }
           done
-          shred -u ~/.ssh/ci_key || true
+          [ "$FAIL" = 0 ] || { echo "FAIL: 有主机挂载失败"; exit 1; }
+          shred -u ~/.ssh/ci_key
