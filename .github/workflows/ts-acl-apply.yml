@@ -104,7 +104,7 @@ jobs:
               [ "$CODE" = 200 ] || exit 1
               CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev-after.json
               echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
-              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in (json.load(open('/tmp/dev-after.json')).get('devices') or []) if d.get('hostname') == os.environ['DEVICE']]" || true
+              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in (json.load(open('/tmp/dev-after.json')).get('devices') or []) if isinstance(d, dict) and d.get('hostname') == os.environ['DEVICE']]"
               ;;
 
             delete-device)
@@ -113,7 +113,7 @@ jobs:
               CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev.json
               echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
               echo "--- 删除前（下行 gate 精确匹配离线唯一；此行仅回显精确命中，永不挂，不做判定） ---"
-              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in (json.load(open('/tmp/dev.json')).get('devices') or []) if os.environ['DEVICE'] in (d.get('addresses') or [])]"
+              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname') if isinstance(d, dict) else d, d.get('addresses') if isinstance(d, dict) else '') for d in (json.load(open('/tmp/dev.json')).get('devices') or []) if isinstance(d, dict) and os.environ['DEVICE'] in (d.get('addresses') or [])]" || true
               DID="$(python3 tailscale/ts-acl.py device-id-by-ip "$DEVICE" < /tmp/dev.json)" || exit 1
               echo "删除设备 id=$DID（ip=$DEVICE）..."
               CODE="$(curl -sS -m 30 -o /tmp/out.json -w '%{http_code}' -H 'Accept: application/json' -u "$TSKEY:" -X DELETE "$API/device/$DID")"
