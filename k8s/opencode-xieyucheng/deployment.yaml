@@ -29,7 +29,7 @@ spec:
       # （quad-100 方案已验证不可行：tailscaled 转发公网自环，E2E-GW-FAIL 000 实锤。）
       initContainers:
         - name: init-dirs
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools@sha256:b9c1da3508793d41313cb872b662061e6d3ed94e9ceaa6e520cf563ba913782f
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools@sha256:d4f668b64ac4b906f11f937ff3dc942404597e32750a6dd2804e5407a61d383a
           command: [sh, -c, "mkdir -p /workspace /root/.local/share/opencode && chown -R root:root /workspace /root/.local/share/opencode || true"]
           volumeMounts:
             - {name: prod-work, mountPath: /workspace}
@@ -39,7 +39,7 @@ spec:
             limits: {cpu: 500m, memory: 512Mi}
       containers:
         - name: opencode
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools@sha256:b9c1da3508793d41313cb872b662061e6d3ed94e9ceaa6e520cf563ba913782f
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools@sha256:d4f668b64ac4b906f11f937ff3dc942404597e32750a6dd2804e5407a61d383a
           command: ["/bin/sh", "/entrypoint/entrypoint.sh"]
           args: ["serve", "--port", "4097", "--hostname", "0.0.0.0"]
           ports:
@@ -55,6 +55,8 @@ spec:
             - {name: SMTP_FROM, value: 122306789@163.com}
             - {name: MAIL_DEFAULT_TO, value: xieyucheng@outlook.com}
             - {name: BROWSER_CDP_URL, value: "http://127.0.0.1:9222"}
+            # kit 走 sidecar（CDP，上游 #114 已合；镜像内已无本地 chrome，见 docker-images#123）
+            - {name: OPEN_DESIGN_BROWSER_URL, value: "http://127.0.0.1:9222"}
             - name: LITELLM_API_KEY
               valueFrom: {secretKeyRef: {name: opencode-xieyucheng-env, key: LITELLM_API_KEY}}
             - name: GH_TOKEN
