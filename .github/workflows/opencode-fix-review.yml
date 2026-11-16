@@ -151,7 +151,10 @@ jobs:
                   print('YAML-FAIL:', f, e); bad = 1
           sys.exit(bad)
           EOF
-          git add -A
+          # 脚手架（.opencode/*）永不进 commit：先还原/清掉，再排除提交
+          git checkout -- .opencode 2>/dev/null || true
+          git clean -fd -- .opencode 2>/dev/null || true
+          git add -A -- . ':!.opencode'
           git -c user.name="opencode-fix-bot" -c user.email="opencode-fix-bot@users.noreply.github.com" commit -m "[auto-fix] 回应 review findings（未解决 threads）"
           git push origin "HEAD:${{ steps.cfg.outputs.branch }}"
           PR="${{ steps.cfg.outputs.pr }}"
