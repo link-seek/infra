@@ -13,5 +13,5 @@ spec:
   prune: true
   sourceRef:
     kind: GitRepository
-    name: flux-system
+    name: docker-images
   wait: false
