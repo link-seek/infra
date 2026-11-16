@@ -154,15 +154,15 @@ jobs:
           sudo tailscale ssh root@100.93.119.21 \
             "set -euo pipefail; \
             # 探针用 python3（网关/browser 镜像里无 curl；opencode-tools 有 python3 实锤）。
-            code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>/dev/null || echo FAIL); \
-            [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
+            code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- python3 -c \"exec(\\\"try:\\n import urllib.request,sys\\n print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\\nexcept Exception:\\n import traceback;traceback.print_exc();print('PROBE-EXC')\\\")" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>&1 | tail -n 25); \
+            echo \"probe-out: \$code\"; code=\$(echo \"\$code\" | grep -aE \"^[0-9]{3}$|__PROBE_EXC__\" | tail -n 1); [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
             kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
       - name: 失败诊断（只读 dump，对标 bake-stack 预检诊断）
         if: failure() && (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify')
         run: |
           set -euo pipefail
-          sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get deploy,pods,pvc 2>&1 | tail -12; echo ---; kubectl -n $K3S_NS describe pods 2>&1 | grep -aE 'Name:|Image:|Status:|Reason:|Message:|Failed|Error|Warning' | head -30; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | tail -8" || true
+          sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get deploy,pods,pvc 2>&1 | tail -12; echo ---; kubectl -n $K3S_NS describe pods 2>&1 | grep -aE 'Name:|Image:|Status:|Reason:|Message:|Failed|Error|Warning' | head -30; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | tail -8; echo ---; kubectl -n $K3S_NS logs deploy/$K3S_DEPLOY -c $K3S_CONTAINER --tail=30 2>&1 | tail -30" || true
       - name: probe tailnet ingress (Caddy视角, fail-closed)
         if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
         run: |
