@@ -1,0 +1,79 @@
+name: node-inventory
+# 三机只读巡检＋数据盘挂载（.21/.41/.69）。
+# mode=report：只读（lsblk/df/版本/cgroup），默认，随便跑。
+# mode=mount-data：把数据盘（有且仅当未挂载的 data/дisk）挂到 /data（fstab UUID 持久化），不动 k3s 数据目录。
+# 全程直连 tailnet（user 身份，Tailscale SSH accept），无跳板。写操作只有 mount-data 的挂载本身。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "report=只读巡检；mount-data=挂载数据盘到 /data"
+        required: false
+        default: "report"
+        type: choice
+        options: [report, mount-data]
+      runner_tag:
+        description: "runner 进网身份"
+        required: false
+        default: "tag:user"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-inventory
+  cancel-in-progress: false
+
+jobs:
+  inv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: runner 进 tailnet（user 身份）
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          RTAG="${{ inputs.runner_tag }}"; [ -n "$RTAG" ] || RTAG="tag:user"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"$RTAG\"]}}},\"expirySeconds\":21600}" \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-inv-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --self | head -2
+      - name: 巡检（只读）
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          FAIL=0
+          for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
+            echo "===== $H ====="
+            ssh $SOPT "root@$H" 'hostname; grep -E "^(NAME|VERSION)=" /etc/os-release; KV="$(k3s --version 2>/dev/null)"; [ -n "$KV" ] || KV="k3s: 未装"; echo "$KV"; lsblk -d -o NAME,SIZE,TYPE 2>/dev/null; df -h / /data /var/lib/rancher 2>/dev/null; if test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroup: v2"; else echo "cgroup: v1"; fi; lsblk -rno NAME,MOUNTPOINT 2>/dev/null' || { echo "$H SSH-FAIL"; FAIL=1; }
+          done
+          [ "$FAIL" = 0 ] || { echo "FAIL: 有主机巡检失败"; exit 1; }
+          shred -u ~/.ssh/ci_key
+      - name: 挂载数据盘到 /data（仅 mount-data）
+        if: inputs.mode == 'mount-data'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          FAIL=0
+          for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
+            echo "===== mount $H ====="
+            ssh $SOPT "root@$H" 'set -euo pipefail; if findmnt -n /data >/dev/null 2>&1; then echo "已挂载，跳过"; findmnt -n -o SOURCE,TARGET,FSTYPE,OPTIONS /data; exit 0; fi; CANDRAW="$(lsblk -rdno NAME,TYPE | awk "\$2==\"disk\" && \$1!=\"vda\" {print \$1}")"; CAND="${CANDRAW%%$'\n'*}"; [ -n "$CAND" ] || { echo "FAIL: 找不到数据盘"; exit 1; }; echo "数据盘: /dev/$CAND"; blkid "/dev/$CAND" | grep -q TYPE || { echo "FAIL: 无文件系统（需先 mkfs，不自动做）"; exit 1; }; UUID="$(blkid -s UUID -o value "/dev/$CAND")"; [ -n "$UUID" ] || { echo "FAIL: 取不到 UUID"; exit 1; }; mkdir -p /data; grep -q "$UUID" /etc/fstab || printf "UUID=%s /data ext4 defaults,nofail 0 2\n" "$UUID" >> /etc/fstab; mount /data; DFOUT="$(df -h /data)"; LAST="${DFOUT##*$'\n'}"; printf "%s\n" "$LAST"; echo MOUNT-OK' || { echo "$H MOUNT-FAIL"; FAIL=1; }
+          done
+          [ "$FAIL" = 0 ] || { echo "FAIL: 有主机挂载失败"; exit 1; }
+          shred -u ~/.ssh/ci_key
