@@ -108,12 +108,13 @@ jobs:
           scp $SOPT /tmp/k3s-seed.tar "root@$H21:/tmp/k3s-seed.tar"
           ssh $SOPT "root@$H21" "k3s ctr -n k8s.io images import /tmp/k3s-seed.tar && rm -f /tmp/k3s-seed.tar"
           ssh $SOPT "root@$H69" "rm -f /tmp/k3s-seed.tar"; rm -f /tmp/k3s-seed.tar
-          echo "等 21 Ready（3 节点）..."
+          echo "等 21 Ready（3 server + vm-proxy agent = 4 节点）..."
           for i in $(seq 1 24); do
             sleep 15
             NODES=$(ssh $SOPT "root@$H69" "kubectl get nodes --no-headers 2>/dev/null | wc -l")
-            echo "nodes=$NODES ($i/24)"
-            [ "$NODES" = 3 ] && break
+            SERVERS=$(ssh $SOPT "root@$H69" "kubectl get nodes --no-headers 2>/dev/null | grep -c control-plane" || echo 0)
+            echo "nodes=$NODES servers=$SERVERS ($i/24)"
+            [ "$SERVERS" = 3 ] && break
             [ "$i" = 24 ] && { echo "FAIL: 21 未入簇"; ssh $SOPT "root@$H69" "kubectl get nodes -o wide"; exit 1; }
           done
           ssh $SOPT "root@$H69" "kubectl get nodes -o wide; kubectl -n kube-system get pods -o wide 2>/dev/null | head -8"
