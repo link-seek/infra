@@ -65,6 +65,7 @@
 		// 跳板摘除（HW21 重建）：CI 以 guest 身份直达（plain key SSH，走 grants，不管 ssh accept）。
 		// 新 HW21 用 tag（重建换 IP 不失联）；.69 暂按 IP（tag 待定，以后收敛）。
 		{"src": ["tag:guest"], "dst": ["tag:opencode-hw21"], "ip": ["22", "2244"]},
+		{"src": ["tag:guest"], "dst": ["tag:opencode-hw41"], "ip": ["22", "2244"]},
 		{"src": ["tag:guest"], "dst": ["100.93.119.21"], "ip": ["22", "2244"]},
 		{"src": ["tag:guest"], "dst": ["tag:guest"], "ip": ["*"]},
 		{"src": ["tag:guest"], "dst": ["tag:opencode"], "ip": ["22"]},
@@ -152,6 +153,13 @@
 		"action": "accept",
 		"src":    ["tag:guest"],
 		"dst":    ["tag:guest"],
+		"users":  ["root"]
+	}, {
+		// 跳板摘除过渡（HW21 首登）：guest 经 tailnet 到活节点/新 HW21 的 22 走 plain key（check 只放行，照样要 PROD_SSH_KEY，不免 Tailscale 身份）。
+		// 22 被 tailscaled 拦截时 grants 不够，必须有 ssh 规则；用 check 不用 accept，三权不破。21 上网后可删。
+		"action": "check",
+		"src":    ["tag:guest"],
+		"dst":    ["tag:opencode-hw21", "tag:opencode-hw41", "100.93.119.21"],
 		"users":  ["root"]
 	}, {
 		"action": "accept",
