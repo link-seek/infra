@@ -173,16 +173,22 @@ jobs:
           sudo tailscale ssh root@100.93.119.21 "kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- sh -c 'tailscale --socket=/var/run/tailscale/tailscaled.sock status --json 2>/dev/null | head -c 600; echo; tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 2>/dev/null || echo no-ip'"
           # L3 可见性：netmap 里有没有这个 peer（ACL 过滤的真相；tailscale ping 走系统 DNS，
           # --accept-dns=false 的 runner 上必挂，不能当门，43067087861 系误判已修正）。
+          # L3 可见性：netmap 里有没有这个 peer。
+          # team 例外：operator 代理设备（tag:k8s）只在常驻节点 netmap 可见，
+          # ephemeral runner 天生失明——探针主体跑 .69（脚本正本见 scripts/k3s-team-probe.py，
+          # 现场 base64 编码喂过去，彻底避开多层引号）。其它栈沿用 runner 直连（历史行为，不动）。
+          if [ "$K3S_NS" = "opencode-team" ]; then
+            PROBE_B64="$(base64 -w0 "$GITHUB_WORKSPACE/scripts/k3s-team-probe.py")"
+            OUT="$(sudo tailscale ssh root@100.93.119.21 "echo $PROBE_B64 | base64 -d | python3 - $K3S_NS")"
+            echo "$OUT"
+            IP="$(echo "$OUT" | grep '^IP=' | cut -d= -f2-)"
+            CODE="$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2-)"
+          else
           IP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if '$K3S_TSHOST' in str(p.get('DNSName','')) or '$K3S_TSHOST' in str(p.get('HostName',''))),''))")
-            # .69 本机视角（常驻节点，全量 netmap）：判设备是否存在；runner 侧看不见可能是 ACL/视野问题。
-            echo "--- .69 netmap (opencode/xieyucheng/ha) ---"
-            sudo tailscale ssh root@100.93.119.21 "tailscale status 2>/dev/null | grep -iE 'opencode|xieyucheng|ha-a|ha-b' || echo NO-TS-MATCH-ON-69"
-            # 可见性基线（判探针本身是否失明）：opencode/xieyucheng/mesh 字样对端全列出，只打 HostName/IP。
             sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; rows=[(p.get('HostName'),(p.get('TailscaleIPs') or ['?'])[0]) for p in peers.values()]; print('PEERS-TOTAL', len(rows)); [print('PEER', h, ip) for h,ip in rows if any(k in str(h) for k in ('opencode','xieyucheng','mesh-hw','litellm','gateway'))]" || true
-          [ -n "$IP" ] || { echo INGRESS-NOT-VISIBLE-FAIL; exit 1; }
-          # L7：直调 pod IP:4097（Host 头对 opencode 无意义，走 IP 即可；数据面 grant 实测）。
           echo "pod tailnet ip=$IP"
           CODE=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://$IP:$K3S_PORT/" || true)
+          fi
           [ "$CODE" = 200 ] || { echo "INGRESS-HTTP-FAIL http=$CODE"; exit 1; }
           echo INGRESS-OK
           # 附带打印卷位置，给数据同步步骤用（只读）。直登 .69 单跳。
