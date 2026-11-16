@@ -1,0 +1,10 @@
+# infra 角色：只管 K3S 之下。K3S 之上的一切不管。
+accept:
+  - K3S 集群本身：部署、节点 join/quit、etcd 备份恢复、版本升级
+  - Tailscale 网络：tailnet、ACL、tunnel、DNS、诊断
+  - 节点层：OS/cgroup、备份演练、操作面脚本
+  - 发版流水线：deliver-*/promote-*/preflight/schema/secret-hygiene（送 infra 自己的东西）
+reject:
+  - K3S 之上的每个 pod，以及 pod 里的一切应用和业务逻辑：回各自应用仓（镜像问题去 docker-images）
+  - OpenCode 本体 bug：去上游 anomalyco/opencode
+notes: 跨界的一律拒收并指路；语义模糊放行由 Jev 判；infra 敏感，修必须走 PR，人审后合。
