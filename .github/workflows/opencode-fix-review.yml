@@ -32,34 +32,39 @@ concurrency:
 
 jobs:
   fix:
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
     steps:
-      - name: 解析 PR 号与轮数
+      - name: 解析 PR 号与分支
         id: cfg
         run: |
           set -euo pipefail
-          if [ -n "${{ github.event.pull_request.number }}" ]; then PR="${{ github.event.pull_request.number }}"; else PR="${{ inputs.pr-number }}"; fi
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then PR="${{ inputs.pr-number }}"; else PR="${{ github.event.pull_request.number }}"; fi
           [ -n "$PR" ] || { echo "FAIL: 取不到 PR 号"; exit 1; }
           echo "pr=$PR" >> "$GITHUB_OUTPUT"
           echo "max=${{ inputs.max-rounds || '3' }}" >> "$GITHUB_OUTPUT"
-          STATE="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state,reviewDecision --jq '{s:.state, r:.reviewDecision}')"
-          echo "pr-state: $STATE"
-          [ "$(echo "$STATE" | python3 -c "import json,sys; print(json.load(sys.stdin)['s'])")" = OPEN ] || { echo "PR 非 OPEN，退出"; exit 0; }
+          INFO="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state,headRefName --jq '{s:.state, b:.headRefName}')"
+          echo "pr-info: $INFO"
+          S="$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['s'])")"
+          B="$(echo "$INFO" | python3 -c "import json,sys; print(json.load(sys.stdin)['b'])")"
+          if [ "$S" = OPEN ] && [ -n "$B" ]; then echo "open=yes" >> "$GITHUB_OUTPUT"; else echo "open=no" >> "$GITHUB_OUTPUT"; fi
+          echo "branch=$B" >> "$GITHUB_OUTPUT"
 
       - name: 轮数护栏（超限转人工）
         id: gate
         run: |
           set -euo pipefail
+          if [ "${{ steps.cfg.outputs.open }}" != yes ]; then echo "PR 非 OPEN 或无分支，跳过"; echo "skip=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
           PR="${{ steps.cfg.outputs.pr }}"; MAX="${{ steps.cfg.outputs.max }}"
-          N="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --jq '[.[] | select(.commit.message | test("\\[auto-fix\\]"))] | length' 2>/dev/null || echo 0)"
+          RESP="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --jq '[.[] | select(.commit.message | test("\\[auto-fix\\]"))] | length')" || { echo "FAIL: 取 commits 失败"; exit 1; }
+          N="$(printf '%s' "$RESP" | tr -cd '0-9')"; [ -n "$N" ] || { echo "FAIL: 轮数解析失败"; exit 1; }
           echo "auto-fix 已推 $N 轮，上限 $MAX"
           if [ "$N" -ge "$MAX" ]; then
-            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "fix-review：自动修已达上限（$N/$MAX），转人工。请人看一眼未解决 threads，手动改或关闭。" 2>/dev/null || true
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "fix-review：自动修已达上限（$N/$MAX），转人工。请人看一眼未解决 threads，手动改或关闭。"
             echo "skip=yes" >> "$GITHUB_OUTPUT"
           else
             echo "skip=no" >> "$GITHUB_OUTPUT"
@@ -69,7 +74,7 @@ jobs:
         if: steps.gate.outputs.skip == 'no'
         uses: actions/checkout@v4
         with:
-          ref: ${{ format('refs/pull/{0}/head', steps.cfg.outputs.pr) }}
+          ref: ${{ steps.cfg.outputs.branch }}
           fetch-depth: 0
           token: ${{ secrets.AGENT_GITHUB_TOKEN }}
 
@@ -78,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           PR="${{ steps.cfg.outputs.pr }}"
-          gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(last:50){nodes{id isResolved path line originalLine diffHunk comments(first:20){nodes{author{login}body}}}}}}}' -f o="${GITHUB_REPOSITORY%%/*}" -f r="${GITHUB_REPOSITORY##*/}" -F n="$PR" --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | .[] | "### " + .path + ":" + ((.line // .originalLine // "?") | tostring) + "\n" + ([.comments.nodes[] | "- @" + .author.login + ": " + .body] | join("\n"))' > /tmp/threads.md || true
+          gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(last:50){nodes{id isResolved path line originalLine diffHunk comments(first:20){nodes{author{login}body}}}}}}}' -f o="${GITHUB_REPOSITORY%%/*}" -f r="${GITHUB_REPOSITORY##*/}" -F n="$PR" --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | .[] | "### " + (.path // "?") + ":" + ((.line // .originalLine // "?") | tostring) + "\n" + ([.comments.nodes[] | "- @" + .author.login + ": " + .body] | join("\n"))' > /tmp/threads.md
           if [ ! -s /tmp/threads.md ]; then echo "无未解决 threads，退出"; echo "EMPTY=yes" >> "$GITHUB_ENV"; exit 0; fi
           wc -l /tmp/threads.md
 
@@ -87,6 +92,9 @@ jobs:
         env:
           MODEL: ${{ vars.OPENCODE_MODEL }}
           LLM_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_API_KEY_BULK: ${{ secrets.OPENCODE_API_KEY_BULK }}
+          KEY_FAST: ${{ secrets.KEY_FAST }}
+          KEY_BULK: ${{ secrets.KEY_BULK }}
           OPENCODE_CONFIG_CONTENT: '{"permission":"allow"}'
         run: |
           set -euo pipefail
@@ -117,6 +125,6 @@ jobs:
           EOF
           git add -A
           git -c user.name="opencode-fix-bot" -c user.email="opencode-fix-bot@users.noreply.github.com" commit -m "[auto-fix] 回应 review findings（未解决 threads）" | head -n 2
-          git push origin "HEAD:$(git branch --show-current)"
+          git push origin "HEAD:${{ steps.cfg.outputs.branch }}"
           PR="${{ steps.cfg.outputs.pr }}"
-          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "fix-review：已按未解决 threads 推一轮修复（[auto-fix]），CI 与复检请继续。破坏性 findings（如有）未动，等人工。" 2>/dev/null || true
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "fix-review：已按未解决 threads 推一轮修复（[auto-fix]），CI 与复检请继续。破坏性 findings（如有）未动，等人工。"
