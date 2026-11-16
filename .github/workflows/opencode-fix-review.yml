@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   fix:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request != null && github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_review' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -45,6 +45,10 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then PR="${{ inputs.pr-number }}"; else PR="${{ github.event.pull_request.number }}"; fi
           [ -n "$PR" ] || { echo "FAIL: 取不到 PR 号"; exit 1; }
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            PR_REPO="${{ github.event.pull_request.head.repo.full_name }}"
+            if [ "$PR_REPO" != "$GITHUB_REPOSITORY" ]; then echo "非同仓 PR，跳过"; echo "open=no" >> "$GITHUB_OUTPUT"; echo "branch=" >> "$GITHUB_OUTPUT"; exit 0; fi
+          fi
           echo "pr=$PR" >> "$GITHUB_OUTPUT"
           echo "max=${{ inputs.max-rounds || '3' }}" >> "$GITHUB_OUTPUT"
           INFO="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state,headRefName --jq '{s:.state, b:.headRefName}')"
@@ -59,7 +63,6 @@ jobs:
         if: steps.cfg.outputs.open == 'yes'
         run: |
           set -euo pipefail
-          if [ "${{ steps.cfg.outputs.open }}" != yes ]; then echo "PR 非 OPEN 或无分支，跳过"; echo "skip=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
           PR="${{ steps.cfg.outputs.pr }}"; MAX="${{ steps.cfg.outputs.max }}"
           RESP="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --jq '[.[] | select((.commit.message // "") | test("\\[auto-fix\\]"))] | length')" || { echo "FAIL: 取 commits 失败"; exit 1; }
           N="$(printf '%s' "$RESP" | tr -cd '0-9')"; [ -n "$N" ] || { echo "FAIL: 轮数解析失败"; exit 1; }
@@ -84,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           PR="${{ steps.cfg.outputs.pr }}"
-          gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(last:50){nodes{id isResolved path line originalLine comments(first:20){nodes{author{login}body}}}}}}}' -f o="${GITHUB_REPOSITORY%%/*}" -f r="${GITHUB_REPOSITORY##*/}" -F n="$PR" --jq 'if (.errors // []) | length > 0 then error((.errors[0].message // "graphql error")) else ([(.data.repository.pullRequest.reviewThreads.nodes // [])[] | select(.isResolved == false)] | .[] | "### " + ((.path | if . == null or . == "" then "?" else . end)) + ":" + (((.line | if . == null then (.originalLine | if . == null then "?" else . end) else . end)) | tostring) + "\n" + ([((.comments.nodes // [])[] | "- @" + ((.author.login // "?")) + ": " + ((.body // ""))) ] | join("\n"))) end' > /tmp/threads.md
+          gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(last:50){nodes{id isResolved path line originalLine comments(first:20){nodes{author{login}body}}}}}}}' -f o="${GITHUB_REPOSITORY%%/*}" -f r="${GITHUB_REPOSITORY##*/}" -F n="$PR" --jq 'if (.errors // []) | length > 0 then error((.errors[0].message // "graphql error")) else ([(((.data.repository.pullRequest // {}).reviewThreads.nodes // []))[] | select(.isResolved == false)] | .[] | "### " + ((.path | if . == null or . == "" then "?" else . end)) + ":" + (((.line | if . == null then (.originalLine | if . == null then "?" else . end) else . end)) | tostring) + "\n" + ([((.comments.nodes // [])[] | "- @" + ((.author.login // "?")) + ": " + ((.body // ""))) ] | join("\n"))) end' > /tmp/threads.md
           if [ ! -s /tmp/threads.md ]; then echo "无未解决 threads，退出"; echo "EMPTY=yes" >> "$GITHUB_ENV"; exit 0; fi
           wc -l /tmp/threads.md
 
@@ -133,7 +136,9 @@ jobs:
         if: steps.gate.outputs.skip == 'no' && env.EMPTY != 'yes'
         run: |
           set -euo pipefail
-          STATUS="$(git status -sb)"; printf '%s\n' "$STATUS" | sed -n '1,10p'
+          STATUS="$(git status -sb)"
+          mapfile -t _status_lines <<< "$STATUS"
+          printf '%s\n' "${_status_lines[@]:0:10}"
           PORCELAIN="$(git status --porcelain)"
           [ -n "$PORCELAIN" ] || { echo "无改动，退出"; exit 0; }
           python3 - <<'EOF'
