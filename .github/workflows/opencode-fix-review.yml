@@ -99,6 +99,7 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/fixbot && mkdir -p /tmp/fixbot
           git clone --depth 1 --filter=blob:none --sparse "https://x-access-token:$GH_TOKEN@github.com/link-seek/opencode-github-bot.git" /tmp/fixbot
+          git -C /tmp/fixbot fetch --depth 1 origin 932530f2fd9ee1b625c625c793f753f484f68e1 && git -C /tmp/fixbot checkout --detach FETCH_HEAD
           git -C /tmp/fixbot sparse-checkout set .opencode scripts
           for d in plugins skills agents; do
             [ -d "/tmp/fixbot/.opencode/$d" ] || { echo "FAIL: 缺 /tmp/fixbot/.opencode/$d"; exit 1; }
@@ -155,6 +156,7 @@ jobs:
           git checkout -- .opencode 2>/dev/null || true
           git clean -fd -- .opencode 2>/dev/null || true
           git add -A -- . ':!.opencode'
+          if git diff --cached --quiet; then echo "无实质改动（仅脚手架），退出"; exit 0; fi
           git -c user.name="opencode-fix-bot" -c user.email="opencode-fix-bot@users.noreply.github.com" commit -m "[auto-fix] 回应 review findings（未解决 threads）"
           git push origin "HEAD:${{ steps.cfg.outputs.branch }}"
           PR="${{ steps.cfg.outputs.pr }}"
