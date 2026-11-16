@@ -120,6 +120,8 @@ jobs:
           SSH69="sudo tailscale ssh root@100.93.119.21"
           if [ "${{ inputs.action }}" = "rollback" ]; then
             $SSH69 "kubectl -n $K3S_NS rollout undo deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s"
+          elif [ ! -d "${{ inputs.stack }}" ]; then
+            echo "VERIFY-ONLY: 本地无 ${{ inputs.stack }}（manifest 已搬商家仓，归 Flux），跳过直装，只验活"
           else
             tar czf /tmp/stack.tgz "${{ inputs.stack }}"
             $SSH69 "cat > /tmp/stack.tgz" < /tmp/stack.tgz
