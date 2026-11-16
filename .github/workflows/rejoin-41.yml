@@ -44,6 +44,10 @@ on:
         description: "direct 模式 SSH 端口（新装系统默认 22）"
         required: false
         default: "22"
+      runner_tag:
+        description: "runner 进网身份（默认 guest；mesh 首登用 user 才能过 Tailscale SSH 到活节点）"
+        required: false
+        default: "tag:guest"
 concurrency:
   group: rejoin-node
   cancel-in-progress: false
@@ -86,8 +90,10 @@ jobs:
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          RTAG="${{ inputs.runner_tag }}"
+          [ -n "$RTAG" ] || RTAG="tag:guest"
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"$RTAG\"]}}},\"expirySeconds\":21600}" \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
