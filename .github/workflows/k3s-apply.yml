@@ -21,7 +21,7 @@ on:
         required: false
         default: "k8s/opencode"
       action:
-        description: "apply trial | verify | rollback"
+        description: "apply trial | verify | rollback | secret-only（只建 ns+swr-pull+env Secret，不碰 manifest，Flux 侧用）"
         required: false
         default: "apply"
 
@@ -102,10 +102,14 @@ jobs:
             echo "CF_AI_TOKEN=$CF_AI"; echo "HCLOUD_AK=$S_AK"; echo "HCLOUD_SK=$S_SK"
             echo "TS_JOIN_KEY=$TS_JOIN"; echo "SMTP_PASS=$S_SMTP"
           } > /tmp/opencode-env.txt
+          if [ "$K3S_NS" = "opencode-team" ]; then
+            echo "BROWSERLESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(24))')" >> /tmp/opencode-env.txt
+          fi
           chmod 600 /tmp/opencode-env.txt
           echo "secret-render-ok: $(grep -c '' /tmp/opencode-env.txt) entries (values masked)"
 
       - name: ship + apply direct to .69 (TS SSH, 零钥匙)
+        if: inputs.action != 'secret-only'
         env:
           SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
           SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
@@ -116,6 +120,8 @@ jobs:
           SSH69="sudo tailscale ssh root@100.93.119.21"
           if [ "${{ inputs.action }}" = "rollback" ]; then
             $SSH69 "kubectl -n $K3S_NS rollout undo deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s"
+          elif [ ! -d "${{ inputs.stack }}" ]; then
+            echo "VERIFY-ONLY: 本地无 ${{ inputs.stack }}（manifest 已搬商家仓，归 Flux），跳过直装，只验活"
           else
             tar czf /tmp/stack.tgz "${{ inputs.stack }}"
             $SSH69 "cat > /tmp/stack.tgz" < /tmp/stack.tgz
@@ -125,8 +131,21 @@ jobs:
                kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt && \
                kubectl apply -R -f ${{ inputs.stack }} && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=900s"
           fi
+      - name: secret-only（ns + swr-pull + env Secret，不碰 manifest）
+        if: inputs.action == 'secret-only'
+        env:
+          SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          set -euo pipefail
+          SSH69="sudo tailscale ssh root@100.93.119.21"
+          $SSH69 "cat > /tmp/opencode-env.txt && chmod 600 /tmp/opencode-env.txt" < /tmp/opencode-env.txt
+          $SSH69 "set -e; kubectl create namespace $K3S_NS --dry-run=client -o yaml | kubectl apply -f - && \
+             kubectl create secret docker-registry swr-pull -n $K3S_NS --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username=\"$SWR_LOGIN_USER\" --docker-password=\"$SWR_LOGIN_PASS\" --dry-run=client -o yaml | kubectl apply -f - && \
+             kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt"
+          echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
       - name: verify in-cluster (fail-closed)
-        if: inputs.action != 'rollback'
+        if: inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify'
         run: |
           set -euo pipefail
           # 远端整段必须整体非零即红：禁止尾随 ; echo 吞退出码。
@@ -139,8 +158,13 @@ jobs:
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
             kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
+      - name: 失败诊断（只读 dump，对标 bake-stack 预检诊断）
+        if: failure() && (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify')
+        run: |
+          set -euo pipefail
+          sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get deploy,pods,pvc 2>&1 | tail -12; echo ---; kubectl -n $K3S_NS describe pods 2>&1 | grep -aE 'Name:|Image:|Status:|Reason:|Message:|Failed|Error|Warning' | head -30; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | tail -8" || true
       - name: probe tailnet ingress (Caddy视角, fail-closed)
-        if: inputs.action != 'rollback' && startsWith(inputs.stack, 'k8s/opencode')
+        if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
         run: |
           set -euo pipefail
           # runner 与 Caddy 同为 tailnet 普通节点：直连 pod 身份，验证切流前可达。
@@ -173,7 +197,7 @@ jobs:
           rm -f /tmp/gw-post.out
           true
       - name: e2e memory recall（内容级门，#338 健康门，fail-closed）
-        if: inputs.action != 'rollback' && startsWith(inputs.stack, 'k8s/opencode')
+        if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
         run: |
           set -euo pipefail
           # A 写 marker → B 新会话召回。模型走容器内网关，数据走本栈卷。直登 .69 单跳。
