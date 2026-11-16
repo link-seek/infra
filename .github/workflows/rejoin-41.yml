@@ -116,14 +116,15 @@ jobs:
           SSH_PORT="${{ inputs.ssh_port }}"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          # 新装 cloud-init 注钥匙 + sshd 起要几分钟，先等端口再传（fail-closed）。
+          # 新装 cloud-init 注钥匙 + sshd 起要几分钟，先等端口再 keyscan/传（fail-closed）。
+          # 注意：ssh-keyscan 必须在等锁之后（目标没应答它先退，set -e 会掐死整步）。
           echo "等 SSH 端口 $SSH_HOST:$SSH_PORT ..."
           for i in $(seq 1 30); do
             timeout 8 bash -c "echo > /dev/tcp/$SSH_HOST/$SSH_PORT" 2>/dev/null && break
             echo "ssh wait $i/30"; sleep 10
             [ "$i" = 30 ] && { echo "FAIL: SSH 未起"; exit 1; }
           done
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
           # 安装脚本走仓里文件（scripts/ts-static-install.sh），只传文件+调，不 inline 拼。
           for i in 1 2 3; do
             scp -P "$SSH_PORT" -o BatchMode=yes -i ~/.ssh/ci_key scripts/ts-static-install.sh "root@$SSH_HOST:/tmp/ts-install.sh" && break
