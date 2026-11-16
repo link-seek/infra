@@ -158,6 +158,11 @@ jobs:
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
             kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
+      - name: 失败诊断（只读 dump，对标 bake-stack 预检诊断）
+        if: failure() && (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify')
+        run: |
+          set -euo pipefail
+          sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get deploy,pods,pvc 2>&1 | tail -12; echo ---; kubectl -n $K3S_NS describe pods 2>&1 | grep -aE 'Name:|Image:|Status:|Reason:|Message:|Failed|Error|Warning' | head -30; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | tail -8" || true
       - name: probe tailnet ingress (Caddy视角, fail-closed)
         if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
         run: |
