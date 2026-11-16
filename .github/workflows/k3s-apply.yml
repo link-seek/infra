@@ -158,14 +158,18 @@ jobs:
           set -euo pipefail
           SSH69="sudo tailscale ssh root@100.93.119.21"
           $SSH69 "cat > /tmp/opencode-env.txt && chmod 600 /tmp/opencode-env.txt" < /tmp/opencode-env.txt
-          OCI_ARG=""
-          if [ -f /tmp/oci-key.pem ]; then
-            $SSH69 "cat > /tmp/oci-key.pem && chmod 600 /tmp/oci-key.pem" < /tmp/oci-key.pem
-            OCI_ARG="--from-file=OCI_CLI_KEY_CONTENT=/tmp/oci-key.pem"
-          fi
+          # kubectl 禁止 from-env-file 混 from-file：key 改 patch 追加（merge 不剪枝；下次 apply 若剪掉本步照补，幂等）
+          OCI_PATCH_NEED="no"
+          [ -f /tmp/oci-key.pem ] && OCI_PATCH_NEED="yes"
           $SSH69 "set -e; kubectl create namespace $K3S_NS --dry-run=client -o yaml | kubectl apply -f - && \
              kubectl create secret docker-registry swr-pull -n $K3S_NS --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username=\"$SWR_LOGIN_USER\" --docker-password=\"$SWR_LOGIN_PASS\" --dry-run=client -o yaml | kubectl apply -f - && \
-             kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt $OCI_ARG --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt /tmp/oci-key.pem"
+             kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt"
+          if [ "$OCI_PATCH_NEED" = "yes" ]; then
+            OCI_B64="$(base64 -w0 /tmp/oci-key.pem)"
+            [ -n "$OCI_B64" ] || { echo "FAIL: oci-key.pem 为空"; exit 1; }
+            $SSH69 "kubectl patch secret $K3S_SECRET -n $K3S_NS -p '{\"data\":{\"OCI_CLI_KEY_CONTENT\":\"$OCI_B64\"}}'"
+            echo "OCI KEY PATCHED: secret=$K3S_SECRET"
+          fi
           echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
       - name: verify in-cluster (fail-closed)
         if: inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify'
