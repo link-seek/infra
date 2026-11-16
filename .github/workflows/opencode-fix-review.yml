@@ -60,7 +60,7 @@ jobs:
           set -euo pipefail
           if [ "${{ steps.cfg.outputs.open }}" != yes ]; then echo "PR 非 OPEN 或无分支，跳过"; echo "skip=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
           PR="${{ steps.cfg.outputs.pr }}"; MAX="${{ steps.cfg.outputs.max }}"
-          RESP="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --jq '[.[] | select(.commit.message | test("\\[auto-fix\\]"))] | length')" || { echo "FAIL: 取 commits 失败"; exit 1; }
+          RESP="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --jq '[.[] | select((.commit.message // "") | test("\\[auto-fix\\]"))] | length')" || { echo "FAIL: 取 commits 失败"; exit 1; }
           N="$(printf '%s' "$RESP" | tr -cd '0-9')"; [ -n "$N" ] || { echo "FAIL: 轮数解析失败"; exit 1; }
           echo "auto-fix 已推 $N 轮，上限 $MAX"
           if [ "$N" -ge "$MAX" ]; then
@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           PR="${{ steps.cfg.outputs.pr }}"
-          gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(last:50){nodes{id isResolved path line originalLine comments(first:20){nodes{author{login}body}}}}}}}' -f o="${GITHUB_REPOSITORY%%/*}" -f r="${GITHUB_REPOSITORY##*/}" -F n="$PR" --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | .[] | "### " + (.path // "?") + ":" + ((.line // .originalLine // "?") | tostring) + "\n" + ([.comments.nodes[] | "- @" + .author.login + ": " + .body] | join("\n"))' > /tmp/threads.md
+          gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(last:50){nodes{id isResolved path line originalLine comments(first:20){nodes{author{login}body}}}}}}}' -f o="${GITHUB_REPOSITORY%%/*}" -f r="${GITHUB_REPOSITORY##*/}" -F n="$PR" --jq '[(.data.repository.pullRequest.reviewThreads.nodes // [])[] | select(.isResolved == false)] | .[] | "### " + (((.path | select(. != null and . != "")) // "?")) + ":" + ((.line // .originalLine // "?") | tostring) + "\n" + ([.comments.nodes[] | "- @" + .author.login + ": " + .body] | join("\n"))' > /tmp/threads.md
           if [ ! -s /tmp/threads.md ]; then echo "无未解决 threads，退出"; echo "EMPTY=yes" >> "$GITHUB_ENV"; exit 0; fi
           wc -l /tmp/threads.md
 
@@ -96,11 +96,12 @@ jobs:
           rm -rf /tmp/fixbot && mkdir -p /tmp/fixbot
           git clone --depth 1 --filter=blob:none --sparse "https://x-access-token:$GH_TOKEN@github.com/link-seek/opencode-github-bot.git" /tmp/fixbot
           git -C /tmp/fixbot sparse-checkout set .opencode scripts
-          mkdir -p .opencode/plugins .opencode/skills .opencode/agents
-          cp -r /tmp/fixbot/.opencode/plugins/* .opencode/plugins/ 2>/dev/null || true
-          cp -r /tmp/fixbot/.opencode/skills/* .opencode/skills/ 2>/dev/null || true
-          cp -r /tmp/fixbot/.opencode/agents/* .opencode/agents/ 2>/dev/null || true
-          rm -rf /tmp/fixbot
+          for d in plugins skills agents; do
+            [ -d "/tmp/fixbot/.opencode/$d" ] || { echo "FAIL: 缺 /tmp/fixbot/.opencode/$d"; exit 1; }
+            mkdir -p ".opencode/$d"
+            cp -r "/tmp/fixbot/.opencode/$d/." ".opencode/$d/"
+          done
+          cp /tmp/fixbot/scripts/model-cli.py /tmp/model-cli.py
 
       - name: 装 opencode 并修
         if: steps.gate.outputs.skip == 'no' && env.EMPTY != 'yes'
@@ -117,7 +118,7 @@ jobs:
           export PATH="$HOME/.opencode/bin:$PATH"
           PR="${{ steps.cfg.outputs.pr }}"
           THREADS="$(head -c 20000 /tmp/threads.md)"
-          CLI_MODEL="$(python3 /tmp/fixbot/scripts/model-cli.py "$MODEL")"
+          CLI_MODEL="$(python3 /tmp/model-cli.py "$MODEL")"
           BULK="${KEY_BULK:-$OPENCODE_API_KEY_BULK}"
           FAST="${KEY_FAST:-${OPENCODE_API_KEY:-$LLM_API_KEY}}"
           if [ -n "$BULK" ]; then AGENT_KEY="$BULK"; else AGENT_KEY="$FAST"; fi
@@ -131,8 +132,9 @@ jobs:
         if: steps.gate.outputs.skip == 'no' && env.EMPTY != 'yes'
         run: |
           set -euo pipefail
-          git status -sb | head -n 10
-          [ -n "$(git status --porcelain | head -n 1)" ] || { echo "无改动，退出"; exit 0; }
+          STATUS="$(git status -sb)"; printf '%s\n' "$STATUS" | head -n 10
+          PORCELAIN="$(git status --porcelain)"
+          [ -n "$PORCELAIN" ] || { echo "无改动，退出"; exit 0; }
           python3 - <<'EOF'
           import glob, sys, yaml
           bad = 0
@@ -144,7 +146,7 @@ jobs:
           sys.exit(bad)
           EOF
           git add -A
-          git -c user.name="opencode-fix-bot" -c user.email="opencode-fix-bot@users.noreply.github.com" commit -m "[auto-fix] 回应 review findings（未解决 threads）" | head -n 2
+          git -c user.name="opencode-fix-bot" -c user.email="opencode-fix-bot@users.noreply.github.com" commit -m "[auto-fix] 回应 review findings（未解决 threads）"
           git push origin "HEAD:${{ steps.cfg.outputs.branch }}"
           PR="${{ steps.cfg.outputs.pr }}"
           gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "fix-review：已按未解决 threads 推一轮修复（[auto-fix]），CI 与复检请继续。破坏性 findings（如有）未动，等人工。"
