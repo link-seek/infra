@@ -10,6 +10,18 @@ on:
         description: "deploy=下发+验证；verify=只验"
         required: false
         default: "deploy"
+      hw69_tail:
+        description: ".69 tailnet 地址（直连免跳）"
+        required: false
+        default: "100.93.119.21"
+      hw41_tail:
+        description: ".41 tailnet 地址（直连免跳）"
+        required: false
+        default: "100.73.182.4"
+      runner_tag:
+        description: "runner 进网身份（需 user 才能登 mesh）"
+        required: false
+        default: "tag:user"
   schedule:
     - cron: "0 1 * * *"
 concurrency:
@@ -23,13 +35,14 @@ jobs:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: runner 进 tailnet（ephemeral CI 身份）
+      - name: runner 进 tailnet（user 身份，直连免跳）
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          RTAG="${{ inputs.runner_tag }}"; [ -n "$RTAG" ] || RTAG="tag:user"
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"$RTAG\"]}}},\"expirySeconds\":21600}" \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
@@ -44,19 +57,13 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
+          H69="${{ inputs.hw69_tail }}"
+          ssh-keyscan -H "$H69" >> ~/.ssh/known_hosts 2>/dev/null || true
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
           tar czf /tmp/etcd-bak.tgz k8s/etcd-backup
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
-          set -euo pipefail
-          J="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
-          $J 'rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak'
-          EOF
-          scp -P 2244 -i ~/.ssh/ci_key /tmp/etcd-bak.tgz root@100.91.222.51:/tmp/etcd-bak.tgz
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<EOF
-          set -euo pipefail
-          echo STAGE-fwd
-          scp -o BatchMode=yes -o StrictHostKeyChecking=no /tmp/etcd-bak.tgz root@192.168.1.69:/tmp/etcd-bak.tgz < /dev/null
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69 bash -s <<'INNEREOF'
+          ssh $SOPT "root@$H69" 'rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak'
+          scp $SOPT /tmp/etcd-bak.tgz "root@$H69:/tmp/etcd-bak.tgz"
+          ssh $SOPT "root@$H69" bash -s <<'INNEREOF'
           set -euo pipefail
           rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak && tar xzf /tmp/etcd-bak.tgz -C /tmp/etcd-bak
           cd /tmp/etcd-bak
@@ -75,7 +82,6 @@ jobs:
           kubectl apply -f k8s/etcd-backup/cronjob.yaml
           echo RBAC-CRONJOB-OK
           INNEREOF
-          EOF
       - name: 首刷 + config 下发 + 滚动重启 + 实传验证
         if: inputs.mode == 'deploy'
         env:
@@ -84,14 +90,14 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
-          set -euo pipefail
-          echo STAGE-remote-start
-          set -x
-          K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
-          K41="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41"
+          H69="${{ inputs.hw69_tail }}"; H41="${{ inputs.hw41_tail }}"
+          ssh-keyscan -H "$H69" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -H "$H41" >> ~/.ssh/known_hosts 2>/dev/null || true
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
+          K69="ssh -n $SOPT root@$H69"
+          K41="ssh -n $SOPT root@$H41"
           kexec() { $K69 "kubectl $*" 2>/dev/null || $K41 "kubectl $*"; }
+          echo STAGE-remote-start-direct
           echo "== 首刷（Secret 先由管理面预建，refresher 只要 get/patch） =="
           $K69 "kubectl create secret generic k3s-etcd-snapshot-s3-config -n kube-system --type=etcd.k3s.cattle.io/s3-config-secret --dry-run=client -o yaml | kubectl apply -f -"
           $K69 "JOB=etcd-s3-refresh-manual-$(date +%s); kubectl create job --from=cronjob/etcd-s3-refresh -n kube-system \$JOB >/dev/null && echo \$JOB > /tmp/refresh-job-name && kubectl wait --for=condition=complete -n kube-system job/\$JOB --timeout=180s"
@@ -111,17 +117,17 @@ jobs:
           apply_config() {
             # $1=IP $2=schedule cron。只用 sed 单引号写文件（不经过 python/argv/heredoc 传值，杜绝截断），写完必验。
             local IP="$1" CRON="$2"
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "sed -i 's#^etcd-snapshot-schedule-cron:.*#etcd-snapshot-schedule-cron: \"$CRON\"#' /etc/rancher/k3s/config.yaml"
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "grep -q '^etcd-s3: true$' /etc/rancher/k3s/config.yaml || printf 'etcd-s3: true\netcd-s3-config-secret: k3s-etcd-snapshot-s3-config\netcd-s3-retention: 28\n' >> /etc/rancher/k3s/config.yaml"
-            LINE="$(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "grep '^etcd-snapshot-schedule-cron:' /etc/rancher/k3s/config.yaml")"
+            ssh $SOPT root@"$IP" "sed -i 's#^etcd-snapshot-schedule-cron:.*#etcd-snapshot-schedule-cron: \"$CRON\"#' /etc/rancher/k3s/config.yaml"
+            ssh $SOPT root@"$IP" "grep -q '^etcd-s3: true$' /etc/rancher/k3s/config.yaml || printf 'etcd-s3: true\netcd-s3-config-secret: k3s-etcd-snapshot-s3-config\netcd-s3-retention: 28\n' >> /etc/rancher/k3s/config.yaml"
+            LINE="$(ssh -n $SOPT root@"$IP" "grep '^etcd-snapshot-schedule-cron:' /etc/rancher/k3s/config.yaml")"
             [ "$LINE" = "etcd-snapshot-schedule-cron: \"$CRON\"" ] || { echo "FAIL: config 落盘不对: [$LINE]"; exit 1; }
             echo "config ok: $LINE"
-            ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@"$IP" "chmod 600 /etc/rancher/k3s/config.yaml && systemctl restart k3s"
+            ssh -n $SOPT root@"$IP" "chmod 600 /etc/rancher/k3s/config.yaml && systemctl restart k3s"
           }
-          echo "== 测试节拍（*/7）+ S3 开：先 .41 再 .69 =="
-          apply_config 192.168.1.41 "*/7 * * * *"
+          echo "== 测试节拍（*/7）+ S3 开：先 .41 再 .69（直连 tailnet） =="
+          apply_config "$H41" "*/7 * * * *"
           wait_ready
-          apply_config 192.168.1.69 "*/7 * * * *"
+          apply_config "$H69" "*/7 * * * *"
           wait_ready
           echo "== 等 S3 client 就绪 =="
           for i in $(seq 1 12); do
@@ -154,14 +160,13 @@ jobs:
             [ "$i" = 12 ] && { echo "FAIL: 12 分钟没等到 S3 实传"; exit 1; }
           done
           echo "== 切回正式节拍（0 */6 * * *） =="
-          apply_config 192.168.1.41 "0 */6 * * *"
+          apply_config "$H41" "0 */6 * * *"
           wait_ready
-          apply_config 192.168.1.69 "0 */6 * * *"
+          apply_config "$H69" "0 */6 * * *"
           wait_ready
-          echo "== 清 HW21 旧链 =="
+          echo "== 清旧链（跳板残留） =="
           rm -f /usr/local/bin/k3s-etcd-fetch-upload.sh /etc/cron.d/k3s-etcd-fetch-upload /tmp/k3s-etcd-fetch-upload.sh /tmp/etcd-bak.tgz
           echo DEPLOY-OK
-          EOF
       - name: 验（CR + 刷新新鲜度，不碰钥匙值）
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
@@ -169,11 +174,12 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          ssh-keyscan -H 100.91.222.51 >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o BatchMode=yes -p 2244 -i ~/.ssh/ci_key root@100.91.222.51 bash -s <<'EOF'
-          set -euo pipefail
-          K69="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.69"
-          kexec() { $K69 "kubectl $*" 2>/dev/null || ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no root@192.168.1.41 "kubectl $*"; }
+          H69="${{ inputs.hw69_tail }}"; H41="${{ inputs.hw41_tail }}"
+          ssh-keyscan -H "$H69" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -H "$H41" >> ~/.ssh/known_hosts 2>/dev/null || true
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
+          K69="ssh -n $SOPT root@$H69"
+          kexec() { $K69 "kubectl $*" 2>/dev/null || ssh -n $SOPT root@$H41 "kubectl $*"; }
           echo "== Secret 刷新新鲜度（<12h） =="
           kexec "get secret -n kube-system k3s-etcd-snapshot-s3-config -o jsonpath='{.metadata.annotations.refreshed-at}'" | python3 -c "
           import sys,datetime
@@ -202,4 +208,3 @@ jobs:
           print('newest s3 snapshot age_h=%.1f %s' % (best[0]/3600, best[1]))
           sys.exit(0 if best[0] < 108000 else 1)" || { echo "FAIL: 30h 内无 S3 快照"; exit 1; }
           echo VERIFY-DONE
-          EOF
