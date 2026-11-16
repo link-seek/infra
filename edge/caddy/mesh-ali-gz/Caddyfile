@@ -50,10 +50,10 @@ opencode.yingxin.net.cn {
 	}
 }
 
-# 部门共用实例 opencode-team（trial，单后端；稳定后再议 ha）。
+# 部门共用实例 team-agent（trial，单后端；稳定后再议 ha）。ops 习惯叫 agent，2026-11-16 改名（旧 opencode-team.xieyucheng.top 同 day 退役）。
 # 后端 = k8s 独立 browserless 旁的 opencode-team Pod（operator 代理，ha-b 钉 .69）。
 # 回滚=删本段（DNS 另清）；opencode 自带密码门，公网直达无妨。
-opencode-team.xieyucheng.top {
+team-agent.xieyucheng.top {
 	reverse_proxy {
 		dynamic a {
 			name opencode-team.mackarel-polaris.ts.net.
@@ -69,7 +69,7 @@ opencode-team.xieyucheng.top {
 		health_timeout 5s
 	}
 	log {
-		output file /var/log/caddy/opencode-team.log
+		output file /var/log/caddy/team-agent.log
 	}
 }
 
