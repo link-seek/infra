@@ -1,6 +1,6 @@
 name: ssh-diag-keys
 # 临时诊断：经 tailnet（user 身份，Tailscale SSH accept，无需 key）读三机 authorized_keys 公钥部分。
-# 只打印公钥（type+前20字符指纹），不碰私钥，不写任何机器。
+# 只打印公钥（完整公钥可日志，私钥不出 runner），不写任何机器。用完即删。
 on:
   workflow_dispatch:
     inputs:
@@ -36,7 +36,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           echo "=== PROD_SSH_KEY 对应公钥（公钥可日志，私钥不出 runner） ==="
-          ssh-keygen -y -f ~/.ssh/ci_key | awk '{print $1, substr($2,1,40)}'
+          ssh-keygen -y -f ~/.ssh/ci_key
           for H in 100.93.119.21 100.73.182.4; do
             echo "=== $H authorized_keys ==="
             ssh -o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$H" "cat ~/.ssh/authorized_keys 2>/dev/null | awk '{print \$1, substr(\$2,1,40), \$3}' | head -n 5" 2>&1 | head -n 8 || echo "$H SSH-FAIL"
