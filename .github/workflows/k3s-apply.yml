@@ -174,6 +174,9 @@ jobs:
           # L3 可见性：netmap 里有没有这个 peer（ACL 过滤的真相；tailscale ping 走系统 DNS，
           # --accept-dns=false 的 runner 上必挂，不能当门，43067087861 系误判已修正）。
           IP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if '$K3S_TSHOST' in str(p.get('DNSName','')) or '$K3S_TSHOST' in str(p.get('HostName',''))),''))")
+            # .69 本机视角（常驻节点，全量 netmap）：判设备是否存在；runner 侧看不见可能是 ACL/视野问题。
+            echo "--- .69 netmap (opencode/xieyucheng/ha) ---"
+            sudo tailscale ssh root@100.93.119.21 "tailscale status 2>/dev/null | grep -iE 'opencode|xieyucheng|ha-a|ha-b' || echo NO-TS-MATCH-ON-69"
             # 可见性基线（判探针本身是否失明）：opencode/xieyucheng/mesh 字样对端全列出，只打 HostName/IP。
             sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; rows=[(p.get('HostName'),(p.get('TailscaleIPs') or ['?'])[0]) for p in peers.values()]; print('PEERS-TOTAL', len(rows)); [print('PEER', h, ip) for h,ip in rows if any(k in str(h) for k in ('opencode','xieyucheng','mesh-hw','litellm','gateway'))]" || true
           [ -n "$IP" ] || { echo INGRESS-NOT-VISIBLE-FAIL; exit 1; }
