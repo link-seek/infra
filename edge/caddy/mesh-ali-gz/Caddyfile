@@ -50,6 +50,29 @@ opencode.yingxin.net.cn {
 	}
 }
 
+# 部门共用实例 opencode-team（trial，单后端；稳定后再议 ha）。
+# 后端 = k8s 独立 browserless 旁的 opencode-team Pod（operator 代理，ha-b 钉 .69）。
+# 回滚=删本段（DNS 另清）；opencode 自带密码门，公网直达无妨。
+opencode-team.xieyucheng.top {
+	reverse_proxy {
+		dynamic a {
+			name opencode-team.mackarel-polaris.ts.net.
+			port 4097
+			refresh 5s
+			resolvers 100.100.100.100
+		}
+		fail_duration 30s
+		max_fails 2
+		lb_try_duration 5s
+		health_uri /
+		health_interval 10s
+		health_timeout 5s
+	}
+	log {
+		output file /var/log/caddy/opencode-team.log
+	}
+}
+
 # 网关公网入口（2026-11-03 灰云直连）：Caddy → 独立 tailnet 身份 litellm-gateway:4000。
 # 国内直连：用户→广州 ali-gz→tailnet→华北网关。隧道回滚已删。
 # 模型列表实时透传官方（无 cron 无过滤）：/go/v1/models → Go 订阅清单；/v1/models → 余额清单。
