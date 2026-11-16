@@ -40,7 +40,8 @@ jobs:
           case "$APP" in
             litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
             opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
-            *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
+            opencode-team) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-team; CONT=opencode; TSHOST=opencode-team;;
+          *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
           esac
           { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; } >> "$GITHUB_ENV"
           echo "stack=$APP deploy=$DEPLOY port=$PORT join=$JT"
