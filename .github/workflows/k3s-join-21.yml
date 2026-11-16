@@ -1,0 +1,121 @@
+name: k3s-join-21
+# HW21 以 k3s server 入簇成第 3 节点（etcd quorum 完整）。
+# 前置：HW21 已在 tailnet（mesh-hw-21，tag mesh/prod/hw21），.69 已 cluster-init。
+# 全程直连 tailnet（user 身份，Tailscale SSH accept），无跳板。runner 下载 .69 二进制中转到 .21，保证同版本。
+# 顺序：21 切 cgroupv2（grub+reboot+验）→ 传二进制+token 以 server 加入 → 验 3 节点 + etcd 3 成员。
+on:
+  workflow_dispatch:
+    inputs:
+      hw21_tail:
+        description: "HW21 tailnet 地址（默认 100.100.246.95）"
+        required: false
+        default: "100.100.246.95"
+      hw69_tail:
+        description: ".69 tailnet 地址"
+        required: false
+        default: "100.93.119.21"
+      runner_tag:
+        description: "runner 进网身份（需 user 才能登 mesh）"
+        required: false
+        default: "tag:user"
+concurrency:
+  group: k3s-join-21
+  cancel-in-progress: false
+jobs:
+  join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: runner 进 tailnet（user 身份）
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${{ secrets.TS_API_KEY }}" | tr -d '\r\n ')"
+          RTAG="${{ inputs.runner_tag }}"; [ -n "$RTAG" ] || RTAG="tag:user"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"$RTAG\"]}}},\"expirySeconds\":21600}" \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-join21-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+      - name: 21 切 cgroupv2 并重启验证
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          H21="${{ inputs.hw21_tail }}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -H "$H21" >> ~/.ssh/known_hosts 2>/dev/null || true
+          OUT=$(ssh -o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$H21" "if test -f /sys/fs/cgroup/cgroup.controllers; then echo V2-READY; else echo NEED-V2; fi; cat /etc/os-release 2>/dev/null | head -2")
+          echo "$OUT"
+          if echo "$OUT" | grep -q V2-READY; then
+            echo "v2 已就绪，跳过重启"
+          else
+            echo "切 v2（grubby 改 BLS + 重生成 grub.cfg）..."
+            ssh -o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 && grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1 | tail -1 && grep -q unified_cgroup_hierarchy /boot/grub2/grub.cfg && echo GRUB-OK"
+            echo "发重启..."
+            ssh -o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "systemctl reboot" || true
+            echo "验掉线..."
+            for i in $(seq 1 18); do
+              sleep 10
+              timeout 8 bash -c "echo > /dev/tcp/$H21/22" 2>/dev/null && echo "22:OPEN" || { echo "22:WAIT $i/18"; continue; }
+              echo "22:OPEN-but-should-drop"; break
+            done
+            echo "等 21 回来（tailnet 重连）..."
+            for i in $(seq 1 30); do
+              sleep 20
+              if ssh -o BatchMode=no -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "echo BACK" 2>/dev/null | grep -q BACK; then echo "BACK-OK"; break; fi
+              echo "wait $i/30"; [ "$i" = 30 ] && { echo "FAIL: 21 重启后未回来"; exit 1; }
+            done
+            ssh -o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "test -f /sys/fs/cgroup/cgroup.controllers && echo CGROUPV2-OK" | grep -q CGROUPV2-OK || { echo "FAIL: 仍是 v1"; exit 1; }
+          fi
+          shred -u ~/.ssh/ci_key || true
+      - name: 21 以 server 加入并验 quorum（3 节点）
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          H21="${{ inputs.hw21_tail }}"
+          H69="${{ inputs.hw69_tail }}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
+          echo "取版本+token（经 .69）..."
+          VER=$(ssh $SOPT "root@$H69" "k3s --version | head -1 | awk '{print \$3}'")
+          echo "k3s 版本: $VER"
+          TOKEN=$(ssh $SOPT "root@$H69" "cat /var/lib/rancher/k3s/server/node-token")
+          [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
+          echo "传二进制（.69→runner→.21，保证同版本，不走公网）..."
+          scp $SOPT "root@$H69:/usr/local/bin/k3s" /tmp/k3s-21
+          scp $SOPT /tmp/k3s-21 "root@$H21:/usr/local/bin/k3s"
+          shred -u /tmp/k3s-21
+          ssh $SOPT "root@$H21" "chmod +x /usr/local/bin/k3s && k3s --version | head -1"
+          echo "写 unit+config 并加入..."
+          ssh $SOPT "root@$H21" "printf '%s\n' '[Unit]' 'Description=Lightweight Kubernetes' 'Documentation=https://k3s.io' 'Wants=network-online.target' 'After=network-online.target' '[Install]' 'WantedBy=multi-user.target' '[Service]' 'Type=notify' 'KillMode=process' 'Delegate=yes' 'User=root' 'ExecStartPre=-/sbin/modprobe br_netfilter' 'ExecStartPre=-/sbin/modprobe overlay' 'ExecStart=/usr/local/bin/k3s server' 'Restart=always' 'RestartSec=5s' > /etc/systemd/system/k3s.service && systemctl daemon-reload && systemctl enable k3s"
+          ssh $SOPT "root@$H21" "mkdir -p /etc/rancher/k3s && printf 'server: https://192.168.1.69:6443\ntoken: %s\ndisable:\n  - traefik\nwrite-kubeconfig-mode: \"644\"\n' \"$TOKEN\" > /etc/rancher/k3s/config.yaml && chmod 600 /etc/rancher/k3s/config.yaml && systemctl start k3s"
+          echo "播镜像种子（内网传 pause/klipper；幂等）..."
+          IMGS=$(ssh $SOPT "root@$H69" "k3s crictl images 2>/dev/null | grep -iE 'pause|klipper' | awk '{print \$1\":\"\$2}' | tr '\n' ' '")
+          [ -n "$IMGS" ] || { echo "FAIL: 源节点无种子镜像"; exit 1; }
+          echo "seed: $IMGS"
+          ssh $SOPT "root@$H69" "k3s ctr -n k8s.io images export /tmp/k3s-seed.tar $IMGS"
+          scp $SOPT "root@$H69:/tmp/k3s-seed.tar" /tmp/k3s-seed.tar
+          scp $SOPT /tmp/k3s-seed.tar "root@$H21:/tmp/k3s-seed.tar"
+          ssh $SOPT "root@$H21" "k3s ctr -n k8s.io images import /tmp/k3s-seed.tar && rm -f /tmp/k3s-seed.tar"
+          ssh $SOPT "root@$H69" "rm -f /tmp/k3s-seed.tar"; rm -f /tmp/k3s-seed.tar
+          echo "等 21 Ready（3 节点）..."
+          for i in $(seq 1 24); do
+            sleep 15
+            NODES=$(ssh $SOPT "root@$H69" "kubectl get nodes --no-headers 2>/dev/null | wc -l")
+            echo "nodes=$NODES ($i/24)"
+            [ "$NODES" = 3 ] && break
+            [ "$i" = 24 ] && { echo "FAIL: 21 未入簇"; ssh $SOPT "root@$H69" "kubectl get nodes -o wide"; exit 1; }
+          done
+          ssh $SOPT "root@$H69" "kubectl get nodes -o wide; kubectl -n kube-system get pods -o wide 2>/dev/null | head -8"
+          echo "=== etcd 成员（应 3）==="
+          ssh $SOPT "root@$H69" "k3s etcd-snapshot list 2>/dev/null | head -3 || true; kubectl -n kube-system exec -i \$(kubectl -n kube-system get pods -l component=etcd --no-headers -o custom-columns=:metadata.name 2>/dev/null | head -1) -- etcdctl member list 2>/dev/null | head -6 || true"
+          shred -u ~/.ssh/ci_key || true
