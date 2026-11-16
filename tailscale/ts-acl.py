@@ -35,7 +35,7 @@ def main():
 
     elif cmd == "device-id":
         host = sys.argv[2]
-        devs = json.load(sys.stdin).get("devices", [])
+        devs = (json.load(sys.stdin).get("devices") or [])
         hit = [d for d in devs if d.get("hostname") == host]
         if len(hit) != 1:
             sys.exit(f"device-id: hostname={host} 匹配到 {len(hit)} 台（要求唯一）")
@@ -44,7 +44,7 @@ def main():
     elif cmd == "device-id-by-ip":
         # 按 tailnet IP 精确取离线设备的 id（删旧条目用；在线设备拒绝，要求唯一）。
         ip = sys.argv[2]
-        devs = json.load(sys.stdin).get("devices", [])
+        devs = (json.load(sys.stdin).get("devices") or [])
         hit = [d for d in devs if ip in (d.get("addresses") or [])]
         if len(hit) != 1:
             sys.exit(f"device-id-by-ip: ip={ip} 匹配到 {len(hit)} 台（要求唯一）")
@@ -53,7 +53,7 @@ def main():
         print(hit[0]["id"])
 
     elif cmd == "devices-table":
-        for d in json.load(sys.stdin).get("devices", []):
+        for d in (json.load(sys.stdin).get("devices") or []):
             print(
                 "%-24s %-20s tags=%-24s online=%s"
                 % (
