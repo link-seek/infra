@@ -154,7 +154,7 @@ jobs:
           sudo tailscale ssh root@100.93.119.21 \
             "set -euo pipefail; \
             # 探针用 python3（网关/browser 镜像里无 curl；opencode-tools 有 python3 实锤）。
-            code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>&1 || echo FAIL); \
+            for ATTEMPT in 1 2 3; do code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>&1); echo \"attempt \$ATTEMPT rc=\$? out=\$code\"; echo \"\$code\" | grep -aqE \"^[0-9]{3}$\" && break || sleep 10; done; code=\$(echo \"\$code\" | grep -aoE \"[0-9]{3}\" | tail -n 1); \
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
             kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
