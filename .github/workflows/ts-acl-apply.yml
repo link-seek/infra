@@ -7,19 +7,20 @@ name: ts-acl-apply
 #   - mode=verify     只读核对：控制台 ACL 与仓里是否一致，顺便列设备 tag。
 #   - mode=apply      覆盖控制台 ACL（必须 confirm=yes）；推完立刻读回逐字段比对。
 #   - mode=tag-device 改单台设备的 tag 集合（必须 confirm=yes；覆盖式，要写全）。
+#   - mode=delete-device 按 tailnet IP 删离线旧条目（必须 confirm=yes；只删离线且唯一匹配）。
 # 手动触发，不挂任何自动事件。逻辑都在 tailscale/ts-acl.py（可在本地直接跑）。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "verify | apply | tag-device"
+        description: "verify | apply | tag-device | delete-device"
         required: true
         default: verify
         type: choice
-        options: [verify, apply, tag-device]
+        options: [verify, apply, tag-device, delete-device]
       device:
-        description: "tag-device 用：设备 hostname（如 mesh-hw-21）"
+        description: "tag-device/device 用：设备 hostname（如 mesh-hw-21）或 tailnet IP（delete-device 用 IP 精确删离线旧条目）"
         required: false
         default: ""
       tags:
@@ -93,15 +94,36 @@ jobs:
             tag-device)
               [ "$CONFIRM" = yes ] || { echo "拒绝：tag-device 需要 confirm=yes"; exit 1; }
               [ -n "$DEVICE" ] && [ -n "$TAGS" ] || { echo "拒绝：tag-device 需要 device 与 tags"; exit 1; }
-              api "$API/tailnet/-/devices" > /tmp/dev.json
+              CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev.json
+              echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
               DID="$(python3 tailscale/ts-acl.py device-id "$DEVICE" < /tmp/dev.json)"
               BODY="$(python3 tailscale/ts-acl.py tags-json "$TAGS")"
               echo "设置 $DEVICE ($DID) tags = $BODY"
               CODE="$(api_out -X POST -d "$BODY" "$API/device/$DID/tags")"
               echo "POST tags HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
               [ "$CODE" = 200 ] || exit 1
-              api "$API/tailnet/-/devices" > /tmp/dev-after.json
-              python3 tailscale/ts-acl.py devices-table < /tmp/dev-after.json | grep -F "$DEVICE" || true
+              CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev-after.json
+              echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
+              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in (json.load(open('/tmp/dev-after.json')).get('devices') or []) if isinstance(d, dict) and d.get('hostname') == os.environ['DEVICE']]"
+              ;;
+
+            delete-device)
+              [ "$CONFIRM" = yes ] || { echo "拒绝：delete-device 需要 confirm=yes"; exit 1; }
+              [ -n "$DEVICE" ] || { echo "拒绝：delete-device 需要 device（tailnet IP，如 100.91.222.51）"; exit 1; }
+              CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev.json
+              echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
+              echo "--- 删除前（下行 gate 精确匹配离线唯一；此行仅回显精确命中，永不挂，不做判定） ---"
+              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname') if isinstance(d, dict) else d, d.get('addresses') if isinstance(d, dict) else '') for d in (json.load(open('/tmp/dev.json')).get('devices') or []) if isinstance(d, dict) and os.environ['DEVICE'] in (d.get('addresses') or [])]" || true
+              DID="$(python3 tailscale/ts-acl.py device-id-by-ip "$DEVICE" < /tmp/dev.json)" || exit 1
+              echo "删除设备 id=$DID（ip=$DEVICE）..."
+              CODE="$(curl -sS -m 30 -o /tmp/out.json -w '%{http_code}' -H 'Accept: application/json' -u "$TSKEY:" -X DELETE "$API/device/$DID")"
+              echo "DELETE HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
+              [ "$CODE" = 200 ] || exit 1
+              echo "--- 删除后复核（取数验 HTTP 200 且 devices 为 list；精确匹配判定，fail-closed） ---"
+              CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev-after.json
+              echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
+              DEVICE="$DEVICE" python3 -c "import json,os,sys; devs=json.load(open('/tmp/dev-after.json')).get('devices'); assert isinstance(devs, list), '取数异常（devices 非 list）'; ip=os.environ['DEVICE']; print('STILL' if [d for d in devs if ip in (d.get('addresses') or [])] else 'GONE')" > /tmp/del-check.txt || { echo "FAIL: 取数异常"; exit 1; }
+              grep -qx GONE /tmp/del-check.txt && echo "DELETED-OK: $DEVICE 已清" || { echo "FAIL: 仍在"; exit 1; }
               ;;
 
             *) echo "未知 mode: $MODE"; exit 1 ;;
