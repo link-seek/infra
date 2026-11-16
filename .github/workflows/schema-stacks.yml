@@ -26,37 +26,9 @@ jobs:
           import re, sys, subprocess, os
 
           # 栈声明：改运单必须同步改这里（显式允许集，防静默改名丢数据）。
-          STACKS = {
-              "stacks/opendesign": {
-                  "project": "opendesign",
-                  "volumes": {"od-data": "opendesign_od-data"},
-                  "networks": {},
-                  "manifest": False,
-                  "env_example_keys": ("OD_API_TOKEN=", "OD_ALLOWED_ORIGINS=",
-                                       "OD_ALLOWED_INTERNAL_HOSTS="),
-              },
-              "stacks/litellm-gateway": {
-                  "project": "litellm-gateway",
-                  "volumes": {"tailscale-state": None},
-                  "networks": {"gw-net": "litellm-guard_default"},
-                  "manifest": True,
-                  "env_example_keys": (),
-              },
-              "stacks/opencode/hw21": {
-                  "project": "opencode-prod",
-                  "volumes": {"prod-data": None, "prod-work": None, "tailscale-state": None},
-                  "networks": {"opencode-net": None},
-                  "manifest": True,
-                  "env_example_keys": (),
-              },
-              "stacks/opencode/hw41": {
-                  "project": "opencode-prod-ali-gz",
-                  "volumes": {"prod-data": None, "prod-work": None, "tailscale-state": None},
-                  "networks": {"opencode-net": None},
-                  "manifest": True,
-                  "env_example_keys": (),
-              },
-          }
+          STACKS = {}
+          # 2026-11-16 老 compose 栈已删（主机重置/k3s 接管，#490/#461）：
+          # STACKS 清空，本门恒过；新栈确权后按需重建。
           SECRET_PAT = re.compile(
               r"^[\s\-]*[A-Z_0-9]*(KEY|TOKEN|SECRET|PASSWD|PASSWORD)[A-Z_0-9_]*\s*[:=]\s*(\S)", re.M)
           # 注：不能写成 [:：]\s*(?!\$)——\s* 回溯后恒能匹配，判死失效。必须先吃掉一个非空字符再看是不是 $。
