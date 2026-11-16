@@ -19,11 +19,23 @@ on:
         required: false
         default: "tag:mesh,tag:opencode-hw41,tag:prod"
       via:
-        description: "jump=经HW21跳（41/.69）；direct=直连公网（重装后HW21本身，跳已死）"
+        description: "jump=经HW21跳（41/.69）；direct=直连公网（重装后HW21本身，跳已死）；mesh=经活节点tailnet直达再内网跳（HW21首登，跳已死时用）"
         required: false
         default: "jump"
         type: choice
-        options: [jump, direct]
+        options: [jump, direct, mesh]
+      alive_host:
+        description: "mesh 模式活节点 tailnet 地址（默认 .69）"
+        required: false
+        default: "100.93.119.21"
+      alive_port:
+        description: "mesh 模式活节点 SSH 端口"
+        required: false
+        default: "22"
+      target_lan:
+        description: "mesh 模式目标内网 IP（默认 HW21）"
+        required: false
+        default: "192.168.1.21"
       ssh_host:
         description: "direct 模式目标公网 IP（默认 HW21 公网）"
         required: false
@@ -134,6 +146,31 @@ jobs:
           ssh -o BatchMode=yes -p "$SSH_PORT" -i ~/.ssh/ci_key "root@$SSH_HOST" "bash /tmp/ts-install.sh \"$JOINKEY\" $TS_HOST"
           echo "--- $TS_HOST 已在网，对端自报 ---"
           ssh -o BatchMode=yes -p "$SSH_PORT" -i ~/.ssh/ci_key "root@$SSH_HOST" "tailscale status --self | head -2"
+          shred -u /tmp/join.key
+      - name: 经活节点 mesh 跳装 tailscale（HW21 首登无跳时用，私钥不出 runner）
+        if: inputs.via == 'mesh'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          JOINKEY="$(cat /tmp/join.key)"; echo "::add-mask::$JOINKEY"
+          TS_HOST="${{ inputs.ts_hostname }}"
+          ALIVE="${{ inputs.alive_host }}"
+          APORT="${{ inputs.alive_port }}"
+          TARGET="${{ inputs.target_lan }}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          ssh-keyscan -p "$APORT" -H "$ALIVE" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "验活节点 $ALIVE:$APORT ..."
+          ssh -o BatchMode=yes -p "$APORT" -i ~/.ssh/ci_key "root@$ALIVE" "echo ALIVE-OK; hostname; ip -o addr show 2>/dev/null | grep -o '192.168.1.[0-9]*' | head -3"
+          JUMP="root@$ALIVE:$APORT"
+          echo "验目标内网 $TARGET（经 $JUMP ProxyJump，key 只在 runner 本地）..."
+          ssh -o BatchMode=yes -o ProxyJump="$JUMP" -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$TARGET" "echo TARGET-OK; hostname; cat /etc/os-release 2>/dev/null | head -2"
+          echo "传安装脚本（经 ProxyJump，私钥不出 runner）..."
+          scp -o ProxyJump="$JUMP" -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key scripts/ts-static-install.sh "root@$TARGET:/tmp/ts-install.sh"
+          ssh -o BatchMode=yes -o ProxyJump="$JUMP" -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$TARGET" "bash /tmp/ts-install.sh \"$JOINKEY\" $TS_HOST"
+          echo "--- $TS_HOST 已在网，对端自报 ---"
+          ssh -o BatchMode=yes -o ProxyJump="$JUMP" -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$TARGET" "tailscale status --self | head -2"
           shred -u /tmp/join.key
       - name: 收尾提醒
         run: |
