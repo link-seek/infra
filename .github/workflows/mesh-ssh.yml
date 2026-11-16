@@ -110,3 +110,5 @@ jobs:
           done
           [ "$FAIL" = 0 ] || { echo "FAIL: 仍有免密不通"; exit 1; }
           shred -u ~/.ssh/ci_key
+
+# retrigger review
