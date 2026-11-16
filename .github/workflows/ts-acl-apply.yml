@@ -102,7 +102,7 @@ jobs:
               echo "POST tags HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
               [ "$CODE" = 200 ] || exit 1
               api "$API/tailnet/-/devices" > /tmp/dev-after.json
-              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in json.load(open('/tmp/dev-after.json'))['devices'] if os.environ['DEVICE'] in (d.get('addresses') or [])]"
+              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in json.load(open('/tmp/dev-after.json'))['devices'] if d.get('hostname') == os.environ['DEVICE']]"
               ;;
 
             delete-device)
