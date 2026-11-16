@@ -108,18 +108,20 @@ jobs:
             delete-device)
               [ "$CONFIRM" = yes ] || { echo "拒绝：delete-device 需要 confirm=yes"; exit 1; }
               [ -n "$DEVICE" ] || { echo "拒绝：delete-device 需要 device（tailnet IP，如 100.91.222.51）"; exit 1; }
-              api "$API/tailnet/-/devices" > /tmp/dev.json
-              echo "--- 删除前（下行 gate 精确匹配离线唯一；此行仅回显精确命中，不做判定） ---"
-              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in json.load(open('/tmp/dev.json'))['devices'] if os.environ['DEVICE'] in (d.get('addresses') or [])]"
+              CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev.json
+              echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
+              echo "--- 删除前（下行 gate 精确匹配离线唯一；此行仅回显精确命中，永不挂，不做判定） ---"
+              DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname'), d.get('addresses')) for d in (json.load(open('/tmp/dev.json')).get('devices') or []) if os.environ['DEVICE'] in (d.get('addresses') or [])]" || true
               DID="$(python3 tailscale/ts-acl.py device-id-by-ip "$DEVICE" < /tmp/dev.json)" || exit 1
               echo "删除设备 id=$DID（ip=$DEVICE）..."
               CODE="$(curl -sS -m 30 -o /tmp/out.json -w '%{http_code}' -H 'Accept: application/json' -u "$TSKEY:" -X DELETE "$API/device/$DID")"
               echo "DELETE HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
               [ "$CODE" = 200 ] || exit 1
-              echo "--- 删除后复核（该 IP 不应再出现；取数验 HTTP 200 且 devices 键存在，判定精确匹配，fail-closed） ---"
+              echo "--- 删除后复核（取数验 HTTP 200 且 devices 为 list；精确匹配判定，fail-closed） ---"
               CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev-after.json
               echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
-              DEVICE="$DEVICE" python3 -c "import json,os,sys; ip=os.environ['DEVICE']; devs=json.load(open('/tmp/dev-after.json'))['devices']; sys.exit(0 if not [d for d in devs if ip in (d.get('addresses') or [])] else 1)" && echo "DELETED-OK: $DEVICE 已清" || { echo "FAIL: 仍在"; exit 1; }
+              DEVICE="$DEVICE" python3 -c "import json,os,sys; devs=json.load(open('/tmp/dev-after.json')).get('devices'); assert isinstance(devs, list), '取数异常（devices 非 list）'; ip=os.environ['DEVICE']; print('STILL' if [d for d in devs if ip in (d.get('addresses') or [])] else 'GONE')" > /tmp/del-check.txt || { echo "FAIL: 取数异常"; exit 1; }
+              grep -qx GONE /tmp/del-check.txt && echo "DELETED-OK: $DEVICE 已清" || { echo "FAIL: 仍在"; exit 1; }
               ;;
 
             *) echo "未知 mode: $MODE"; exit 1 ;;
