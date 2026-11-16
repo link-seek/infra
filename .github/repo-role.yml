@@ -6,5 +6,6 @@ accept:
   - 发版流水线：deliver-*/promote-*/preflight/schema/secret-hygiene（送 infra 自己的东西）
 reject:
   - K3S 之上的每个 pod，以及 pod 里的一切应用和业务逻辑：回各自应用仓（镜像问题去 docker-images）
+  - 应用发版（镜像 bake/打 tag/发版本）：去 docker-images（infra 只管基建自身发版、摆场与 deliver 执行）
   - OpenCode 本体 bug：去上游 anomalyco/opencode
 notes: 跨界的一律拒收并指路；语义模糊放行由 Jev 判；infra 敏感，修必须走 PR，人审后合。
