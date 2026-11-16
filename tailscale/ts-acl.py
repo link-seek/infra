@@ -4,6 +4,7 @@
 子命令：
   norm <file>               打印规范化 JSON（容忍整行 // 注释与尾逗号），用于比对
   device-id <hostname>      从 stdin 的设备 JSON 里取唯一匹配的 id
+  device-id-by-ip <ip>     按 tailnet IP 取离线且唯一设备的 id（在线拒绝）
   devices-table             从 stdin 的设备 JSON 里打印 hostname/ip/tags/online
   tags-json <csv>           打印 {"tags": [...]}
   change-summary <a> <b>    打印 grants/ssh/tests 数量变化与 tagOwners
@@ -38,6 +39,17 @@ def main():
         hit = [d for d in devs if d.get("hostname") == host]
         if len(hit) != 1:
             sys.exit(f"device-id: hostname={host} 匹配到 {len(hit)} 台（要求唯一）")
+        print(hit[0]["id"])
+
+    elif cmd == "device-id-by-ip":
+        # 按 tailnet IP 精确取离线设备的 id（删旧条目用；在线设备拒绝，要求唯一）。
+        ip = sys.argv[2]
+        devs = json.load(sys.stdin).get("devices", [])
+        hit = [d for d in devs if ip in (d.get("addresses") or [])]
+        if len(hit) != 1:
+            sys.exit(f"device-id-by-ip: ip={ip} 匹配到 {len(hit)} 台（要求唯一）")
+        if hit[0].get("connectedToControl"):
+            sys.exit(f"device-id-by-ip: ip={ip} 对应 {hit[0].get('hostname')} 在线，拒绝删除")
         print(hit[0]["id"])
 
     elif cmd == "devices-table":

@@ -7,19 +7,20 @@ name: ts-acl-apply
 #   - mode=verify     只读核对：控制台 ACL 与仓里是否一致，顺便列设备 tag。
 #   - mode=apply      覆盖控制台 ACL（必须 confirm=yes）；推完立刻读回逐字段比对。
 #   - mode=tag-device 改单台设备的 tag 集合（必须 confirm=yes；覆盖式，要写全）。
+#   - mode=delete-device 按 tailnet IP 删离线旧条目（必须 confirm=yes；只删离线且唯一匹配）。
 # 手动触发，不挂任何自动事件。逻辑都在 tailscale/ts-acl.py（可在本地直接跑）。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "verify | apply | tag-device"
+        description: "verify | apply | tag-device | delete-device"
         required: true
         default: verify
         type: choice
-        options: [verify, apply, tag-device]
+        options: [verify, apply, tag-device, delete-device]
       device:
-        description: "tag-device 用：设备 hostname（如 mesh-hw-21）"
+        description: "tag-device/device 用：设备 hostname（如 mesh-hw-21）或 tailnet IP（delete-device 用 IP 精确删离线旧条目）"
         required: false
         default: ""
       tags:
@@ -102,6 +103,22 @@ jobs:
               [ "$CODE" = 200 ] || exit 1
               api "$API/tailnet/-/devices" > /tmp/dev-after.json
               python3 tailscale/ts-acl.py devices-table < /tmp/dev-after.json | grep -F "$DEVICE" || true
+              ;;
+
+            delete-device)
+              [ "$CONFIRM" = yes ] || { echo "拒绝：delete-device 需要 confirm=yes"; exit 1; }
+              [ -n "$DEVICE" ] || { echo "拒绝：delete-device 需要 device（tailnet IP，如 100.91.222.51）"; exit 1; }
+              api "$API/tailnet/-/devices" > /tmp/dev.json
+              echo "--- 删除前（目标 IP 精确匹配，需离线且唯一） ---"
+              python3 tailscale/ts-acl.py devices-table < /tmp/dev.json | grep -F "$DEVICE" || { echo "FAIL: 找不到 $DEVICE"; exit 1; }
+              DID="$(python3 tailscale/ts-acl.py device-id-by-ip "$DEVICE" < /tmp/dev.json)" || exit 1
+              echo "删除设备 id=$DID（ip=$DEVICE）..."
+              CODE="$(curl -sS -m 30 -o /tmp/out.json -w '%{http_code}' -H 'Accept: application/json' -u "$TSKEY:" -X DELETE "$API/device/$DID")"
+              echo "DELETE HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
+              [ "$CODE" = 200 ] || exit 1
+              echo "--- 删除后复核（该 IP 不应再出现） ---"
+              api "$API/tailnet/-/devices" > /tmp/dev-after.json
+              python3 tailscale/ts-acl.py devices-table < /tmp/dev-after.json | grep -F "$DEVICE" && { echo "FAIL: 仍在"; exit 1; } || echo "DELETED-OK: $DEVICE 已清"
               ;;
 
             *) echo "未知 mode: $MODE"; exit 1 ;;
