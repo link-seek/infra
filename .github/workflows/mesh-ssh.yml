@@ -1,0 +1,103 @@
+name: mesh-ssh
+# 三机内网互联 + 免密检查/打通（.21/.41/.69）。
+# mode=check：只读，测每台到另两台 LAN BatchMode 免密 + authorized_keys 盘点。
+# mode=deploy：每台本地生成独立 mesh keypair（私钥不出本机），只互换公钥，铺完复测。
+# 全程直连 tailnet（user 身份），无跳板。私钥不进日志不落 runner。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check=只读检查；deploy=生成分发mesh公钥并复测"
+        required: false
+        default: "check"
+        type: choice
+        options: [check, deploy]
+      runner_tag:
+        description: "runner 进网身份"
+        required: false
+        default: "tag:user"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mesh-ssh
+  cancel-in-progress: false
+
+jobs:
+  mesh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: runner 进 tailnet（user 身份）
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          RTAG="${{ inputs.runner_tag }}"; [ -n "$RTAG" ] || RTAG="tag:user"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"$RTAG\"]}}},\"expirySeconds\":21600}" \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-mesh-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --self | head -2
+      - name: 互联免密检查（只读）
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -i ~/.ssh/ci_key"
+          # tailnet 到各机 + LAN 互访 BatchMode 测试（免密才过）
+          for SRC in 100.100.246.95 100.73.182.4 100.93.119.21; do
+            echo "===== SRC $SRC ====="
+            ssh -o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$SRC" "hostname; echo ---PUBS---; ls -l /root/.ssh/ 2>/dev/null | head -8; cat /root/.ssh/mesh_id.pub 2>/dev/null || echo NO-MESH-PUB; echo ---AUTH---; wc -l /root/.ssh/authorized_keys 2>/dev/null || echo NO-AUTH" || echo "$SRC REACH-FAIL"
+            for DST in 192.168.1.21 192.168.1.41 192.168.1.69; do
+              echo "--- $SRC -> $DST ---"
+              ssh -o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$SRC" "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@$DST hostname 2>&1 || echo NO-PASSWD" || echo "$SRC TEST-FAIL"
+            done
+          done
+          shred -u ~/.ssh/ci_key
+      - name: 生成分发mesh公钥（仅 deploy）
+        if: inputs.mode == 'deploy'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          COPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          mkdir -p /tmp/meshpubs
+          for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
+            echo "===== keygen $H ====="
+            ssh $COPT "root@$H" "[ -f /root/.ssh/mesh_id.pub ] || ssh-keygen -t ed25519 -f /root/.ssh/mesh_id -N '' -C mesh; cat /root/.ssh/mesh_id.pub"
+            ssh $COPT "root@$H" "cat /root/.ssh/mesh_id.pub" > "/tmp/meshpubs/$H.pub"
+            cat "/tmp/meshpubs/$H.pub"
+          done
+          echo "===== 分发 ====="
+          cat /tmp/meshpubs/*.pub | sort -u > /tmp/meshpubs/all.pub
+          wc -l /tmp/meshpubs/all.pub
+          for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
+            echo "---铺 $H---"
+            while read -r PUB; do
+              [ -n "$PUB" ] || continue
+              ssh $COPT "root@$H" "grep -qxF '$PUB' /root/.ssh/authorized_keys 2>/dev/null || echo '$PUB' >> /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys; wc -l /root/.ssh/authorized_keys"
+            done < /tmp/meshpubs/all.pub || true
+          done
+          echo "===== 复测 ====="
+          FAIL=0
+          for SRC in 100.100.246.95 100.73.182.4 100.93.119.21; do
+            for DST in 192.168.1.21 192.168.1.41 192.168.1.69; do
+              OUT="$(ssh $COPT "root@$SRC" "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@$DST hostname 2>&1" || true)"
+              echo "$SRC -> $DST : $OUT"
+              case "$OUT" in *NO-PASSWD*|*denied*|*FAIL*) FAIL=1;; esac
+            done
+          done
+          [ "$FAIL" = 0 ] || { echo "FAIL: 仍有免密不通"; exit 1; }
+          shred -u ~/.ssh/ci_key
