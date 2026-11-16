@@ -71,6 +71,11 @@ jobs:
           S_AK: ${{ secrets.PROD_HCLOUD_AK }}
           S_SK: ${{ secrets.PROD_HCLOUD_SK }}
           S_SMTP: ${{ secrets.PROD_SMTP_PASS }}
+          S_OU: ${{ secrets.OCI_USER_OCID }}
+          S_OFP: ${{ secrets.OCI_FINGERPRINT }}
+          S_OT: ${{ secrets.OCI_TENANCY_OCID }}
+          S_OR: ${{ secrets.OCI_REGION }}
+          S_OK: ${{ secrets.OCI_API_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           if [ "$K3S_NS" = "litellm" ]; then
@@ -105,6 +110,18 @@ jobs:
           } > /tmp/opencode-env.txt
           if [ "$K3S_NS" = "opencode-team" ]; then
             echo "BROWSERLESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(24))')" >> /tmp/opencode-env.txt
+          fi
+          if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
+            # OCI 身份（pilot 专用；PEM 多行走 --from-file，不进 env-file）
+            for v in S_OU S_OFP S_OT S_OR S_OK; do
+              [ -n "${!v:-}" ] || { echo "FAIL: $v missing (OCI identity)"; exit 1; }
+            done
+            {
+              echo "OCI_CLI_USER=$S_OU"; echo "OCI_CLI_FINGERPRINT=$S_OFP"
+              echo "OCI_CLI_TENANCY=$S_OT"; echo "OCI_CLI_REGION=$S_OR"
+            } >> /tmp/opencode-env.txt
+            printf '%s' "$S_OK" > /tmp/oci-key.pem && chmod 600 /tmp/oci-key.pem
+            echo "oci identity staged (xieyucheng only)"
           fi
           chmod 600 /tmp/opencode-env.txt
           echo "secret-render-ok: $(grep -c '' /tmp/opencode-env.txt) entries (values masked)"
@@ -141,9 +158,14 @@ jobs:
           set -euo pipefail
           SSH69="sudo tailscale ssh root@100.93.119.21"
           $SSH69 "cat > /tmp/opencode-env.txt && chmod 600 /tmp/opencode-env.txt" < /tmp/opencode-env.txt
+          OCI_ARG=""
+          if [ -f /tmp/oci-key.pem ]; then
+            $SSH69 "cat > /tmp/oci-key.pem && chmod 600 /tmp/oci-key.pem" < /tmp/oci-key.pem
+            OCI_ARG="--from-file=OCI_CLI_KEY_CONTENT=/tmp/oci-key.pem"
+          fi
           $SSH69 "set -e; kubectl create namespace $K3S_NS --dry-run=client -o yaml | kubectl apply -f - && \
              kubectl create secret docker-registry swr-pull -n $K3S_NS --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username=\"$SWR_LOGIN_USER\" --docker-password=\"$SWR_LOGIN_PASS\" --dry-run=client -o yaml | kubectl apply -f - && \
-             kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt"
+             kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt $OCI_ARG --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt /tmp/oci-key.pem"
           echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
       - name: verify in-cluster (fail-closed)
         if: inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify'
