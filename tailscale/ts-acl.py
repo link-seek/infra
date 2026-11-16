@@ -48,8 +48,8 @@ def main():
         hit = [d for d in devs if ip in (d.get("addresses") or [])]
         if len(hit) != 1:
             sys.exit(f"device-id-by-ip: ip={ip} 匹配到 {len(hit)} 台（要求唯一）")
-        if hit[0].get("connectedToControl"):
-            sys.exit(f"device-id-by-ip: ip={ip} 对应 {hit[0].get('hostname')} 在线，拒绝删除")
+        if hit[0].get("connectedToControl") is not False:
+            sys.exit(f"device-id-by-ip: ip={ip} 对应 {hit[0].get('hostname')} 在线或状态未知，拒绝删除")
         print(hit[0]["id"])
 
     elif cmd == "devices-table":

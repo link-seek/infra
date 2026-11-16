@@ -109,16 +109,16 @@ jobs:
               [ "$CONFIRM" = yes ] || { echo "拒绝：delete-device 需要 confirm=yes"; exit 1; }
               [ -n "$DEVICE" ] || { echo "拒绝：delete-device 需要 device（tailnet IP，如 100.91.222.51）"; exit 1; }
               api "$API/tailnet/-/devices" > /tmp/dev.json
-              echo "--- 删除前（目标 IP 精确匹配，需离线且唯一） ---"
-              python3 tailscale/ts-acl.py devices-table < /tmp/dev.json | grep -F "$DEVICE" || { echo "FAIL: 找不到 $DEVICE"; exit 1; }
+              echo "--- 删除前（目标 IP 精确匹配见下行 gate；此表仅回显，不做判定） ---"
+              python3 tailscale/ts-acl.py devices-table < /tmp/dev.json | grep -F "$DEVICE" || true
               DID="$(python3 tailscale/ts-acl.py device-id-by-ip "$DEVICE" < /tmp/dev.json)" || exit 1
               echo "删除设备 id=$DID（ip=$DEVICE）..."
               CODE="$(curl -sS -m 30 -o /tmp/out.json -w '%{http_code}' -H 'Accept: application/json' -u "$TSKEY:" -X DELETE "$API/device/$DID")"
               echo "DELETE HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
               [ "$CODE" = 200 ] || exit 1
-              echo "--- 删除后复核（该 IP 不应再出现） ---"
+              echo "--- 删除后复核（该 IP 不应再出现；取数与判定分开，fail-closed） ---"
               api "$API/tailnet/-/devices" > /tmp/dev-after.json
-              python3 tailscale/ts-acl.py devices-table < /tmp/dev-after.json | grep -F "$DEVICE" && { echo "FAIL: 仍在"; exit 1; } || echo "DELETED-OK: $DEVICE 已清"
+              python3 -c "import json,sys; devs=json.load(open('/tmp/dev-after.json')).get('devices',[]); sys.exit(0 if not [d for d in devs if '$DEVICE' in (d.get('addresses') or [])] else 1)" && echo "DELETED-OK: $DEVICE 已清" || { echo "FAIL: 仍在"; exit 1; }
               ;;
 
             *) echo "未知 mode: $MODE"; exit 1 ;;
