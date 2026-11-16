@@ -56,8 +56,9 @@ jobs:
           if echo "$OUT" | grep -q V2-READY; then
             echo "v2 已就绪，跳过重启"
           else
-            echo "切 v2（grubby 改 BLS + 重生成 grub.cfg）..."
-            ssh -o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 && grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1 | tail -1 && grep -q unified_cgroup_hierarchy /boot/grub2/grub.cfg && echo GRUB-OK"
+            echo "切 v2（/etc/default/grub 持久化 + grubby + 重生成 grub.cfg；mkconfig 会覆盖 grubby，必须双写）..."
+            ssh -o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "grep -q systemd.unified_cgroup_hierarchy=1 /etc/default/grub || sed -i 's/^GRUB_CMDLINE_LINUX=\"/GRUB_CMDLINE_LINUX=\"systemd.unified_cgroup_hierarchy=1 /' /etc/default/grub; grep -o 'systemd.unified_cgroup_hierarchy=1' /etc/default/grub | head -1"
+            ssh -o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 && grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1 | tail -1 && grubby --info=DEFAULT 2>/dev/null | grep -q unified_cgroup_hierarchy && echo GRUB-OK"
             echo "发重启..."
             ssh -o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key "root@$H21" "systemctl reboot" || true
             echo "验掉线..."
