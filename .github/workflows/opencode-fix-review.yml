@@ -87,6 +87,21 @@ jobs:
           if [ ! -s /tmp/threads.md ]; then echo "无未解决 threads，退出"; echo "EMPTY=yes" >> "$GITHUB_ENV"; exit 0; fi
           wc -l /tmp/threads.md
 
+      - name: 取 bot 插件/skills（与 review 同一套 agent）
+        if: steps.gate.outputs.skip == 'no' && env.EMPTY != 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/fixbot && mkdir -p /tmp/fixbot
+          git clone --depth 1 --filter=blob:none --sparse "https://x-access-token:$GH_TOKEN@github.com/link-seek/opencode-github-bot.git" /tmp/fixbot
+          git -C /tmp/fixbot sparse-checkout set .opencode
+          mkdir -p .opencode/plugins .opencode/skills .opencode/agents
+          cp -r /tmp/fixbot/.opencode/plugins/* .opencode/plugins/ 2>/dev/null || true
+          cp -r /tmp/fixbot/.opencode/skills/* .opencode/skills/ 2>/dev/null || true
+          cp -r /tmp/fixbot/.opencode/agents/* .opencode/agents/ 2>/dev/null || true
+          rm -rf /tmp/fixbot
+
       - name: 装 opencode 并修
         if: steps.gate.outputs.skip == 'no' && env.EMPTY != 'yes'
         env:
@@ -102,7 +117,7 @@ jobs:
           export PATH="$HOME/.opencode/bin:$PATH"
           PR="${{ steps.cfg.outputs.pr }}"
           THREADS="$(head -c 20000 /tmp/threads.md)"
-          opencode run --model "${MODEL}" "你是 link-seek/infra 仓的 fix-review 机器人。任务：逐条修复 PR #$PR 的未解决 review findings（见下文），推回 PR 分支。
+          opencode run --agent github-bot --model "${MODEL}" "你是 link-seek/infra 仓的 fix-review 机器人。任务：逐条修复 PR #$PR 的未解决 review findings（见下文），推回 PR 分支。
           铁律（违反即失败）：fail-closed，有疑问先停；只改 findings 涉及的文件；绝不合并/关 PR/dismiss review；绝不 destructive（删设备、下发 ACL、部署、转流量、改保护分支）——这类只回 comment 说明等人工；密钥只走 \${VAR}/GitHub Secrets，绝不进日志与聊天；commit 信息前缀 [auto-fix]；改完必须本地验证（yaml.safe_load、py_compile、相关 norm 脚本）；验证不过不许 push。
           findings 如下：
           $THREADS"
