@@ -303,7 +303,7 @@ jobs:
           echo "opencode pod IP（脱敏）: ${OPODIP%.*.*}.x.x"
           S69 "kubectl exec canary-edge-verify -- ping -c2 $OPODIP 2>&1 | tail -2"
           S69 "kubectl exec canary-edge-verify -- wget -q -O- http://$OPODIP:4097/ 2>&1 | head -c 120; echo"
-          S69 'kubectl delete pod canary-edge-verify --wait=false 2>&1 | head -1'
+          S69 'kubectl delete pod canary-edge-verify --wait=false 2>&1 | head -1 || true'
           echo OVERLAY-L7-OK
       - name: 焚毁（跳板钥匙＋runner 身份）
         if: always()
@@ -451,7 +451,7 @@ jobs:
           echo "canary pod IP（脱敏）: ${CPODIP%.*.*}.x.x"
           S69 "kubectl exec canary-edge-self -- ping -c2 $OPODIP 2>&1 | tail -2"
           S69 "kubectl exec canary-edge-self -- wget -q -O- http://$OPODIP:4097/ 2>&1 | head -c 120; echo"
-          S69 'kubectl delete pod canary-edge-self --wait=false 2>&1 | head -1'
+          S69 'kubectl delete pod canary-edge-self --wait=false 2>&1 | head -1 || true'
           echo OVERLAY-L7-OK
       - name: 拆（drain＋delete＋uninstall，本 job 内闭环）
         if: always()
