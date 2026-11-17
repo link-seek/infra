@@ -1,4 +1,5 @@
 name: k3s-join-21
+# DEPRECATED：统一链 k3s-join-edge 落定前保留可跑；runner 进网跑通＋旧链切转调后删除。
 # HW21 以 k3s server 入簇成第 3 节点（etcd quorum 完整）。
 # 前置：HW21 已在 tailnet（mesh-hw-21，tag mesh/prod/hw21），.69 已 cluster-init。
 # 全程直连 tailnet（user 身份，Tailscale SSH accept），无跳板。runner 下载 .69 二进制中转到 .21，保证同版本。
