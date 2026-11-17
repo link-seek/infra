@@ -216,6 +216,13 @@ jobs:
           sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get pods 2>&1 | tail -20; echo ---; kubectl -n $K3S_NS get endpoints 2>&1 | tail -12; echo ---; kubectl -n $K3S_NS logs deploy/erpnext-nginx --tail=30 2>&1 | tail -35; echo ---; kubectl -n $K3S_NS logs deploy/erpnext-gunicorn --tail=30 2>&1 | tail -35" || true
           sudo tailscale ssh root@100.93.119.21             "kubectl get pods -A 2>&1 | grep -aiE 'tailscale|proxy' | head -8; echo ---; kubectl -n $K3S_NS get svc erpnext -o yaml 2>&1 | grep -aE 'expose|hostname|proxy-class|clusterIP:' | head -8; echo ---; kubectl -n $K3S_NS get endpoints erpnext 2>&1" || true
           sudo tailscale ssh root@100.93.119.21             "OPIP=\$(tailscale status 2>/dev/null | awk '/erpnext/{print \$1}'); echo operator-ip=\$OPIP; [ -n \"\$OPIP\" ] && curl -s -o /dev/null -w 'operator-direct:%{http_code}\n' --max-time 20 -H \"Host: $K3S_HOST\" \"http://\$OPIP:8080\$K3S_HEALTH\" || echo operator-direct:unreachable" || true
+      - name: bisect operator直连 (erpnext 常开, 只读不拦门)
+        if: inputs.stack == 'k8s/erpnext'
+        run: |
+          set +e
+          sudo tailscale ssh root@100.93.119.21             "kubectl get pods -A 2>&1 | grep -aiE 'tailscale|proxy' | head -8; echo ---; kubectl -n $K3S_NS get svc erpnext -o yaml 2>&1 | grep -aE 'expose|hostname|proxy-class|clusterIP:' | head -8; echo ---; kubectl -n $K3S_NS get endpoints erpnext 2>&1" || true
+          sudo tailscale ssh root@100.93.119.21             "OPIP=\$(tailscale status 2>/dev/null | awk '/erpnext/{print \$1}'); echo operator-ip=\$OPIP; [ -n \"\$OPIP\" ] && curl -s -o /dev/null -w 'operator-direct:%{http_code}\n' --max-time 20 -H \"Host: $K3S_HOST\" \"http://\$OPIP:8080\$K3S_HEALTH\" || echo operator-direct:unreachable" || true
+          exit 0
       - name: probe tailnet ingress (Caddy视角, fail-closed)
         if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
         run: |
