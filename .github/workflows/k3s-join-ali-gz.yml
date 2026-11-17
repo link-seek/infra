@@ -114,6 +114,15 @@ jobs:
           echo "== k3s 是否已装 =="
           ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
             'command -v k3s >/dev/null && k3s --version | head -1 || echo K3S-NOT-INSTALLED'
+          echo "== k3s-agent 状态 =="
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@${{ inputs.agent_ip }}" \
+            'systemctl is-active k3s-agent 2>/dev/null || echo AGENT-NOT-INSTALLED'
+          echo "== server 可达（ali-gz 视角） =="
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@${{ inputs.agent_ip }}" \
+            'timeout 10 bash -c "echo > /dev/tcp/${{ inputs.server_tail }}/6443" && echo SRV-6443-OPEN || echo SRV-6443-CLOSED; curl -sk -m 10 https://${{ inputs.server_tail }}:6443/version 2>&1 | head -c 200; echo'
+          echo "== agent 日志尾 =="
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@${{ inputs.agent_ip }}" \
+            'journalctl -u k3s-agent --no-pager -n 20 2>/dev/null | tail -20 || echo NO-JOURNAL'
           echo "== token 已就位（只验长度） =="
           [ "$(wc -c < /tmp/ali-join/token)" -gt 20 ] || { echo "FAIL: token 缺失"; exit 1; }
           echo "server k3s: $(cat /tmp/ali-join/ver)"
