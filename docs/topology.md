@@ -7,9 +7,9 @@
 
 | 节点 | LAN / tailnet IP | 系统/版本 | 盘/挂载 | SSH |
 |---|---|---|---|---|
-| mesh-hw-21（hw21） | 192.168.1.21 / 100.100.246.95 | EulerOS 2.0 / k3s v1.37.2+k3s1 / cgroup v2 | vda 150G（/ 3.2G）· vdb 150G ext4 → /data 147G空盘 | tailnet user + CI key＋密码（PROD_SSH_PASSWORD，server-password 链维护）；EIP 121.37.127.187占位待解绑 |
-| mesh-hw-41 | 192.168.1.41 / 100.73.182.4 | EulerOS 2.0 / k3s v1.37.2+k3s1 / cgroup v2 | vda 150G（/ 31G）· vdb 150G vdb1 147G → /data 9.2G已有数据 | tailnet user + CI key＋密码（PROD_SSH_PASSWORD，server-password 链维护） |
-| mesh-hw-69 | 192.168.1.69 / 100.93.119.21 | EulerOS 2.0 / k3s v1.37.2+k3s1 / cgroup v2 | vda 150G（/ 44G）· vdb 150G ext4 → /data 147G空盘已挂 | tailnet user + CI key＋密码（PROD_SSH_PASSWORD，server-password 链维护） |
+| mesh-hw-21（hw21） | 192.168.1.21 / 100.100.246.95 | EulerOS 2.0 / k3s v1.37.2+k3s1 / cgroup v2 | vda 150G（/ 3.2G）· vdb 150G ext4 → /data 147G空盘 | tailnet user + CI key＋密码（PROD_OPENCODE_SERVER_PASSWORD，server-password 链维护）；EIP 121.37.127.187占位待解绑 |
+| mesh-hw-41 | 192.168.1.41 / 100.73.182.4 | EulerOS 2.0 / k3s v1.37.2+k3s1 / cgroup v2 | vda 150G（/ 31G）· vdb 150G vdb1 147G → /data 9.2G已有数据 | tailnet user + CI key＋密码（PROD_OPENCODE_SERVER_PASSWORD，server-password 链维护） |
+| mesh-hw-69 | 192.168.1.69 / 100.93.119.21 | EulerOS 2.0 / k3s v1.37.2+k3s1 / cgroup v2 | vda 150G（/ 44G）· vdb 150G ext4 → /data 147G空盘已挂 | tailnet user + CI key＋密码（PROD_OPENCODE_SERVER_PASSWORD，server-password 链维护） |
 | mesh-ali-gz（120） | 120.77.76.20 / 100.85.128.116 | 公网入口：Caddy 终止 TLS | — | 只走 tailnet（22 公网关闭） |
 | mesh-oci-vpn | 152.70.105.106 / 100.103.182.112 | tailnet 出口节点 | — | — |
 | mesh-xyc-pc | — / 100.69.220.112 | 个人 PC | — | — |
