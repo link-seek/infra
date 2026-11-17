@@ -41,10 +41,10 @@ jobs:
             litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
             opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
             opencode-team) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-team; CONT=opencode; TSHOST=opencode-team;;
-            erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext;;
+            erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext; HOST=erp.xieyucheng.top;;
           *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
           esac
-          { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; } >> "$GITHUB_ENV"
+          { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; echo "K3S_HOST=${HOST:-}"; } >> "$GITHUB_ENV"
           # erpnext 例外：chart secret 名 = fullname（erpnext），不用 -env 后缀（manifest 写死 secretKeyRef name: erpnext）。
           if [ "$APP" = "erpnext" ]; then echo "K3S_SECRET=erpnext" >> "$GITHUB_ENV"; fi
           echo "stack=$APP deploy=$DEPLOY port=$PORT join=$JT"
@@ -201,7 +201,7 @@ jobs:
           sudo tailscale ssh root@100.93.119.21 \
             "set -euo pipefail; \
             # 探针用 python3（网关/browser 镜像里无 curl；opencode-tools 有 python3 实锤）。
-            for ATTEMPT in 1 2 3; do code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>&1); echo \"attempt \$ATTEMPT rc=\$? out=\$code\"; echo \"\$code\" | grep -aqE \"^[0-9]{3}$\" && break || sleep 10; done; code=\$(echo \"\$code\" | grep -aoE \"[0-9]{3}\" | tail -n 1); \
+            for ATTEMPT in 1 2 3; do code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- env K3S_HOST=\"$K3S_HOST\" python3 -c \"import urllib.request,os,sys;h={'Host':os.environ['K3S_HOST']} if os.environ.get('K3S_HOST') else {};print(urllib.request.urlopen(urllib.request.Request(sys.argv[1],headers=h),timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>&1); echo \"attempt \$ATTEMPT rc=\$? out=\$code\"; echo \"\$code\" | grep -aqE \"^[0-9]{3}$\" && break || sleep 10; done; code=\$(echo \"\$code\" | grep -aoE \"[0-9]{3}\" | tail -n 1); \
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
             kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
@@ -212,6 +212,9 @@ jobs:
           sudo tailscale ssh root@100.93.119.21             "kubectl -n flux-system get kustomization 2>&1 | tail -12; echo ---; kubectl -n flux-system get kustomization $K3S_NS -o jsonpath='{.status.conditions}' 2>&1 | head -c 1500; echo; echo ---; kubectl -n $K3S_NS get deploy -o jsonpath='{range .items[*]}{.metadata.name} {.spec.template.spec.nodeSelector} images={range .spec.template.spec.containers[*]}{.image} {end}{\"\n\"}{end}' 2>&1 | head -15; echo ---; kubectl -n $K3S_NS get sts erpnext-mariadb-sts -o jsonpath='sts-template-nodeselector={.spec.template.spec.nodeSelector} updaterev={.status.updateRevision} currentrev={.status.currentRevision} ready={.status.readyReplicas}' 2>&1; echo; echo ---; kubectl -n $K3S_NS describe pod erpnext-mariadb-sts-0 2>&1 | grep -aE 'Status:|Reason:|Message:|Failed|Warning|node' | head -20; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | grep -aiE 'schedul|provision|provisioner|failed|unschedulable|affinity|taint|volume' | tail -15" || true
           sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get sts erpnext-mariadb-sts -o jsonpath='updaterev={.status.updateRevision} currentrev={.status.currentRevision} observedgen={.status.observedGeneration} gen={.metadata.generation} strategy={.spec.updateStrategy} replicas={.status.replicas}' 2>&1; echo; echo ---; journalctl -u k3s --since '30 min ago' 2>/dev/null | grep -aiE 'statefulset|erpnext-mariadb' | tail -15; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | tail -25" || true
           sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get job 2>&1 | tail -8; echo ---; kubectl -n $K3S_NS logs job/erpnext-conf-bench-r3 --all-containers=true --tail=30 2>&1 | tail -35; echo ---; kubectl -n $K3S_NS logs deploy/erpnext-socketio --tail=20 2>&1 | tail -23; echo ---; kubectl -n $K3S_NS get pods 2>&1 | tail -20" || true
+          sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get endpoints 2>&1 | tail -12" || true
+          # runner 视角：operator 发布的 MagicDNS 能否解析（与 Caddy dynamic resolver 同源；runner --accept-dns=false 故直连 100.100.100.100 查）
+          nslookup "$K3S_TSHOST.mackarel-polaris.ts.net" 100.100.100.100 2>&1 | tail -8 || true
       - name: probe tailnet ingress (Caddy视角, fail-closed)
         if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
         run: |
