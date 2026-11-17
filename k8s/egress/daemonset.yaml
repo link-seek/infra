@@ -1,7 +1,7 @@
 # SNI 出海中转（hostNetwork DaemonSet，钉边缘节点）。
 # 为什么不用普通 Deployment：edge agent 的 pod 网络是断的（flannel 到不了 edge）；
 # hostNetwork 绕开 flannel，直走宿主机出海（东京 IP）。TLS 端到端透传，不解密。
-# 未来阿里节点：同一 DaemonSet 用 nodeAffinity 再加 selector 即可横向扩展。
+# 调度按 dedicated=edge label 走：vm-proxy / mesh-ali-gz 及未来 edge agent 自动覆盖，不再逐机写 hostname。
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -20,8 +20,14 @@ spec:
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
-      nodeSelector:
-        kubernetes.io/hostname: vm-proxy
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: dedicated
+                    operator: In
+                    values: [edge]
       tolerations:
         - key: dedicated
           operator: Equal

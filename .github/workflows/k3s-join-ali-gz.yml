@@ -1,0 +1,131 @@
+name: k3s-join-ali-gz
+# mesh-ali-gz（阿里广州 120.77.76.20 / 100.85.128.116，公网入口机）以 tainted agent 入簇。
+# dedicated=edge，只跑 SNI 出海中继；Caddy 生产入口不动。
+# 前置：ali-gz 已在 tailnet；runner 以 tag:admin 进网（ali-gz 无 user grants，需手动 dispatch＋全程盯）。
+# 流程：recon（默认，只读：ali-gz OS/cgroup/arch/14443/Caddy/k3s 有无＋server token 可达）
+#   → mode=join：装 k3s agent（版本跟 server 对齐，flannel 走 tailscale0，taint edge）
+#   → 金丝雀验跨节点 → logout 焚毁。
+# SNI 横扩见 k8s/egress/daemonset.yaml（edge label 亲和，vm-proxy/ali-gz 通吃；生效需另 dispatch k3s-egress deploy）。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "recon=只读巡检（默认）；join=装 agent 入簇"
+        required: false
+        default: "recon"
+        type: choice
+        options: [recon, join]
+      server_tail:
+        description: "取 token 的 server tailnet IP（默认 .69）"
+        required: false
+        default: "100.93.119.21"
+      agent_ip:
+        description: "ali-gz tailnet IP（默认 100.85.128.116）"
+        required: false
+        default: "100.85.128.116"
+
+concurrency:
+  group: k3s-join-ali-gz
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: runner 进 tailnet（admin 身份）
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:admin"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: admin key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-joinali-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          for T in "${{ inputs.agent_ip }}" "${{ inputs.server_tail }}"; do
+            OK=0
+            for i in $(seq 1 12); do
+              if sudo tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); peers=d.get("Peer") or {}; flat=[ip for p in peers.values() for ip in (p.get("TailscaleIPs") or [])]; sys.exit(0 if sys.argv[1] in flat else 1)' "$T"; then OK=1; break; fi
+              sleep 15
+            done
+            [ "$OK" = 1 ] || { echo "FAIL: $T 不在 netmap"; exit 1; }
+            timeout 90 sudo tailscale ping --timeout=30s --c=2 "$T" || { echo "FAIL: $T ping 不通"; exit 1; }
+          done
+          echo NETMAP-OK
+
+      - name: recon（只读，不碰线上）
+        env:
+          SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          A="${{ inputs.agent_ip }}"
+          S="${{ inputs.server_tail }}"
+          echo "== ali-gz 基本面 =="
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$A" \
+            'hostname; cat /etc/os-release 2>/dev/null | head -2; uname -m; free -g | head -2; df -h / | tail -1; if test -f /sys/fs/cgroup/cgroup.controllers; then echo CGROUPV2; else echo CGROUPV1; fi'
+          echo "== 14443/关键端口占用 =="
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
+            'ss -ltnp 2>/dev/null | grep -E ":(14443|10250|6443) " || echo PORTS-FREE; systemctl is-active caddy 2>/dev/null || echo CADDY-UNKNOWN'
+          echo "== k3s 是否已装 =="
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
+            'command -v k3s >/dev/null && k3s --version | head -1 || echo K3S-NOT-INSTALLED'
+          echo "== server 端版本 + token 可达 =="
+          sudo tailscale ssh "root@$S" 'k3s --version | head -1'
+          sudo tailscale ssh "root@$S" 'test -s /var/lib/rancher/k3s/server/node-token && echo TOKEN-READABLE || echo TOKEN-FAIL'
+          echo RECON-OK
+
+      - name: join（仅 mode=join）
+        if: inputs.mode == 'join'
+        env:
+          SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          A="${{ inputs.agent_ip }}"
+          S="${{ inputs.server_tail }}"
+          VER="$(sudo tailscale ssh "root@$S" 'k3s --version | head -1 | awk "{print \$3}"')"
+          [ -n "$VER" ] || { echo "FAIL: 取不到 server 版本"; exit 1; }
+          echo "server k3s: $VER"
+          TOKEN="$(sudo tailscale ssh "root@$S" 'cat /var/lib/rancher/k3s/server/node-token')"
+          [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
+            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://$S:6443 --token \"$TOKEN\" --node-ip $A --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -"
+          echo "== 等 agent Ready =="
+          for i in $(seq 1 24); do
+            sleep 15
+            NODES="$(sudo tailscale ssh "root@$S" 'kubectl get nodes --no-headers 2>/dev/null' | wc -l)"
+            READY="$(sudo tailscale ssh "root@$S" 'kubectl get nodes --no-headers 2>/dev/null' | grep -c ' Ready' || true)"
+            echo "nodes=$NODES ready=$READY ($i/24)"
+            [ "$READY" -ge 5 ] && [ "$NODES" -ge 5 ] && break
+            [ "$i" = 24 ] && { echo "FAIL: ali-gz 未入簇"; sudo tailscale ssh "root@$S" 'kubectl get nodes -o wide'; exit 1; }
+          done
+          sudo tailscale ssh "root@$S" 'kubectl get nodes -o wide'
+          echo "== 金丝雀：edge 上起 busybox，双向打 overlay + L7 =="
+          sudo tailscale ssh "root@$S" "kubectl run canary-edge-ali --image=busybox:1.36 --overrides='{\"spec\":{\"nodeSelector\":{\"dedicated\":\"edge\"},\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}]}}' -- sleep 3600 2>&1 | head -2"
+          sudo tailscale ssh "root@$S" "kubectl wait --for=condition=Ready pod/canary-edge-ali --timeout=180s 2>&1 | tail -1"
+          OPODIP=$(sudo tailscale ssh "root@$S" "kubectl get pod -n opencode -o jsonpath='{.items[0].status.podIP}'")
+          echo "opencode pod IP（脱敏）: ${OPODIP%.*.*}.x.x"
+          sudo tailscale ssh "root@$S" "kubectl exec canary-edge-ali -- ping -c2 $OPODIP 2>&1 | tail -2"
+          sudo tailscale ssh "root@$S" "kubectl exec canary-edge-ali -- wget -q -O- http://$OPODIP:4097/ 2>&1 | head -c 120; echo"
+          sudo tailscale ssh "root@$S" 'kubectl delete pod canary-edge-ali --wait=false 2>&1 | head -1'
+          shred -u ~/.ssh/ci_key || true
+          echo ALI-JOIN-OK
+
+      - name: 退出 tailnet（焚毁节点）
+        if: always()
+        run: sudo tailscale logout || true
