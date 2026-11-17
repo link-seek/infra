@@ -95,7 +95,7 @@ on:
     secrets:
       TS_API_KEY:
         required: false
-      SSH_KEY:
+      CADDY_SSH_KEY:
         required: false
       SWR_LOGIN_USER:
         required: false
@@ -175,7 +175,7 @@ jobs:
     timeout-minutes: 20
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
-      SSH_KEY: ${{ secrets.SSH_KEY }}
+      SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: 进网（单 user 身份）＋递钥匙到跳板
@@ -225,7 +225,7 @@ jobs:
     timeout-minutes: 40
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
-      SSH_KEY: ${{ secrets.SSH_KEY }}
+      SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
       SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
       SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
     steps:
@@ -318,7 +318,7 @@ jobs:
     timeout-minutes: 20
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
-      SSH_KEY: ${{ secrets.SSH_KEY }}
+      SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: 二次确认＋进网
