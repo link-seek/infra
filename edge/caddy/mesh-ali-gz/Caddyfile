@@ -118,3 +118,25 @@ litellm.linkseek.net.cn {
 		output file /var/log/caddy/litellm.log
 	}
 }
+
+# ERPNext trial（单后端 ha-b 钉 .69；稳定后再议 ha）。
+# 后端 = k8s erpnext Service 经 tailscale operator 暴露（hostname erpnext，proxy-class ha-b，端口 8080）。
+# 主动健康检查不上：frappe 无站点时 / 与 /api/method/ping 均非 200（404），会被误摘；
+# 只用被动熔断（fail_duration/max_fails，与 opencode.yingxin 块同 pattern）。
+# 回滚=删本段（DNS 另清）；首登需 admin 密码（Secret erpnext，不进仓）。
+erp.xieyucheng.top {
+	reverse_proxy {
+		dynamic a {
+			name erpnext.mackarel-polaris.ts.net.
+			port 8080
+			refresh 5s
+			resolvers 100.100.100.100
+		}
+		fail_duration 30s
+		max_fails 2
+		lb_try_duration 5s
+	}
+	log {
+		output file /var/log/caddy/erp.log
+	}
+}
