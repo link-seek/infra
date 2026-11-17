@@ -12,7 +12,7 @@ on:
         required: false
         default: "report"
         type: choice
-        options: [report, mount-data]
+        options: [report, mount-data, data-prep]
       runner_tag:
         description: "runner 进网身份"
         required: false
