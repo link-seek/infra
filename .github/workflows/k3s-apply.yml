@@ -41,10 +41,10 @@ jobs:
             litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
             opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
             opencode-team) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-team; CONT=opencode; TSHOST=opencode-team;;
-            erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext;;
+            erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext; HOST=erp.xieyucheng.top;;
           *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
           esac
-          { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; } >> "$GITHUB_ENV"
+          { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; echo "K3S_HOST=${HOST:-}"; } >> "$GITHUB_ENV"
           # erpnext 例外：chart secret 名 = fullname（erpnext），不用 -env 后缀（manifest 写死 secretKeyRef name: erpnext）。
           if [ "$APP" = "erpnext" ]; then echo "K3S_SECRET=erpnext" >> "$GITHUB_ENV"; fi
           echo "stack=$APP deploy=$DEPLOY port=$PORT join=$JT"
@@ -201,7 +201,7 @@ jobs:
           sudo tailscale ssh root@100.93.119.21 \
             "set -euo pipefail; \
             # 探针用 python3（网关/browser 镜像里无 curl；opencode-tools 有 python3 实锤）。
-            for ATTEMPT in 1 2 3; do code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- python3 -c \"import urllib.request,sys;print(urllib.request.urlopen(sys.argv[1],timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>&1); echo \"attempt \$ATTEMPT rc=\$? out=\$code\"; echo \"\$code\" | grep -aqE \"^[0-9]{3}$\" && break || sleep 10; done; code=\$(echo \"\$code\" | grep -aoE \"[0-9]{3}\" | tail -n 1); \
+            for ATTEMPT in 1 2 3; do code=\$(kubectl -n $K3S_NS exec deploy/$K3S_DEPLOY -c $K3S_CONTAINER -- env K3S_HOST=\"$K3S_HOST\" python3 -c \"import urllib.request,os,sys;h={'Host':os.environ['K3S_HOST']} if os.environ.get('K3S_HOST') else {};print(urllib.request.urlopen(urllib.request.Request(sys.argv[1],headers=h),timeout=15).getcode())\" \"http://127.0.0.1:$K3S_PORT$K3S_HEALTH\" 2>&1); echo \"attempt \$ATTEMPT rc=\$? out=\$code\"; echo \"\$code\" | grep -aqE \"^[0-9]{3}$\" && break || sleep 10; done; code=\$(echo \"\$code\" | grep -aoE \"[0-9]{3}\" | tail -n 1); \
             [ \"\$code\" = \"200\" ] || { echo \"FAIL: app http=\$code\"; exit 1; }; \
             kubectl -n $K3S_NS wait --for=condition=Ready pod -l app=$K3S_LABEL --timeout=180s"
           echo V-SERVING
