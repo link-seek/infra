@@ -1,0 +1,56 @@
+name: ali-verify
+# 阿里云只读连通验证（ALI_AK/ALI_SK 组织 secrets，ALL 可见）。
+# manual dispatch only（非 HW：admin 手动点火＋全程盯，禁自动触发）。
+# 全程 ephemeral runner，不落任何常驻节点；只读 Describe*，不做任何变更。
+# 真值掩码，不进日志；fail-closed：空/失败即红。
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "RegionId（默认 cn-hangzhou）"
+        required: false
+        default: "cn-hangzhou"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ali-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ALI_AK: ${{ secrets.ALI_AK }}
+      ALI_SK: ${{ secrets.ALI_SK }}
+    steps:
+      - name: 装 aliyun cli（ephemeral runner 临时用）
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/aliyun.tgz https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+          tar xzf /tmp/aliyun.tgz -C /tmp && sudo mv /tmp/aliyun /usr/local/bin/ && rm -f /tmp/aliyun.tgz
+          aliyun --version
+      - name: 只读验连通（DescribeInstances）
+        run: |
+          set -euo pipefail
+          [ -n "${ALI_AK:-}" ] || { echo "FAIL: ALI_AK 未配"; exit 1; }
+          [ -n "${ALI_SK:-}" ] || { echo "FAIL: ALI_SK 未配"; exit 1; }
+          echo "::add-mask::$ALI_AK"
+          echo "::add-mask::$ALI_SK"
+          aliyun configure set --profile akProfile --mode AK \
+            --region "${{ inputs.region }}" \
+            --access-key-id "$ALI_AK" --access-key-secret "$ALI_SK" >/dev/null
+          aliyun ecs DescribeInstances --profile akProfile \
+            --RegionId "${{ inputs.region }}" --PageSize 50 \
+            | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          insts = (d.get('Instances') or {}).get('Instance') or []
+          print(f\"region=${{ inputs.region }} count={len(insts)}\")
+          for i in insts:
+              print(i.get('InstanceId'), '|', i.get('InstanceName'), '|', i.get('Status'))
+          "
+          echo ALI-VERIFY-OK

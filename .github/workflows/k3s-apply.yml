@@ -71,11 +71,9 @@ jobs:
           S_AK: ${{ secrets.PROD_HCLOUD_AK }}
           S_SK: ${{ secrets.PROD_HCLOUD_SK }}
           S_SMTP: ${{ secrets.PROD_SMTP_PASS }}
-          S_OU: ${{ secrets.OCI_USER_OCID }}
-          S_OFP: ${{ secrets.OCI_FINGERPRINT }}
-          S_OT: ${{ secrets.OCI_TENANCY_OCID }}
-          S_OR: ${{ secrets.OCI_REGION }}
           S_OK: ${{ secrets.OCI_API_PRIVATE_KEY }}
+          S_ALI_AK: ${{ secrets.ALI_AK }}
+          S_ALI_SK: ${{ secrets.ALI_SK }}
         run: |
           set -euo pipefail
           if [ "$K3S_NS" = "litellm" ]; then
@@ -111,15 +109,20 @@ jobs:
           if [ "$K3S_NS" = "opencode-team" ]; then
             echo "BROWSERLESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(24))')" >> /tmp/opencode-env.txt
           fi
-          if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
-            # OCI 身份（pilot 专用；PEM 多行走 --from-file，不进 env-file）
-            for v in S_OU S_OFP S_OT S_OR S_OK; do
-              [ -n "${!v:-}" ] || { echo "FAIL: $v missing (OCI identity)"; exit 1; }
+          if [ "$K3S_NS" = "opencode" ]; then
+            # 阿里云身份（yingxin 生产专用；单行键，env-file 直装；CLI 读原生 env 名）
+            for v in S_ALI_AK S_ALI_SK; do
+              [ -n "${!v:-}" ] || { echo "FAIL: $v missing (ALI identity)"; exit 1; }
             done
             {
-              echo "OCI_CLI_USER=$S_OU"; echo "OCI_CLI_FINGERPRINT=$S_OFP"
-              echo "OCI_CLI_TENANCY=$S_OT"; echo "OCI_CLI_REGION=$S_OR"
+              echo "ALIBABACLOUD_ACCESS_KEY_ID=$S_ALI_AK"
+              echo "ALIBABACLOUD_ACCESS_KEY_SECRET=$S_ALI_SK"
             } >> /tmp/opencode-env.txt
+            echo "ali identity staged (opencode only)"
+          fi
+          if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
+            # OCI 身份（pilot 专用；PEM 多行走 --from-file，不进 env-file）
+            [ -n "${S_OK:-}" ] || { echo "FAIL: S_OK missing (OCI private key)"; exit 1; }
             printf '%s' "$S_OK" > /tmp/oci-key.pem && chmod 600 /tmp/oci-key.pem
             echo "oci identity staged (xieyucheng only)"
           fi
