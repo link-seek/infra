@@ -150,9 +150,10 @@ jobs:
           import subprocess, sys
           blob = open('/tmp/edge-scripts.txt').read()
           # 仅验本链：含 inputs./secrets. 引用的段在 runner 上做语法检查需占位替换
+          # （注：此处刻意拼接，文件中不得出现美元加大括号连续体，否则 workflow 解析失败）
           n = 0
           for i, seg in enumerate(blob.split('\n---SCRIPT---\n')):
-              seg = seg.replace('${{', '$__').replace('}}', '__')
+              seg = seg.replace('$' + '{{', '$__').replace('}}', '__')
               p = f'/tmp/edge-seg-{i}.sh'
               open(p, 'w').write('set -euo pipefail\n' + seg)
               r = subprocess.run(['bash', '-n', p], capture_output=True, text=True)
