@@ -223,6 +223,7 @@ jobs:
           sudo tailscale ssh root@100.93.119.21             "kubectl get pods -A 2>&1 | grep -aiE 'tailscale|proxy' | head -8; echo ---; kubectl -n $K3S_NS get svc erpnext -o yaml 2>&1 | grep -aE 'expose|hostname|proxy-class|clusterIP:' | head -8; echo ---; kubectl -n $K3S_NS get endpoints erpnext 2>&1" || true
           sudo tailscale ssh root@100.93.119.21             "tailscale status 2>/dev/null | grep -ai erpnext | head -8; echo ---; OPIP=\$(tailscale status 2>/dev/null | awk '/erpnext/{print \$1; exit}'); echo operator-ip=\$OPIP; tailscale ping --timeout=10s --c=1 \$OPIP 2>&1 | tail -2" || true
           sudo tailscale ssh root@100.93.119.21             "OPIP=\$(tailscale status 2>/dev/null | awk '/erpnext/{print \$1; exit}'); for P in 80 443 8080; do printf \"port-\$P:\"; curl -s -o /dev/null -w '%{http_code}\n' --max-time 10 -H \"Host: $K3S_HOST\" \"http://\$OPIP:\$P\$K3S_HEALTH\"; done" || true
+          sudo tailscale ssh root@100.93.119.21             "kubectl -n tailscale logs statefulset/ts-erpnext-h7m2t --tail=30 2>&1 | tail -35; echo ---; kubectl get proxyclass ha-b -o yaml 2>&1 | head -30" || true
           exit 0
       - name: probe tailnet ingress (Caddy视角, fail-closed)
         if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
