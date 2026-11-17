@@ -1,0 +1,76 @@
+name: tmpfix-access
+# 临时密码账号（agent 直连定位用）：action=create 建/轮换，delete 删账号。
+# 背景：纯 key 链下 agent 无法直连，定位全靠转述太慢；保留密码口子（此前设计关闭，现重开）。
+# 密码走 secret TMPFIX_PASS（>=20 位、不含冒号，web 手工设）；root key（PROD_SSH_KEY）不动。
+# 用完即删：action=delete。
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "create=建/轮换tmpfix；delete=删账号"
+        required: false
+        default: "create"
+        type: choice
+        options: [create, delete]
+      username:
+        description: "临时账号名"
+        required: false
+        default: "tmpfix"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tmpfix-access
+  cancel-in-progress: false
+
+jobs:
+  access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: runner 进 tailnet（user 身份）
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: CI key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-tmpfix-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --self | head -2
+
+      - name: 开/删临时账号（三机）
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          FIX_PASS: ${{ secrets.TMPFIX_PASS }}
+        run: |
+          set -euo pipefail
+          U="${{ inputs.username }}"; [ -n "$U" ] || U="tmpfix"
+          case "$U" in root|ubuntu|admin) echo "FAIL: 账号名太危险"; exit 1;; esac
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          COPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/ci_key"
+          if [ "${{ inputs.action }}" = "delete" ]; then
+            for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
+              echo "===== del $U @ $H ====="
+              ssh $COPT "root@$H" "userdel -r $U 2>/dev/null || true; rm -f /etc/sudoers.d/$U; echo DELETED-\$(hostname)" || echo "$H FAIL"
+            done
+          else
+            P="$(printf '%s' "${FIX_PASS:-}" | tr -d '\r\n')"
+            [ "${#P}" -ge 20 ] || { echo "FAIL: TMPFIX_PASS 未设或太短（>=20位）"; exit 1; }
+            case "$P" in *:*) echo "FAIL: 密码不能含冒号"; exit 1;; esac
+            printf '%s' "$P" > /tmp/fixpass && chmod 600 /tmp/fixpass
+            for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
+              echo "===== create $U @ $H ====="
+              scp $COPT /tmp/fixpass "root@$H:/tmp/fixpass" || { echo "$H SCP-FAIL"; continue; }
+              ssh $COPT "root@$H" 'set -euo pipefail; U="'"$U"'"; id "$U" >/dev/null 2>&1 || useradd -m -s /bin/bash "$U"; printf "%s:%s\n" "$U" "$(cat /tmp/fixpass)" | chpasswd; echo "$U ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$U"; chmod 440 "/etc/sudoers.d/$U"; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || { sed -i "s/^#\?PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication" /etc/ssh/sshd_config || echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config; }; (systemctl reload sshd || service ssh reload) >/dev/null 2>&1; shred -u /tmp/fixpass; echo CREATED-$(hostname)'
+            done
+            shred -u /tmp/fixpass ~/.ssh/ci_key
+          fi
