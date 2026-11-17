@@ -144,11 +144,12 @@ jobs:
           echo "== 等 agent Ready（ali-gz 本机 k3s kubectl 视角） =="
           for i in $(seq 1 24); do
             sleep 15
-            STAT="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null' | awk '{print $2}' | sort | uniq -c)"
+            STAT="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null' | awk '{print $2}' | sort | uniq -c || true)"
             echo "$STAT ($i/24)"
-            NODES="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null' | wc -l)"
-            READY="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null' | grep -c ' Ready' || true)"
-            [ "$NODES" -ge 5 ] && [ "$READY" -ge 5 ] && break
+            NODES="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null'  2>/dev/null | wc -l || true)"
+            READY="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null' 2>/dev/null | grep -c ' Ready' || true)"
+            echo "nodes=${NODES:-0} ready=${READY:-0} ($i/24)"
+            [ "${NODES:-0}" -ge 5 ] && [ "${READY:-0}" -ge 5 ] && break
             [ "$i" = 24 ] && { echo "FAIL: ali-gz 未入簇"; ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes -o wide'; exit 1; }
           done
           ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes -o wide'
