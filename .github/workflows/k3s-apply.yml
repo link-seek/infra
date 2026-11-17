@@ -19,7 +19,7 @@ on:
       stack:
         description: "k8s/<stack> 目录"
         required: false
-        default: "k8s/opencode"
+        default: "k8s/opencode-yingxin"
       action:
         description: "apply trial | verify | rollback | secret-only（只建 ns+swr-pull+env Secret，不碰 manifest，Flux 侧用）"
         required: false
@@ -40,6 +40,7 @@ jobs:
           case "$APP" in
             litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
             opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
+            opencode-yingxin) DEPLOY=opencode-yingxin; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-yingxin; CONT=opencode; TSHOST=opencode-k3s;;
             opencode-team) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-team; CONT=opencode; TSHOST=opencode-team;;
             erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext; HOST=erp.xieyucheng.top;;
           *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
