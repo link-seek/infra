@@ -1,4 +1,5 @@
 name: k3s-join-41
+# DEPRECATED：统一链 k3s-join-edge 落定前保留可跑；runner 进网跑通＋旧链切转调后删除。
 # 41 以 k3s server 入簇（同 VPC，etcd 高可用第一步）。
 # 顺序（任一步失败即停）：
 #  1) 41 切 cgroupv2（grub + reboot + 验）。

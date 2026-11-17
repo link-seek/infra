@@ -1,4 +1,5 @@
 name: k3s-join-oci-proxy
+# DEPRECATED：统一链 k3s-join-edge 落定前保留可跑；runner 进网跑通＋旧链切转调后删除。
 # OCI vm-proxy 以 tainted agent 入簇（dedicated=edge，只跑边缘验证；vpn 生产节点不动）。
 # 前置：proxy:22 已对 HW21 放行（临时 SG 规则，用完删）；key 从 OBS robotwin-assets 现取，不进 GH。
 # 流程：HW21 取 key → proxy 装 tailscale 入网 → 装 k3s agent（pin v1.37.2，经 tailnet 指 server）→ taint → 金丝雀 pod 验跨节点 → 清理。

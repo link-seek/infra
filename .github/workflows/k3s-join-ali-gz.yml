@@ -1,4 +1,5 @@
 name: k3s-join-ali-gz
+# DEPRECATED：统一链 k3s-join-edge 落定前保留可跑；runner 进网跑通＋旧链切转调后删除。
 # mesh-ali-gz（阿里广州，公网入口机）以 tainted agent 入簇（v2）。
 # dedicated=edge，只跑 SNI 出海中继；Caddy 生产入口不动。
 # 单身份单跳板：runner 只以 tag:user 进 tailnet，一切经 .69 办
