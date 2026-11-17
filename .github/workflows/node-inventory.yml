@@ -102,5 +102,5 @@ jobs:
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
           H=100.73.182.4
           echo "===== sync $H ====="
-          ssh $SOPT "root@$H" 'set -euo pipefail; for d in work data; do SRC="/var/lib/opencode-xieyucheng/$d/"; DST="/data/opencode-xieyucheng/$d/"; if [ -d "$SRC" ]; then rsync -a --info=stats2 "$SRC" "$DST" | tail -3; else echo "SKIP-$d"; fi; done; du -sh /var/lib/opencode-xieyucheng /data/opencode-xieyucheng; echo SYNC-OK' || echo "$H SYNC-FAIL"
+          ssh $SOPT "root@$H" 'set -euo pipefail; for d in work data; do SRC="/var/lib/opencode-xieyucheng/$d/"; DST="/data/opencode-xieyucheng/$d/"; if [ -d "$SRC" ]; then rsync -a --info=stats2 "$SRC" "$DST" | tail -3; rc=${PIPESTATUS[0]}; if [ $rc -ne 0 ] && [ $rc -ne 24 ]; then echo "RSYNC-FAIL-$d rc=$rc"; exit 1; elif [ $rc -eq 24 ]; then echo "RSYNC-24-vanished-ok-$d"; fi; else echo "SKIP-$d"; fi; done; du -sh /var/lib/opencode-xieyucheng /data/opencode-xieyucheng; echo SYNC-OK' || echo "$H SYNC-FAIL"
           shred -u ~/.ssh/ci_key
