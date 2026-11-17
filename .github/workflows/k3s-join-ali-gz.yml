@@ -126,6 +126,21 @@ jobs:
           shred -u ~/.ssh/ci_key || true
           echo ALI-JOIN-OK
 
+      - name: 入口回验（仅 mode=join，只读打流量）
+        if: inputs.mode == 'join'
+        run: |
+          set -euo pipefail
+          # ali-gz 是现网入口：join 后确认两域名仍 200，否则即红（回滚见 PR）。
+          for i in $(seq 1 10); do
+            A=$(curl -s -m 15 -o /dev/null -w '%{http_code}' https://opencode.xieyucheng.top/ || true)
+            B=$(curl -s -m 15 -o /dev/null -w '%{http_code}' https://opencode.yingxin.net.cn/ || true)
+            echo "try$i xieyucheng=$A yingxin=$B"
+            [ "$A" = 200 ] && [ "$B" = 200 ] && break
+            sleep 30
+            [ "$i" = 10 ] && { echo "FAIL: 入口回验不通"; exit 1; }
+          done
+          echo INGRESS-OK
+
       - name: 退出 tailnet（焚毁节点）
         if: always()
         run: sudo tailscale logout || true
