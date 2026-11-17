@@ -77,3 +77,17 @@ jobs:
           done
           [ "$FAIL" = 0 ] || { echo "FAIL: 有主机挂载失败"; exit 1; }
           shred -u ~/.ssh/ci_key
+      - name: 半搬前置建目录+du（仅 data-prep）
+        if: inputs.mode == 'data-prep'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
+            echo "===== prep $H ====="
+            ssh $SOPT "root@$H" 'echo ---DU-WORK---; du -sh /var/lib/opencode-* 2>/dev/null || echo NO-WORK; echo ---DU-DOCKER---; du -sh /data/docker 2>/dev/null || echo NO-DOCKER; mkdir -p /data/opencode-xieyucheng/work /data/opencode-xieyucheng/data; ls -la /data/ | head -10; ls -la /data/opencode-xieyucheng/; echo PREP-OK' || echo "$H PREP-FAIL"
+          done
+          shred -u ~/.ssh/ci_key
