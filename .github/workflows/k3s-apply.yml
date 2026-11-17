@@ -204,7 +204,7 @@ jobs:
         if: failure() && (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify')
         run: |
           set -euo pipefail
-          sudo tailscale ssh root@100.93.119.21             "kubectl -n $K3S_NS get deploy,pods,pvc 2>&1 | tail -12; echo ---; kubectl -n $K3S_NS describe pods 2>&1 | grep -aE 'Name:|Image:|Status:|Reason:|Message:|Failed|Error|Warning' | head -30; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | tail -8; echo ---; kubectl -n $K3S_NS logs deploy/$K3S_DEPLOY -c $K3S_CONTAINER --tail=30 2>&1 | tail -30" || true
+          sudo tailscale ssh root@100.93.119.21             "kubectl -n flux-system get kustomization 2>&1 | tail -12; echo ---; kubectl -n flux-system get kustomization $K3S_NS -o jsonpath='{.status.conditions}' 2>&1 | head -c 1500; echo; echo ---; kubectl -n $K3S_NS get deploy -o jsonpath='{range .items[*]}{.metadata.name} {.spec.template.spec.nodeSelector} images={range .spec.template.spec.containers[*]}{.image} {end}{\"\n\"}{end}' 2>&1 | head -15; echo ---; kubectl -n $K3S_NS get deploy,pods,pvc 2>&1 | tail -12; echo ---; kubectl -n $K3S_NS describe pods 2>&1 | grep -aE 'Name:|Image:|Status:|Reason:|Message:|Failed|Error|Warning' | head -30; echo ---; kubectl -n $K3S_NS get events --sort-by=.lastTimestamp 2>&1 | tail -8; echo ---; kubectl -n $K3S_NS logs deploy/$K3S_DEPLOY -c $K3S_CONTAINER --tail=30 2>&1 | tail -30" || true
       - name: probe tailnet ingress (Caddy视角, fail-closed)
         if: (inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify') && startsWith(inputs.stack, 'k8s/opencode')
         run: |
