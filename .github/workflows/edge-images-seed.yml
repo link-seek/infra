@@ -30,19 +30,20 @@ jobs:
           echo "::add-mask::$SWR_LOGIN_PASS"
           REG="swr.cn-north-9.myhuaweicloud.com/link-seek"
           echo "$SWR_LOGIN_PASS" | docker login "$REG" -u "$SWR_LOGIN_USER" --password-stdin
-          seed() { # $1=上游 $2=SWR目标 $3=期望digest(可空)
+          seed() { # $1=上游 $2=SWR目标(名:tag，digest 引用不能做 tag 目标) $3=期望digest(可空)
             echo "== $1 -> $2 =="
             docker pull "$1"
-            GOT="$(docker inspect "$1" --format='{{.Id}}' | sed 's/^sha256://')"
-            if [ -n "${3:-}" ] && [ "$GOT" != "$3" ]; then
-              echo "FAIL: digest 不符 want=$3 got=$GOT"; exit 1
+            GOT="$(docker inspect "$1" --format='{{.RepoDigests}}')"
+            echo "repoDigests=$GOT"
+            if [ -n "${3:-}" ]; then
+              echo "$GOT" | grep -q "$3" || { echo "FAIL: digest 不符 want=$3"; exit 1; }
             fi
             docker tag "$1" "$2"
             docker push "$2"
-            echo "OK $2 @sha256:$GOT"
+            echo "OK $2 (manifest digest 不变，DS 仍按 digest 引用)"
           }
           seed "docker.io/rancher/mirrored-pause:3.10.2" "$REG/edge-pause:3.10.2" ""
           seed "docker.io/library/busybox:1.36" "$REG/edge-busybox:1.36" ""
-          seed "docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7" "$REG/edge-nginx-relay@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7" "bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7"
+          seed "docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7" "$REG/edge-nginx-relay:bb8f722b" "bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7"
           docker logout "$REG" || true
           echo SEED-OK
