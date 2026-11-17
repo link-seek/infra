@@ -24,6 +24,14 @@ on:
         description: "ali-gz tailnet IP（默认 100.85.128.116）"
         required: false
         default: "100.85.128.116"
+      k3s_bin_url:
+        description: "k3s 二进制国内中转 URL（url2hc download-to-obs 预签名，7天有效，过期重转）"
+        required: false
+        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/k3s?Expires=1795504324&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=az4IutRXGVzhonWH8vfNMUgtTds%3D"
+      k3s_sha_url:
+        description: "k3s sha256 国内中转 URL（同上）"
+        required: false
+        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/sha256sum-amd64.txt?Expires=1795504328&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=hs0Y3DheEzxIHYUWVzT4lqdv2fk%3D"
 
 concurrency:
   group: k3s-join-ali-gz
@@ -125,8 +133,12 @@ jobs:
           TOKEN="$(cat /tmp/ali-join/token)"
           [ -n "$VER" ] && [ -n "$TOKEN" ] || { echo "FAIL: token 缺失"; exit 1; }
           echo "::add-mask::$TOKEN"
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
-            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://$S:6443 --token \"$TOKEN\" --node-ip $A --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -"
+          # 二进制走国内 OBS 中转（广州直下 github 40 分钟下不完，见 run 44031463978），get.k3s.io 脚本小、直取可走。
+          # 超时门 900s：卡住即红，不耗满 40 分钟 job 超时。
+          timeout 900 ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
+            "mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin"
+          timeout 900 ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
+            "curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://$S:6443 --token \"$TOKEN\" --node-ip $A --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -"
           unset TOKEN
           shred -u /tmp/ali-join/token || true
           echo "== 等 agent Ready（ali-gz 本机 k3s kubectl 视角） =="
