@@ -8,7 +8,7 @@ name: ts-acl-apply
 #   - mode=apply      覆盖控制台 ACL（必须 confirm=yes）；推完立刻读回逐字段比对。
 #   - mode=tag-device 改单台设备的 tag 集合（必须 confirm=yes；覆盖式，要写全）。
 #   - mode=delete-device 按 tailnet IP 删离线旧条目（必须 confirm=yes；只删离线且唯一匹配）。
-#   - mode=approve-routes 批准 subnet 路由（必须 confirm=yes；默认 192.168.1.0/24）：列出已广播/已批准，批准后读回核对。
+#   - mode=approve-routes 给设备批准 subnet 路由（必须 confirm=yes；device=广播机器，routes 默认 192.168.1.0/24）：读回核对。
 # 手动触发，不挂任何自动事件。逻辑都在 tailscale/ts-acl.py（可在本地直接跑）。
 
 on:
@@ -116,15 +116,20 @@ jobs:
             approve-routes)
               [ "$CONFIRM" = yes ] || { echo "拒绝：approve-routes 需要 confirm=yes"; exit 1; }
               [ -n "${ROUTES:-}" ] || { echo "拒绝：approve-routes 需要 routes"; exit 1; }
-              CODE="$(api_out "$API/tailnet/-/routes")"
+              [ -n "${DEVICE:-}" ] || { echo "拒绝：approve-routes 需要 device（广播路由的机器 hostname）"; exit 1; }
+              CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev.json
+              echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
+              DID="$(python3 tailscale/ts-acl.py device-id "$DEVICE" < /tmp/dev.json)"
+              echo "设备 $DEVICE -> $DID"
+              CODE="$(api_out "$API/device/$DID/routes")"
               echo "GET routes HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
               python3 -c "import json; d=json.load(open('/tmp/out.json')); print('advertised:', d.get('advertisedRoutes')); print('enabled:', d.get('enabledRoutes'))"
               BODY="$(python3 -c "import json,os; print(json.dumps({'routes': [r.strip() for r in os.environ['ROUTES'].split(',') if r.strip()], 'enabled': True}))")"
               echo "批准: $BODY"
-              CODE="$(api_out -X POST -d "$BODY" "$API/tailnet/-/routes")"
+              CODE="$(api_out -X POST -d "$BODY" "$API/device/$DID/routes")"
               echo "POST routes HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
               [ "$CODE" = 200 ] || [ "$CODE" = 201 ] || exit 1
-              CODE="$(api_out "$API/tailnet/-/routes")"
+              CODE="$(api_out "$API/device/$DID/routes")"
               echo "GET routes HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
               ROUTES="$ROUTES" python3 -c "import json,os,sys; want=set(r.strip() for r in os.environ['ROUTES'].split(',') if r.strip()); got=set((json.load(open('/tmp/out.json')) or {}).get('enabledRoutes') or []); missing=want-got; print('enabled:',sorted(got)); print('RESULT: 路由已批准') if not missing else (print('FAIL:',sorted(missing)), sys.exit(1))"
               ;;
