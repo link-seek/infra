@@ -21,9 +21,13 @@ on:
         required: false
         default: "k8s/opencode"
       action:
-        description: "apply trial | verify | rollback | secret-only（只建 ns+swr-pull+env Secret，不碰 manifest，Flux 侧用）"
+        description: "apply trial | verify | rollback | secret-only | migrate（只迁卷，不碰 manifest）"
         required: false
         default: "apply"
+      migrate_from:
+        description: "migrate 源栈（如 k8s/opencode），仅 action=migrate 用"
+        required: false
+        default: ""
 
 jobs:
   apply:
@@ -40,6 +44,7 @@ jobs:
           case "$APP" in
             litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
             opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
+            opencode-yingxin) DEPLOY=opencode-yingxin; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-yingxin; CONT=opencode; TSHOST=opencode-k3s;;
             opencode-team) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-team; CONT=opencode; TSHOST=opencode-team;;
             erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext; HOST=erp.xieyucheng.top;;
           *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
@@ -147,7 +152,7 @@ jobs:
           echo "secret-render-ok: $(grep -c '' /tmp/opencode-env.txt) entries (values masked)"
 
       - name: ship + apply direct to .69 (TS SSH, 零钥匙)
-        if: inputs.action != 'secret-only'
+        if: inputs.action != 'secret-only' && inputs.action != 'migrate'
         env:
           SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
           SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
@@ -191,6 +196,16 @@ jobs:
             echo "OCI KEY PATCHED: secret=$K3S_SECRET"
           fi
           echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
+      - name: migrate 卷（源 ns PVC → 目标 hostPath，fail-closed）
+        if: inputs.action == 'migrate'
+        run: |
+          set -euo pipefail
+          [ -n "${{ inputs.migrate_from }}" ] || { echo "FAIL: migrate_from 为空"; exit 1; }
+          SRC="$(basename "${{ inputs.migrate_from }}")"
+          DST="$K3S_NS"
+          [ "$SRC" != "$DST" ] || { echo "FAIL: 源=目标"; exit 1; }
+          SSH69="sudo tailscale ssh root@100.93.119.21"
+          $SSH69 "set -euo pipefail; NW=ecs-ies-euleros-jmupervm-zhangzhirui; for V in work data; do PV=\$(kubectl get pvc prod-\$V -n $SRC -o jsonpath='{.spec.volumeName}'); [ -n \"\$PV\" ] || { echo \"FAIL: pvc prod-\$V 不在 $SRC\"; exit 1; }; NODE=\$(kubectl get pv \$PV -o jsonpath='{.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0]}'); PP=\$(kubectl get pv \$PV -o \"jsonpath={.spec.local.path}{.spec.hostPath.path}\"); echo \"\$V: pv=\$PV node=\$NODE path=\$PP\"; [ \"\$NODE\" = \"\$NW\" ] || { echo \"FAIL: 跨节点（\$NODE），停\"; exit 1; }; [ -n \"\$PP\" ] || { echo \"FAIL: 取不到 path\"; exit 1; }; mkdir -p /var/lib/$DST/\$V; cp -a \"\$PP/.\" /var/lib/$DST/\$V/; done; echo MIGRATE-SIZES:; du -sh /var/lib/$DST/work /var/lib/$DST/data; echo MIGRATE-OK"
       - name: verify in-cluster (fail-closed)
         if: inputs.action == 'apply' || inputs.action == 'trial' || inputs.action == 'verify'
         run: |
