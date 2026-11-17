@@ -77,6 +77,7 @@ jobs:
           S_OK: ${{ secrets.OCI_API_PRIVATE_KEY }}
           S_ALI_AK: ${{ secrets.ALI_AK }}
           S_ALI_SK: ${{ secrets.ALI_SK }}
+          S_MAAS: ${{ secrets.MAAS_KEY }}
         run: |
           set -euo pipefail
           if [ "$K3S_NS" = "erpnext" ]; then
@@ -120,6 +121,10 @@ jobs:
           } > /tmp/opencode-env.txt
           if [ "$K3S_NS" = "opencode-team" ]; then
             echo "BROWSERLESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(24))')" >> /tmp/opencode-env.txt
+          fi
+          if [ "$K3S_NS" = "opencode-team" ]; then
+            [ -n "${S_MAAS:-}" ] || { echo "FAIL: S_MAAS missing (MAAS_KEY)"; exit 1; }
+            echo "MAAS_KEY=$S_MAAS" >> /tmp/opencode-env.txt
           fi
           if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
             # 阿里云身份（pilot 专用；单行键，env-file 直装；CLI 读原生 env 名）
