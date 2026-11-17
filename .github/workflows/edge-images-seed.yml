@@ -1,0 +1,48 @@
+name: edge-images-seed
+# CN edge 节点用镜像的中转播种（SWR 常驻仓 link-seek/edge-*）。
+# 背景：广州/华为节点直拉 docker.io 超时（registry-1 全关）；只有 SWR/阿里广州源站能在内网拉稳。
+# manual dispatch，幂等：runner 直拉官方源 → 验 digest → 推 SWR。agent/中继/canary 只认 SWR 路径。
+# 用到新的 edge 镜像时：先加到下面列表，常驻后再改引用。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-images-seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+    steps:
+      - name: 推 edge 三件套到 SWR 常驻仓
+        run: |
+          set -euo pipefail
+          [ -n "${SWR_LOGIN_USER:-}" ] || { echo "FAIL: SWR_LOGIN_USER 未配"; exit 1; }
+          [ -n "${SWR_LOGIN_PASS:-}" ] || { echo "FAIL: SWR_LOGIN_PASS 未配"; exit 1; }
+          echo "::add-mask::$SWR_LOGIN_PASS"
+          REG="swr.cn-north-9.myhuaweicloud.com/link-seek"
+          echo "$SWR_LOGIN_PASS" | docker login "$REG" -u "$SWR_LOGIN_USER" --password-stdin
+          seed() { # $1=上游 $2=SWR目标 $3=期望digest(可空)
+            echo "== $1 -> $2 =="
+            docker pull "$1"
+            GOT="$(docker inspect "$1" --format='{{.Id}}' | sed 's/^sha256://')"
+            if [ -n "${3:-}" ] && [ "$GOT" != "$3" ]; then
+              echo "FAIL: digest 不符 want=$3 got=$GOT"; exit 1
+            fi
+            docker tag "$1" "$2"
+            docker push "$2"
+            echo "OK $2 @sha256:$GOT"
+          }
+          seed "docker.io/rancher/mirrored-pause:3.10.2" "$REG/edge-pause:3.10.2" ""
+          seed "docker.io/library/busybox:1.36" "$REG/edge-busybox:1.36" ""
+          seed "docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7" "$REG/edge-nginx-relay@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7" "bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7"
+          docker logout "$REG" || true
+          echo SEED-OK

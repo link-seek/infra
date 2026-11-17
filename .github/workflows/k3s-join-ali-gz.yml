@@ -147,7 +147,7 @@ jobs:
           timeout 900 ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
             "mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin"
           timeout 900 ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" \
-            "curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://$S:6443 --token \"$TOKEN\" --node-ip $A --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule' sh -"
+            "curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://$S:6443 --token \"$TOKEN\" --node-ip $A --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --kubelet-arg pod-infra-container-image=swr.cn-north-9.myhuaweicloud.com/link-seek/edge-pause:3.10.2' sh -"
           unset TOKEN
           shred -u /tmp/ali-join/token || true
           echo "== 等 agent Ready（ali-gz 本机 k3s kubectl 视角） =="
@@ -163,7 +163,7 @@ jobs:
           done
           ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes -o wide'
           echo "== 金丝雀：edge 上起 busybox，双向打 overlay + L7 =="
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl run canary-edge-ali --image=busybox:1.36 --overrides='{\"spec\":{\"nodeSelector\":{\"dedicated\":\"edge\"},\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}]}}' -- sleep 3600 2>&1 | head -2"
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl run canary-edge-ali --image=swr.cn-north-9.myhuaweicloud.com/link-seek/edge-busybox:1.36 --overrides='{\"spec\":{\"nodeSelector\":{\"dedicated\":\"edge\"},\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}]}}' -- sleep 3600 2>&1 | head -2"
           ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl wait --for=condition=Ready pod/canary-edge-ali --timeout=180s 2>&1 | tail -1"
           OPODIP=$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl get pod -n opencode -o jsonpath='{.items[0].status.podIP}'")
           echo "opencode pod IP（脱敏）: ${OPODIP%.*.*}.x.x"
