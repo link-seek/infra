@@ -41,6 +41,7 @@ jobs:
             litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
             opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
             opencode-team) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-team; CONT=opencode; TSHOST=opencode-team;;
+            erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext;;
           *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
           esac
           { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; } >> "$GITHUB_ENV"
