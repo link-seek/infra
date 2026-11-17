@@ -150,28 +150,89 @@ jobs:
             "curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://$S:6443 --token \"$TOKEN\" --node-ip $A --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=swr.cn-north-9.myhuaweicloud.com/link-seek/edge-pause:3.10.2' sh -"
           unset TOKEN
           shred -u /tmp/ali-join/token || true
-          echo "== 等 agent Ready（ali-gz 本机 k3s kubectl 视角） =="
+          echo AGENT-INSTALLED
+      - name: 验（user 身份，.69 视角，仅 mode=join）
+        if: inputs.mode == 'join'
+        env:
+          SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+          SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-aliverify-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          S="${{ inputs.server_tail }}"
+          echo "== 等 agent Ready（.69 视角） =="
           for i in $(seq 1 24); do
             sleep 15
-            STAT="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null' | awk '{print $2}' | sort | uniq -c || true)"
-            echo "$STAT ($i/24)"
-            NODES="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null'  2>/dev/null | wc -l || true)"
-            READY="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes --no-headers 2>/dev/null' 2>/dev/null | grep -c ' Ready' || true)"
+            NODES="$(sudo tailscale ssh "root@$S" 'kubectl get nodes --no-headers 2>/dev/null' 2>/dev/null | wc -l || true)"
+            READY="$(sudo tailscale ssh "root@$S" 'kubectl get nodes --no-headers 2>/dev/null' 2>/dev/null | grep -c ' Ready' || true)"
             echo "nodes=${NODES:-0} ready=${READY:-0} ($i/24)"
             [ "${NODES:-0}" -ge 5 ] && [ "${READY:-0}" -ge 5 ] && break
-            [ "$i" = 24 ] && { echo "FAIL: ali-gz 未入簇"; ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes -o wide'; exit 1; }
+            [ "$i" = 24 ] && { echo "FAIL: ali-gz 未入簇"; sudo tailscale ssh "root@$S" 'kubectl get nodes -o wide'; exit 1; }
           done
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl get nodes -o wide'
-          echo "== 金丝雀：edge 上起 busybox，双向打 overlay + L7 =="
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl run canary-edge-ali --image=swr.cn-north-9.myhuaweicloud.com/link-seek/edge-busybox:1.36 --overrides='{\"spec\":{\"nodeSelector\":{\"dedicated\":\"edge\"},\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}]}}' -- sleep 3600 2>&1 | head -2"
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl wait --for=condition=Ready pod/canary-edge-ali --timeout=180s 2>&1 | tail -1"
-          OPODIP=$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl get pod -n opencode -o jsonpath='{.items[0].status.podIP}'")
-          echo "opencode pod IP（脱敏）: ${OPODIP%.*.*}.x.x"
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl exec canary-edge-ali -- ping -c2 $OPODIP 2>&1 | tail -2"
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "k3s kubectl exec canary-edge-ali -- wget -q -O- http://$OPODIP:4097/ 2>&1 | head -c 120; echo"
-          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" 'k3s kubectl delete pod canary-edge-ali --wait=false 2>&1 | head -1'
+          sudo tailscale ssh "root@$S" 'kubectl get nodes -o wide'
+          echo "== swr-pull（default ns，供金丝雀拉 SWR 镜像） =="
+          echo "::add-mask::$SWR_LOGIN_PASS"
+          sudo tailscale ssh "root@$S" "kubectl create secret docker-registry swr-pull -n default --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username='$SWR_LOGIN_USER' --docker-password='$SWR_LOGIN_PASS' --dry-run=client -o yaml | kubectl apply -f -"
+          echo "== 金丝雀：钉到 ali-gz，SWR busybox =="
+          sudo tailscale ssh "root@$S" 'kubectl delete pod canary-edge-ali --wait=false --ignore-not-found 2>&1 | head -1'
+          sudo tailscale ssh "root@$S" "kubectl run canary-edge-ali --image=swr.cn-north-9.myhuaweicloud.com/link-seek/edge-busybox:1.36 --overrides='{\"spec\":{\"nodeName\":\"mesh-ali-gz\",\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}],\"imagePullSecrets\":[{\"name\":\"swr-pull\"}]}}' -- sleep 3600 2>&1 | head -2"
+          sudo tailscale ssh "root@$S" "kubectl wait --for=condition=Ready pod/canary-edge-ali --timeout=300s 2>&1 | tail -1"
+          OPODIP=$(sudo tailscale ssh "root@$S" "kubectl get pod -n opencode -o jsonpath='{.items[0].status.podIP}'")
+          echo "$OPODIP" > /tmp/opencode-pod-ip
+          echo "opencode pod IP 已记（脱敏显示）: ${OPODIP%.*.*}.x.x"
+          sudo tailscale logout || true
+          echo CANARY-SCHEDULED
+
+      - name: L7（admin 身份，ali-gz 本机打 overlay，仅 mode=join）
+        if: inputs.mode == 'join'
+        env:
+          SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          echo "::add-mask::$TSKEY"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:admin"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: admin key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-alil7-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          A="${{ inputs.agent_ip }}"
+          OPODIP="$(cat /tmp/opencode-pod-ip)"
+          echo "== overlay：ali-gz ping＋curl opencode pod =="
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "ping -c2 $OPODIP 2>&1 | tail -2"
+          CODE="$(ssh -o BatchMode=yes -i ~/.ssh/ci_key "root@$A" "curl -s -m 20 -o /dev/null -w '%{http_code}' http://$OPODIP:4097/ 2>/dev/null" || true)"
+          echo "overlay http=$CODE"
+          [ "$CODE" = 200 ] || { echo "FAIL: overlay L7 不通"; exit 1; }
           shred -u ~/.ssh/ci_key || true
-          echo ALI-JOIN-OK
+          sudo tailscale logout || true
+          echo OVERLAY-L7-OK
+
+      - name: 清金丝雀（user 身份，仅 mode=join）
+        if: inputs.mode == 'join'
+        run: |
+          set -euo pipefail
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-aliclean-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          S="${{ inputs.server_tail }}"
+          sudo tailscale ssh "root@$S" 'kubectl delete pod canary-edge-ali --wait=false --ignore-not-found 2>&1 | head -1'
+          sudo tailscale logout || true
+          echo CLEANED
 
       - name: 入口回验（仅 mode=join，只读打流量）
         if: inputs.mode == 'join'
