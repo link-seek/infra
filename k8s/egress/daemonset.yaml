@@ -1,7 +1,8 @@
-# SNI 出海中转（hostNetwork DaemonSet，钉边缘节点）。
+# SNI 出海中转（hostNetwork DaemonSet，钉 vm-proxy，东京直出）。
 # 为什么不用普通 Deployment：edge agent 的 pod 网络是断的（flannel 到不了 edge）；
 # hostNetwork 绕开 flannel，直走宿主机出海（东京 IP）。TLS 端到端透传，不解密。
-# 调度按 dedicated=edge label 走：vm-proxy / mesh-ali-gz 及未来 edge agent 自动覆盖，不再逐机写 hostname。
+# 广州节点另见 daemonset-ali-gz.yaml：同模同 conf，镜像走 SWR（广州直拉 docker.io 不通）；
+# 东京直拉 docker.io 最快，不跟 SWR。两边独立滚动，互不影响。
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -20,14 +21,8 @@ spec:
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: dedicated
-                    operator: In
-                    values: [edge]
+      nodeSelector:
+        kubernetes.io/hostname: vm-proxy
       tolerations:
         - key: dedicated
           operator: Equal
@@ -35,7 +30,7 @@ spec:
           effect: NoSchedule
       initContainers:
         - name: conf-test
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/edge-nginx-relay@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
+          image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
           imagePullPolicy: IfNotPresent
           command: ["nginx", "-t", "-c", "/etc/nginx/nginx.conf"]
           volumeMounts:
@@ -45,7 +40,7 @@ spec:
               readOnly: true
       containers:
         - name: relay
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/edge-nginx-relay@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
+          image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 14443
