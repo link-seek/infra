@@ -69,6 +69,8 @@ jobs:
             ssh -o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$SRC" "kubectl get nodes -o wide 2>&1 | head -20 || echo NO-KUBECTL" || echo "$SRC KUBECTL-FAIL"
           done
           echo "===== /data 盘点（只读） ====="
+          echo "===== xieyucheng pods check ====="
+          ssh -o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@100.73.182.4" "kubectl get pods -n opencode-xieyucheng -o wide 2>&1 | head -20; kubectl get deployment opencode -n opencode-xieyucheng -o jsonpath='{.spec.template.spec.volumes}' 2>&1 | head -c 800; echo" || echo "PODS-FAIL"
           for SRC in 100.100.246.95 100.73.182.4 100.93.119.21; do
             echo "--- data via $SRC ---"
             ssh -o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key "root@$SRC" "df -h /data | tail -1; ls -la /data/ 2>&1 | head -20; du -sh /data/* 2>/dev/null | head -20 || echo DATA-EMPTY; grep -E 'default-local-storage-path|data-dir' /etc/rancher/k3s/config.yaml 2>/dev/null || echo NO-K3S-CONF" || echo "$SRC DATA-FAIL"
