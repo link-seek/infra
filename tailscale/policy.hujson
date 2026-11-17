@@ -35,9 +35,6 @@
 		{"src": ["tag:mesh"], "dst": ["tag:prod"], "ip": ["6443", "41641"]},
 		// 远端 edge（广州）经 subnet-router 回内网：k3s server 名单＋flannel vxlan 都是 192.168.1.x，tailnet 直达不了，必须路由过去。
 		{"src": ["tag:mesh"], "dst": ["192.168.1.0/24"], "ip": ["6443", "8472"]},
-		// TEMP（selfjoin 首跑实验，tag 重设计时收编/删除）：ephemeral runner（tag:user）以 k3s agent 直拨 .69:6443＋flannel 8472。
-		// 只到 .69 这一个 IP；k8s 真门是 token，ACL 只管传输。实验完即关。
-		{"src": ["tag:user"], "dst": ["100.93.119.21"], "ip": ["6443", "8472"]},
 		// 东京出海中转（#423）：k3s 网关 pod 经宿主机 SNAT（tag:prod 身份）打 vm-proxy:14443；
 		// 22/10250 是 edge 白盒排障通道（exec/log），逐 IP 开（vm-proxy＋ali-gz），用完可关。
 		{"src": ["tag:prod"], "dst": ["100.73.221.121", "100.85.128.116"], "ip": ["14443", "22", "10250"]},
