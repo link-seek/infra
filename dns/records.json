@@ -44,6 +44,15 @@
       "proxied": true,
       "state": "absent",
       "comment": "2026-11-04 下线：公网入口收敛至 litellm.linkseek.net.cn 灰云直连。UUID 同 llm-trial，待 dns-apply/手动删除"
+    },
+    {
+      "name": "erp.xieyucheng.top",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "erpnext trial：120 Caddy -> tailnet k3s erpnext:8080（ha-b/.69）"
     }
   ]
 }
