@@ -133,10 +133,12 @@ jobs:
                   print(f'YAML-FAIL {f}: {e}'); bad += 1; continue
               print(f'YAML-OK {f}')
               if f.endswith('k3s-join-edge.yml'):
-                  modes = doc['on']['workflow_dispatch']['inputs']['mode']['options']
+                  on = doc.get(True) or doc.get('on')  # PyYAML 把 on 读成 True
+                  modes = on['workflow_dispatch']['inputs']['mode']['options']
                   assert set(modes) == {'selftest', 'recon', 'join', 'teardown'}, modes
-                  assert doc['on']['workflow_dispatch']['inputs']['mode']['default'] == 'selftest'
-                  print('INPUTS-OK modes=selftest/recon/join/teardown default=selftest')
+                  assert on['workflow_dispatch']['inputs']['mode']['default'] == 'selftest'
+                  assert 'workflow_call' in on, 'missing workflow_call'
+                  print('INPUTS-OK modes=selftest/recon/join/teardown default=selftest workflow_call')
               for _job, body in (doc.get('jobs') or {}).items():
                   for s in (body.get('steps') or []):
                       if isinstance(s, dict) and s.get('run'):
