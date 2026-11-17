@@ -410,8 +410,17 @@ jobs:
           VER="$(cat /tmp/edge-ver)"; TOKEN="$(cat /tmp/edge-token)"
           [ -n "$VER" ] && [ -n "$TOKEN" ] || { echo "FAIL: token 缺失"; exit 1; }
           echo "::add-mask::$TOKEN"
-          mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}' && cd /tmp/k3s-bin && grep -E ' +k3s$' sha256sum-amd64.txt | sha256sum -c - && sudo install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin
-          timeout 900 sudo -E sh -c "curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://${{ inputs.server_tail }}:6443 --token \"$TOKEN\" --node-name $HN --node-ip $TSIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}' sh -"
+          mkdir -p /tmp/k3s-bin
+          echo "== 下二进制（OBS 国内） =="
+          curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}'
+          curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}'
+          (cd /tmp/k3s-bin && grep -E ' +k3s$' sha256sum-amd64.txt | sha256sum -c -)
+          sudo install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s
+          rm -rf /tmp/k3s-bin
+          [ -x /usr/local/bin/k3s ] || { echo "FAIL: k3s 二进制未落盘"; exit 1; }
+          /usr/local/bin/k3s --version | head -1
+          echo "== 装 agent（900s 门，sudo env 传参） =="
+          timeout 900 sudo env "INSTALL_K3S_SKIP_DOWNLOAD=true" "INSTALL_K3S_VERSION=$VER" "INSTALL_K3S_EXEC=agent --server https://${{ inputs.server_tail }}:6443 --token \"$TOKEN\" --node-name $HN --node-ip $TSIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}" sh -c 'curl -sfL https://get.k3s.io | sh -'
           unset TOKEN; sudo shred -u /tmp/edge-token || shred -u /tmp/edge-token || true
           for i in $(seq 1 24); do
             sleep 15
