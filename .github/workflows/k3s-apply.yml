@@ -41,9 +41,12 @@ jobs:
             litellm) DEPLOY=litellm-gateway; PORT=4000; HEALTH=/v1/models; JT=tag:gateway; LBL=litellm-gateway; CONT=litellm; TSHOST=litellm-gateway-k3s;;
             opencode) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=opencode-k3s;;
             opencode-team) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode-team; CONT=opencode; TSHOST=opencode-team;;
+            erpnext) DEPLOY=erpnext-nginx; PORT=8080; HEALTH=/login; JT=tag:k8s; LBL=erpnext-nginx; CONT=nginx; TSHOST=erpnext;;
           *) DEPLOY=opencode; PORT=4097; HEALTH=/; JT=tag:opencode; LBL=opencode; CONT=opencode; TSHOST=$APP;;
           esac
           { echo "K3S_NS=$APP"; echo "K3S_DEPLOY=$DEPLOY"; echo "K3S_PORT=$PORT"; echo "K3S_HEALTH=$HEALTH"; echo "K3S_JOIN_TAG=$JT"; echo "K3S_LABEL=$LBL"; echo "K3S_SECRET=${APP}-env"; echo "K3S_CONTAINER=$CONT"; echo "K3S_TSHOST=$TSHOST"; } >> "$GITHUB_ENV"
+          # erpnext 例外：chart secret 名 = fullname（erpnext），不用 -env 后缀（manifest 写死 secretKeyRef name: erpnext）。
+          if [ "$APP" = "erpnext" ]; then echo "K3S_SECRET=erpnext" >> "$GITHUB_ENV"; fi
           echo "stack=$APP deploy=$DEPLOY port=$PORT join=$JT"
 
       - name: join tailnet (guest, mint-only)
@@ -72,8 +75,19 @@ jobs:
           S_SK: ${{ secrets.PROD_HCLOUD_SK }}
           S_SMTP: ${{ secrets.PROD_SMTP_PASS }}
           S_OK: ${{ secrets.OCI_API_PRIVATE_KEY }}
+          S_ALI_AK: ${{ secrets.ALI_AK }}
+          S_ALI_SK: ${{ secrets.ALI_SK }}
         run: |
           set -euo pipefail
+          if [ "$K3S_NS" = "erpnext" ]; then
+            # erpnext trial：只要 db-root + admin 两个 key（chart 写死 secret 名 erpnext）。
+            # trial 约定：两值均复用 PROD_OPENCODE_SERVER_PASSWORD（用户确认，不新增 org secret；转正前轮换）。
+            [ -n "${S_PWD:-}" ] || { echo "FAIL: S_PWD missing"; exit 1; }
+            { echo "mariadb-root-password=$S_PWD"; echo "admin-password=$S_PWD"; } > /tmp/opencode-env.txt
+            chmod 600 /tmp/opencode-env.txt
+            echo "secret-render-ok: erpnext (2 entries, values masked)"
+            exit 0
+          fi
           if [ "$K3S_NS" = "litellm" ]; then
             # 网关：隻要 TS key（tag:gateway）+ 现场随机 master key；无状态，不吃业务 secret。
             [ -n "${TS_API_KEY:-}" ] || { echo "FAIL: TS_API_KEY missing"; exit 1; }
@@ -106,6 +120,17 @@ jobs:
           } > /tmp/opencode-env.txt
           if [ "$K3S_NS" = "opencode-team" ]; then
             echo "BROWSERLESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(24))')" >> /tmp/opencode-env.txt
+          fi
+          if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
+            # 阿里云身份（pilot 专用；单行键，env-file 直装；CLI 读原生 env 名）
+            for v in S_ALI_AK S_ALI_SK; do
+              [ -n "${!v:-}" ] || { echo "FAIL: $v missing (ALI identity)"; exit 1; }
+            done
+            {
+              echo "ALIBABACLOUD_ACCESS_KEY_ID=$S_ALI_AK"
+              echo "ALIBABACLOUD_ACCESS_KEY_SECRET=$S_ALI_SK"
+            } >> /tmp/opencode-env.txt
+            echo "ali identity staged (xieyucheng only)"
           fi
           if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
             # OCI 身份（pilot 专用；PEM 多行走 --from-file，不进 env-file）

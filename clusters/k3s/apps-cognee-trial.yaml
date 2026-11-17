@@ -1,0 +1,17 @@
+# Flux Kustomization: cognee-trial 组织记忆中央 trial（ClusterIP 仅集群内，不碰 opencode）。
+# 由 flux-system（path ./clusters/k3s）收编 → 自动建对账链。
+# manifest 同仓 docker-images k8s/cognee-trial；digest pin 即行为版本。
+# 无 Secret（单用户模式，LLM 后续接）；定型后加 EBAC + 一 ns 一 MCP + 隔离。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cognee-trial
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/cognee-trial
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: docker-images
+  wait: false

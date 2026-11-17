@@ -1,0 +1,19 @@
+# Flux Kustomization: erpnext trial（官方 digest pin，先跑通）。
+# 由 flux-system（path ./clusters/k3s）收编 → 自动建对账链。
+# manifest 同仓 docker-images k8s/erpnext（#461）；digest 即行为版本（官方 SWR digest pin，派生转正后切 erpnext-cn）。
+# Secret erpnext（mariadb-root-password + admin-password）不进仓不归 Flux：
+# Flux 对账前先经 pipeline mint，缺 Secret 时 pod 报 CreateContainerConfigError，属预期。
+# swr-pull 同理（infra 侧已有机制，见 team）。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: erpnext
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/erpnext
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: docker-images
+  wait: false
