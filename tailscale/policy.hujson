@@ -33,6 +33,8 @@
 		// k3s 跨云 agent（#373 终局）：mesh 系节点（含边缘 agent）调 k3s server 6443（agent 主动建连方向；回包 stateful 放行）。
 		// 直连 UDP 41641 提速（DERP 兜底，不断连）。IP 写死已死（41/.69 重建换 IP 即失联），改走 tag:prod。
 		{"src": ["tag:mesh"], "dst": ["tag:prod"], "ip": ["6443", "41641"]},
+		// 远端 edge（广州）经 subnet-router 回内网：k3s server 名单＋flannel vxlan 都是 192.168.1.x，tailnet 直达不了，必须路由过去。
+		{"src": ["tag:mesh"], "dst": ["192.168.1.0/24"], "ip": ["6443", "8472"]},
 		// 东京出海中转（#423）：k3s 网关 pod 经宿主机 SNAT（tag:prod 身份）打 vm-proxy:14443；
 		// 22/10250 是 edge 白盒排障通道（exec/log），逐 IP 开（vm-proxy＋ali-gz），用完可关。
 		{"src": ["tag:prod"], "dst": ["100.73.221.121", "100.85.128.116"], "ip": ["14443", "22", "10250"]},
