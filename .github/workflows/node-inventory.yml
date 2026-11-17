@@ -12,7 +12,7 @@ on:
         required: false
         default: "report"
         type: choice
-        options: [report, mount-data, data-prep]
+        options: [report, mount-data, data-prep, data-sync]
       runner_tag:
         description: "runner 进网身份"
         required: false
@@ -90,4 +90,17 @@ jobs:
             echo "===== prep $H ====="
             ssh $SOPT "root@$H" 'echo ---DU-WORK---; du -sh /var/lib/opencode-* 2>/dev/null || echo NO-WORK; echo ---DU-DOCKER---; du -sh /data/docker 2>/dev/null || echo NO-DOCKER; mkdir -p /data/opencode-xieyucheng/work /data/opencode-xieyucheng/data; ls -la /data/ | head -10; ls -la /data/opencode-xieyucheng/; echo PREP-OK' || echo "$H PREP-FAIL"
           done
+          shred -u ~/.ssh/ci_key
+      - name: 半搬同步rsync（仅 data-sync，.41 Daniel）
+        if: inputs.mode == 'data-sync'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          H=100.73.182.4
+          echo "===== sync $H ====="
+          ssh $SOPT "root@$H" 'set -euo pipefail; for d in work data; do SRC="/var/lib/opencode-xieyucheng/$d/"; DST="/data/opencode-xieyucheng/$d/"; if [ -d "$SRC" ]; then rsync -a --info=stats2 "$SRC" "$DST" | tail -3; else echo "SKIP-$d"; fi; done; du -sh /var/lib/opencode-xieyucheng /data/opencode-xieyucheng; echo SYNC-OK' || echo "$H SYNC-FAIL"
           shred -u ~/.ssh/ci_key
