@@ -411,9 +411,16 @@ jobs:
           [ -n "$VER" ] && [ -n "$TOKEN" ] || { echo "FAIL: token 缺失"; exit 1; }
           echo "::add-mask::$TOKEN"
           mkdir -p /tmp/k3s-bin
-          echo "== 下二进制（OBS 国内） =="
-          curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}'
-          curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}'
+          echo "== 下二进制（OBS 国内优先，境外兜底官方 release） =="
+          VERSAFE="${VER/+/%2B}"
+          if ! curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}'; then
+            echo "OBS 未果，切官方 release（runner 可能在境外）"
+            curl -sfL --retry 3 -o /tmp/k3s-bin/k3s "https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/k3s"
+          fi
+          if ! curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}'; then
+            echo "OBS sha 未果，切官方"
+            curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt "https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/sha256sum-amd64.txt"
+          fi
           (cd /tmp/k3s-bin && grep -E ' +k3s$' sha256sum-amd64.txt | sha256sum -c -)
           sudo install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s
           rm -rf /tmp/k3s-bin
