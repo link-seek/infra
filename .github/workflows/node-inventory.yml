@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "report=只读巡检；mount-data=挂载数据盘到 /data"
+        description: "report=只读巡检；mount-data=挂载数据盘到 /data；fw-watch-6443=只读联调（.69 计数器前后快照判 SYN 到没到）"
         required: false
         default: "report"
         type: choice
-        options: [report, mount-data, data-prep, data-sync]
+        options: [report, mount-data, data-prep, data-sync, fw-watch-6443]
       runner_tag:
         description: "runner 进网身份"
         required: false
@@ -47,6 +47,7 @@ jobs:
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-inv-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           tailscale status --self | head -2
       - name: 巡检（只读）
+        if: inputs.mode != 'fw-watch-6443'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
@@ -61,6 +62,24 @@ jobs:
           done
           [ "$FAIL" = 0 ] || { echo "FAIL: 有主机巡检失败"; exit 1; }
           shred -u ~/.ssh/ci_key
+      - name: 联调 6443 计数器（仅 fw-watch-6443，只读）
+        if: inputs.mode == 'fw-watch-6443'
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          H=100.93.119.21
+          echo "===== $H 快照1（联调窗口起点） ====="; date -u
+          ssh $SOPT "root@$H" 'echo "--- ts-input 计数 ---"; iptables -L ts-input -n -v 2>/dev/null | head -8; echo "--- conntrack 总数 ---"; (conntrack -C 2>/dev/null || cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo no-conntrack); echo "--- SYN-RECV ---"; (ss -tn state SYN-RECV 2>/dev/null | wc -l || echo no-ss)'
+          echo "等待 150s（联调窗口：此时去 dispatch selfjoin 发包）..."
+          sleep 150
+          echo "===== $H 快照2（联调窗口终点） ====="; date -u
+          ssh $SOPT "root@$H" 'echo "--- ts-input 计数 ---"; iptables -L ts-input -n -v 2>/dev/null | head -8; echo "--- conntrack 总数 ---"; (conntrack -C 2>/dev/null || cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo no-conntrack); echo "--- dmesg 丢包/flood ---"; (dmesg 2>/dev/null | grep -iE "flood|drop|conntrack table full|martian" | tail -5 || echo no-dmesg-hit); echo "--- nft 6443 ---"; (nft list ruleset 2>/dev/null | grep -E "6443|10250" | head -10 || echo no-nft-6443)'
+          shred -u ~/.ssh/ci_key
+          echo FW-WATCH-OK
       - name: 挂载数据盘到 /data（仅 mount-data）
         if: inputs.mode == 'mount-data'
         env:
