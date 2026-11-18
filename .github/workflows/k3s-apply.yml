@@ -83,6 +83,8 @@ jobs:
           S_ALI_AK: ${{ secrets.ALI_AK }}
           S_ALI_SK: ${{ secrets.ALI_SK }}
           S_MAAS: ${{ secrets.MAAS_KEY }}
+          S_OBS_AK: ${{ secrets.PROD_HCLOUD_AK }}
+          S_OBS_SK: ${{ secrets.PROD_HCLOUD_SK }}
         run: |
           set -euo pipefail
           if [ "$K3S_NS" = "erpnext" ]; then
@@ -130,6 +132,11 @@ jobs:
           if [ "$K3S_NS" = "opencode-team" ]; then
             [ -n "${S_MAAS:-}" ] || { echo "FAIL: S_MAAS missing (MAAS_KEY)"; exit 1; }
             echo "MAAS_KEY=$S_MAAS" >> /tmp/opencode-env.txt
+          fi
+          # OBS 上传身份：复用 PROD_HCLOUD（与 xieyucheng 同账号；team 专用 key 另立后再切）。
+          if [ "$K3S_NS" = "opencode-team" ]; then
+            [ -n "${S_OBS_AK:-}" ] || { echo "FAIL: S_OBS_AK missing"; exit 1; }
+            { echo "OBS_AK=$S_OBS_AK"; echo "OBS_SK=$S_OBS_SK"; } >> /tmp/opencode-env.txt
           fi
           if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
             # 阿里云身份（pilot 专用；单行键，env-file 直装；CLI 读原生 env 名）
