@@ -1,0 +1,102 @@
+name: ts-mint
+# Tailscale 短期 key 统一签发口：签发不管分发，明文不出流水线。
+# 用法：dispatch（tags/expiry/purpose＋recipient_key=GPG 公钥）→ 日志取 PGP 密文 → 持私钥方本地解。
+# 私钥永不出持钥方容器；明文 key 只活 runner 内存＋目标机，用完即焚。
+# tags allowlist：tag:mesh / tag:user（edge agent＋CI 自用；tag:admin 另议，不开放）。
+# expiry 硬顶 86400s；签发固定 reusable=false＋ephemeral=true＋preauthorized=true（一次一签）。
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "tag 身份（allowlist：tag:mesh/tag:user，逗号分隔）"
+        required: false
+        default: "tag:mesh"
+      expiry_seconds:
+        description: "有效期秒（默认 3600，硬顶 86400）"
+        required: false
+        default: "3600"
+      recipient_key:
+        description: "收件方 GPG 公钥（armor 整段，一次一换）"
+        required: true
+      purpose:
+        description: "用途（审计留痕，如 oci-vpn-rebuild-20261118）"
+        required: true
+
+  workflow_call:
+    inputs:
+      tags:
+        required: false
+        default: "tag:mesh"
+        type: string
+      expiry_seconds:
+        required: false
+        default: "3600"
+        type: string
+      recipient_key:
+        required: true
+        type: string
+      purpose:
+        required: true
+        type: string
+    secrets:
+      TS_API_KEY:
+        required: true
+
+concurrency:
+  group: ts-mint
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: 签发＋加密（明文不出日志）
+        env:
+          TAGS: ${{ inputs.tags }}
+          EXPIRY: ${{ inputs.expiry_seconds }}
+          PURPOSE: ${{ inputs.purpose }}
+          RECIPIENT_KEY: ${{ inputs.recipient_key }}
+        run: |
+          set -euo pipefail
+          # —— 护栏 ——
+          [ "$EXPIRY" -gt 0 ] 2>/dev/null && [ "$EXPIRY" -le 86400 ] || { echo "FAIL: expiry 非法（1~86400）"; exit 1; }
+          python3 - "$TAGS" <<'EOF'
+          import sys
+          allow = {'tag:mesh', 'tag:user'}
+          tags = [t.strip() for t in sys.argv[1].split(',') if t.strip()]
+          assert tags, 'tags 为空'
+          bad = [t for t in tags if t not in allow]
+          assert not bad, f'tags 越界: {bad}（allowlist: {sorted(allow)}）'
+          print('TAGS-OK', tags)
+          EOF
+          [ -n "${TS_API_KEY:-}" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          [ -n "${RECIPIENT_KEY:-}" ] || { echo "FAIL: recipient_key 为空"; exit 1; }
+          echo "purpose=$PURPOSE expiry=${EXPIRY}s"
+          # —— 现签（固定一次一签） ——
+          TSKEY="$(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')"
+          TAGJSON="$(python3 -c "import json; print(json.dumps([t.strip() for t in '''$TAGS'''.split(',') if t.strip()]))")"
+          KEY="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":$TAGJSON}}},\"expirySeconds\":$EXPIRY}" \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$KEY" ] || { echo "FAIL: mint 失败"; exit 1; }
+          echo "::add-mask::$KEY"
+          # —— 加密交接 ——
+          printf '%s\n' "$RECIPIENT_KEY" > /tmp/recipient.asc
+          gpg --batch --import /tmp/recipient.asc 2>&1 | head -2
+          FPR="$(gpg --batch --list-keys --with-colons 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+          [ -n "$FPR" ] || { echo "FAIL: 公钥导入失败"; exit 1; }
+          echo "recipient-fpr=${FPR:0:16}... purpose=$PURPOSE"
+          CIPHER="$(printf '%s' "$KEY" | gpg --batch --trust-model always --encrypt -r "$FPR" --armor 2>/dev/null)"
+          [ -n "$CIPHER" ] || { echo "FAIL: 加密失败"; exit 1; }
+          unset KEY TSKEY
+          shred -u /tmp/recipient.asc 2>/dev/null || true
+          echo "===== TS-MINT-CIPHERTEXT-BEGIN purpose=$PURPOSE ====="
+          printf '%s\n' "$CIPHER"
+          echo "===== TS-MINT-CIPHERTEXT-END ====="
+          echo MINT-OK
