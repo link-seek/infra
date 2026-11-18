@@ -112,22 +112,22 @@ runs:
         echo "BIN_SOURCE=${{ inputs.bin_source }} -> $BIN_URL"
         if [ "${{ inputs.remote }}" = "true" ]; then
           A="root@${{ inputs.node_ip }}"
-          timeout 900 S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A \"mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '$BIN_URL' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '$SHA_URL' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin\""
+          timeout 900 S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A \"mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 --max-time 300 -o /tmp/k3s-bin/k3s '$BIN_URL' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '$SHA_URL' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin\""
           echo "== 定位 get.k3s.io（set -x＋分段计时，hang 点即红） =="
           time timeout 120 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"curl -sfL --max-time 60 https://get.k3s.io -o /tmp/k3s-install.sh && wc -l /tmp/k3s-install.sh\"" || { echo "FAIL: get.k3s.io 下载超时（120s）"; exit 1; }
-          timeout 900 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"set -x; INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://${{ inputs.server_tail }}:6443 --token \\\"$TOKEN\\\" --node-ip ${{ inputs.node_ip }} --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}' sh -x /tmp/k3s-install.sh 2>&1 | tail -30; rm -f /tmp/k3s-install.sh\""
+          timeout --foreground -k 30 300 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"set -x; INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://${{ inputs.server_tail }}:6443 --token \\\"$TOKEN\\\" --node-ip ${{ inputs.node_ip }} --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}' sh -x /tmp/k3s-install.sh 2>&1 && rm -f /tmp/k3s-install.sh\""
         else
           TSIP="$(sudo tailscale ip -4)"; [ -n "$TSIP" ] || { echo "FAIL: 取不到本机 tailnet IP"; exit 1; }
           mkdir -p /tmp/k3s-bin
-          curl -sfL --retry 3 -o /tmp/k3s-bin/k3s "$BIN_URL"
-          curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt "$SHA_URL"
+          curl -sfL --retry 3 --max-time 300 -o /tmp/k3s-bin/k3s "$BIN_URL"
+          curl -sfL --max-time 120 -o /tmp/k3s-bin/sha256sum-amd64.txt "$SHA_URL"
           (cd /tmp/k3s-bin && grep -E ' +k3s$' sha256sum-amd64.txt | sha256sum -c -)
           sudo install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s
           rm -rf /tmp/k3s-bin
           echo "== 定位 get.k3s.io（set -x＋分段计时） =="
           time curl -sfL --max-time 60 https://get.k3s.io -o /tmp/k3s-install.sh || { echo "FAIL: get.k3s.io 下载超时（60s）"; exit 1; }
           wc -l /tmp/k3s-install.sh
-          timeout 900 sudo env "INSTALL_K3S_SKIP_DOWNLOAD=true" "INSTALL_K3S_VERSION=$VER" "INSTALL_K3S_EXEC=agent --server https://${{ inputs.server_tail }}:6443 --token \"$TOKEN\" --node-name ${{ inputs.node_name }} --node-ip $TSIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}" sh -x /tmp/k3s-install.sh 2>&1 | tail -30
+          timeout --foreground -k 30 300 sudo env "INSTALL_K3S_SKIP_DOWNLOAD=true" "INSTALL_K3S_VERSION=$VER" "INSTALL_K3S_EXEC=agent --server https://${{ inputs.server_tail }}:6443 --token \"$TOKEN\" --node-name ${{ inputs.node_name }} --node-ip $TSIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}" sh -x /tmp/k3s-install.sh 2>&1
           rm -f /tmp/k3s-install.sh
         fi
         unset TOKEN; shred -u /tmp/edge-token || true
