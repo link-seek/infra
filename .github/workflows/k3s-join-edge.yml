@@ -1,44 +1,35 @@
 name: k3s-join-edge
 # 统一固定入簇链：OCI / ali-gz / 新节点全走这一条（inputs 化）。
 # 旧 bespoke 链（k3s-join-oci-proxy / 21 / 41 / ali-gz）已标 DEPRECATED，转调完成前保留可跑，之后删除。
-# 入簇只需要两样：token（默认从 server_tail 读一次）＋ 到新机器的 TS SSH（经 .69 跳）。
-# mode（默认 selftest，最安全：只验 runner 本地，零密钥、不碰任何节点）：
-#   selftest = runner 本地验证（YAML 解析＋全步骤 bash -n＋旧链 DEPRECATED 标记检查），首个实验对象；
-#   recon    = 只读巡检（不读 token，不装东西）；
-#   join     = 幂等入簇（已 Ready 直接跳过；默认轻门禁只验 Ready；verify=true 才跑全套 overlay/L7/入口）；
-#   teardown = 弃节点（drain＋delete node＋uninstall，需 confirm_hostname 二次确认）。
-#   selfjoin = runner 本机闭环（本机装 agent→入簇→验→拆全在一个 job 内，节点名 ci-edge-$RUN_ID；
-#              不用跳板/SSH 钥匙；专为"把 runner 送进 K3S 网络"首跑证明用，广州不动）。
-# 触发分级：selftest/recon 可跑；join/teardown 需手动 dispatch＋全程盯（admin 身份，非 HW 需活人值守）。
+# 装机段唯一正本：.github/actions/edge-join（入）＋ edge-leave（出）；本文件只排 jobs，不写装机逻辑。
+# mode：join=入（远机跳装）｜leave=出（drain/delete/uninstall，需 confirm_hostname）｜
+#   selfjoin=本机闭环回归（装→金丝雀→拆，always 摘，不留垃圾）。
+# 触发分级：join/leave/selfjoin 均需手动 dispatch＋全程盯（admin 事项，非 HW 需活人值守）。
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "selftest=只验runner（默认）；recon=只读；join=入簇；teardown=弃节点"
+        description: "join=入簇；leave=弃节点；selfjoin=本机闭环回归"
         required: false
-        default: "selftest"
+        default: "selfjoin"
         type: choice
-        options: [selftest, recon, join, teardown, selfjoin]
+        options: [join, leave, selfjoin]
       node_hostname:
-        description: "目标节点 hostname（kubectl node 名；join 钉死＋Ready 门＋teardown 确认）"
+        description: "目标节点 hostname（join 钉死＋Ready 门；leave=要摘的节点，可摘任意垃圾）"
         required: true
         type: string
       agent_ip:
-        description: "目标机器 tailnet IP（.69 跳 ssh 用）"
-        required: true
+        description: "目标机器 tailnet IP（远机 join/leave 跳装用；selfjoin 不用）"
+        required: false
+        default: ""
         type: string
       server_tail:
-        description: "取号＋验证视角 server（默认 .69），只读"
+        description: "取号＋kubectl 视角 server（默认 .69；VIP 上线后填 VIP，见 #612）"
         required: false
         default: "100.93.119.21"
         type: string
-      verify:
-        description: "join 时是否跑全套验证（金丝雀 overlay 双向＋L7＋入口；首跑/排障开，平时关）"
-        required: false
-        default: false
-        type: boolean
       confirm_hostname:
-        description: "teardown 二次确认（必须与 node_hostname 一致才执行）"
+        description: "leave 二次确认（必须与 node_hostname 一致才执行）"
         required: false
         default: ""
         type: string
@@ -62,29 +53,26 @@ on:
     inputs:
       mode:
         required: false
-        default: "selftest"
+        default: "selfjoin"
         type: string
       node_hostname:
         required: true
         type: string
       agent_ip:
-        required: true
+        required: false
+        default: ""
         type: string
       server_tail:
         required: false
         default: "100.93.119.21"
         type: string
-      verify:
-        required: false
-        default: false
-        type: boolean
       confirm_hostname:
         required: false
         default: ""
         type: string
       k3s_bin_url:
         required: false
-        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/k3s?Expires=1795504324&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=az4IutRXGVzhonWH8vfNMUgtTds%3D"
+        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/k3s?Expires=1795504324&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=hs0Y3DheEzxIHYUWv2fk%3D"
         type: string
       k3s_sha_url:
         required: false
@@ -112,216 +100,57 @@ permissions:
   contents: read
 
 jobs:
-  # —— selftest：runner 本地，零密钥，不进网不碰节点 ——
-  selftest:
-    if: inputs.mode == 'selftest'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: runner 自验（YAML＋bash -n＋旧链标记）
-        run: |
-          set -euo pipefail
-          python3 - <<'EOF'
-          import glob, sys, yaml
-          files = sorted(glob.glob('.github/workflows/*.yml'))
-          assert files, 'no workflows found'
-          bad = 0
-          scripts = []
-          for f in files:
-              try:
-                  doc = yaml.safe_load(open(f))
-              except Exception as e:
-                  print(f'YAML-FAIL {f}: {e}'); bad += 1; continue
-              print(f'YAML-OK {f}')
-              if f.endswith('k3s-join-edge.yml'):
-                  on = doc.get(True) or doc.get('on')  # PyYAML 把 on 读成 True
-                  modes = on['workflow_dispatch']['inputs']['mode']['options']
-                  assert set(modes) == {'selftest', 'recon', 'join', 'teardown', 'selfjoin'}, modes
-                  assert on['workflow_dispatch']['inputs']['mode']['default'] == 'selftest'
-                  assert 'workflow_call' in on, 'missing workflow_call'
-                  assert set(doc['jobs']) == {'selftest', 'recon', 'join', 'teardown', 'selfjoin'}, set(doc['jobs'])
-                  print('INPUTS-OK modes=selftest/recon/join/teardown/selfjoin default=selftest workflow_call')
-              for _job, body in (doc.get('jobs') or {}).items():
-                  for s in (body.get('steps') or []):
-                      if isinstance(s, dict) and s.get('run'):
-                          scripts.append(s['run'])
-          open('/tmp/edge-scripts.txt', 'w').write('\n---SCRIPT---\n'.join(scripts))
-          print(f'SCRIPTS={len(scripts)}')
-          sys.exit(1 if bad else 0)
-          EOF
-          echo "== 逐段 bash -n =="
-          python3 - <<'EOF'
-          import subprocess, sys
-          blob = open('/tmp/edge-scripts.txt').read()
-          # 仅验本链：含 inputs./secrets. 引用的段在 runner 上做语法检查需占位替换
-          # （注：此处刻意拼接，文件中不得出现美元加大括号连续体，否则 workflow 解析失败）
-          n = 0
-          for i, seg in enumerate(blob.split('\n---SCRIPT---\n')):
-              seg = seg.replace('$' + '{{', '$__').replace('}}', '__')
-              p = f'/tmp/edge-seg-{i}.sh'
-              open(p, 'w').write('set -euo pipefail\n' + seg)
-              r = subprocess.run(['bash', '-n', p], capture_output=True, text=True)
-              if r.returncode != 0:
-                  print(f'BASH-FAIL seg{i}: {r.stderr.strip()}'); sys.exit(1)
-              n += 1
-          print(f'BASH-OK segs={n}')
-          EOF
-          echo "== 旧链 DEPRECATED 标记 =="
-          grep -l 'DEPRECATED' .github/workflows/k3s-join-oci-proxy.yml .github/workflows/k3s-join-21.yml .github/workflows/k3s-join-41.yml .github/workflows/k3s-join-ali-gz.yml
-          echo SELFTEST-OK
-
-  # —— recon：只读，不读 token，不装东西 ——
-  recon:
-    if: inputs.mode == 'recon'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      TS_API_KEY: ${{ secrets.TS_API_KEY }}
-      SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: 进网（单 user 身份）＋递钥匙到跳板
-        timeout-minutes: 8
-        run: |
-          set -euo pipefail
-          curl -fsSL https://tailscale.com/install.sh | sh
-          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
-          echo "::add-mask::$TSKEY"; echo "::add-mask::$SSH_KEY"
-          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
-            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
-          [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
-          echo "::add-mask::$MINTED"
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edge-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          sudo tailscale ssh root@"${{ inputs.server_tail }}" 'echo JUMP-OK; hostname'
-          printf '%s\n' "$SSH_KEY" | sudo tailscale ssh root@"${{ inputs.server_tail }}" 'cat > /tmp/ci-edge.key && chmod 600 /tmp/ci-edge.key && echo KEY-SHIPPED'
-          unset MINTED
-          echo NETMAP-OK
-      - name: 只读巡检（经 .69 跳，不碰目标机配置）
-        env:
-          A69: "root@${{ inputs.server_tail }}"
-          A: "root@${{ inputs.agent_ip }}"
-          H: "${{ inputs.node_hostname }}"
-        run: |
-          set -euo pipefail
-          S69() { sudo tailscale ssh "$A69" "$@"; }
-          echo "== 簇节点（.69 视角） =="
-          S69 'kubectl get nodes -o wide'
-          echo "== 目标节点 $H =="
-          S69 "kubectl get node $H -o wide 2>&1 || echo NODE-NOT-IN-CLUSTER"
-          echo "== 目标机基本面（只读） =="
-          S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A 'hostname; command -v k3s >/dev/null && k3s --version | head -1 || echo K3S-NOT-INSTALLED; systemctl is-active k3s-agent 2>/dev/null || echo AGENT-NOT-INSTALLED'"
-          echo RECON-OK
-      - name: 焚毁（跳板钥匙＋runner 身份）
-        if: always()
-        env:
-          A69: "root@${{ inputs.server_tail }}"
-        run: |
-          sudo tailscale ssh "$A69" 'shred -u /tmp/ci-edge.key 2>/dev/null; echo KEY-BURNED' || true
-          sudo tailscale logout || true
-
-  # —— join：幂等入簇，默认轻门禁（只验 Ready），verify=true 才全套 ——
+  # —— join：远机入簇（经跳板跳装；幂等，已 Ready 直接跳过） ——
   join:
     if: inputs.mode == 'join'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
-      SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
-      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
-      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
     steps:
       - uses: actions/checkout@v4
-      - name: 进网＋取号（token 只读一次，用完即焚）
-        timeout-minutes: 8
+      - name: 幂等门（已 Ready 直接跳过）
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
-          echo "::add-mask::$TSKEY"; echo "::add-mask::$SSH_KEY"; echo "::add-mask::$SWR_LOGIN_PASS"
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
             -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edge-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@"; }
-          S69 'echo JUMP-OK; hostname'
-          VER="$(S69 'k3s --version | head -1' | awk '{print $3}')"; [ -n "$VER" ] || { echo "FAIL: 取不到 server 版本"; exit 1; }
-          echo "server k3s: $VER"
-          TOKEN="$(S69 'cat /var/lib/rancher/k3s/server/node-token')"; [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
-          echo "::add-mask::$TOKEN"
-          printf '%s' "$VER" > /tmp/edge-ver
-          printf '%s' "$TOKEN" > /tmp/edge-token && chmod 600 /tmp/edge-token
-          unset TOKEN MINTED
-          printf '%s\n' "$SSH_KEY" | S69 'cat > /tmp/ci-edge.key && chmod 600 /tmp/ci-edge.key && echo KEY-SHIPPED'
-          echo NETMAP-OK
-      - name: 幂等入簇（已 Ready 直接跳过）
-        env:
-          A69: "root@${{ inputs.server_tail }}"
-          A: "root@${{ inputs.agent_ip }}"
-          H: "${{ inputs.node_hostname }}"
-        run: |
-          set -euo pipefail
-          S69() { sudo tailscale ssh "$A69" "$@"; }
-          if S69 "kubectl get node $H --no-headers 2>/dev/null" | grep -q ' Ready'; then
-            echo "JOIN-SKIPPED-ALREADY-READY $H"
-            shred -u /tmp/edge-token || true
-            exit 0
+          unset MINTED
+          if sudo tailscale ssh root@"${{ inputs.server_tail }}" "kubectl get node ${{ inputs.node_hostname }} --no-headers 2>/dev/null" | grep -q ' Ready'; then
+            echo "JOIN-SKIPPED-ALREADY-READY ${{ inputs.node_hostname }}"
+            echo "SKIP_JOIN=true" >> "$GITHUB_ENV"
           fi
-          VER="$(cat /tmp/edge-ver)"; TOKEN="$(cat /tmp/edge-token)"
-          [ -n "$VER" ] && [ -n "$TOKEN" ] || { echo "FAIL: token 缺失"; exit 1; }
-          echo "::add-mask::$TOKEN"
-          echo "== 下二进制（OBS 国内）＋验签＋装 agent（900s 门） =="
-          timeout 900 S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A \"mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin\""
-          timeout 900 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://${{ inputs.server_tail }}:6443 --token \\\"$TOKEN\\\" --node-ip ${{ inputs.agent_ip }} --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}' sh -\""
-          unset TOKEN; shred -u /tmp/edge-token || true
-          echo "== 等 $H Ready（.69 视角，轻门禁） =="
-          for i in $(seq 1 24); do
-            sleep 15
-            ST="$(S69 "kubectl get node $H -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null" || true)"
-            echo "$H Ready=$ST ($i/24)"
-            [ "$ST" = True ] && break
-            [ "$i" = 24 ] && { echo "FAIL: $H 未 Ready"; S69 'kubectl get nodes -o wide'; exit 1; }
-          done
-          echo AGENT-JOINED
-      - name: 全套验证（仅 verify=true：金丝雀 overlay 双向＋L7＋入口）
-        if: inputs.verify
-        env:
-          A69: "root@${{ inputs.server_tail }}"
-          H: "${{ inputs.node_hostname }}"
-        run: |
-          set -euo pipefail
-          S69() { sudo tailscale ssh "$A69" "$@"; }
-          echo "::add-mask::$SWR_LOGIN_PASS"
-          S69 "kubectl create secret docker-registry swr-pull -n default --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username='$SWR_LOGIN_USER' --docker-password='$SWR_LOGIN_PASS' --dry-run=client -o yaml | kubectl apply -f -"
-          S69 'kubectl delete pod canary-edge-verify --wait=false --ignore-not-found 2>&1 | head -1'
-          S69 "kubectl run canary-edge-verify --image=swr.cn-north-9.myhuaweicloud.com/link-seek/edge-busybox:1.36 --overrides='{\"spec\":{\"nodeName\":\"$H\",\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}],\"imagePullSecrets\":[{\"name\":\"swr-pull\"}]}}' -- sleep 3600 2>&1 | head -2"
-          S69 "kubectl wait --for=condition=Ready pod/canary-edge-verify --timeout=300s 2>&1 | tail -1"
-          OPODIP=$(S69 "kubectl get pod -n opencode -o jsonpath='{.items[0].status.podIP}'")
-          echo "opencode pod IP（脱敏）: ${OPODIP%.*.*}.x.x"
-          S69 "kubectl exec canary-edge-verify -- ping -c2 $OPODIP 2>&1 | tail -2"
-          S69 "kubectl exec canary-edge-verify -- wget -q -O- http://$OPODIP:4097/ 2>&1 | head -c 120; echo"
-          S69 'kubectl delete pod canary-edge-verify --wait=false 2>&1 | head -1 || true'
-          echo OVERLAY-L7-OK
+      - name: 远机装机（edge-join action，remote=true）
+        if: env.SKIP_JOIN != 'true'
+        uses: ./.github/actions/edge-join
+        with:
+          remote: "true"
+          node_name: ${{ inputs.node_hostname }}
+          node_ip: ${{ inputs.agent_ip }}
+          server_tail: ${{ inputs.server_tail }}
+          ssh_key: ${{ secrets.CADDY_SSH_KEY }}
+          k3s_bin_url: ${{ inputs.k3s_bin_url }}
+          k3s_sha_url: ${{ inputs.k3s_sha_url }}
+          pause_image: ${{ inputs.pause_image }}
+          ts_api_key: ${{ secrets.TS_API_KEY }}
       - name: 焚毁（跳板钥匙＋runner 身份）
         if: always()
-        env:
-          A69: "root@${{ inputs.server_tail }}"
         run: |
-          sudo tailscale ssh "$A69" 'shred -u /tmp/ci-edge.key 2>/dev/null; echo KEY-BURNED' || true
-          shred -u /tmp/edge-token /tmp/edge-ver 2>/dev/null || true
+          sudo tailscale ssh root@"${{ inputs.server_tail }}" 'shred -u /tmp/ci-edge.key 2>/dev/null; echo KEY-BURNED' || true
           sudo tailscale logout || true
 
-  # —— teardown：弃节点（cattle），需 confirm_hostname 二次确认 ——
-  teardown:
-    if: inputs.mode == 'teardown'
+  # —— leave：弃节点（远机/垃圾均可摘，需 confirm_hostname 二次确认） ——
+  leave:
+    if: inputs.mode == 'leave'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
-      SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: 二次确认＋进网
@@ -329,54 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           [ "${{ inputs.confirm_hostname }}" = "${{ inputs.node_hostname }}" ] || { echo "FAIL: confirm_hostname 与 node_hostname 不一致，拒绝执行"; exit 1; }
-          curl -fsSL https://tailscale.com/install.sh | sh
-          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
-          echo "::add-mask::$TSKEY"; echo "::add-mask::$SSH_KEY"
-          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
-            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
-          [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
-          echo "::add-mask::$MINTED"
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edge-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          printf '%s\n' "$SSH_KEY" | sudo tailscale ssh root@"${{ inputs.server_tail }}" 'cat > /tmp/ci-edge.key && chmod 600 /tmp/ci-edge.key && echo KEY-SHIPPED'
-          unset MINTED
-          echo NETMAP-OK
-      - name: 弃节点（drain＋delete node＋uninstall）
-        env:
-          A69: "root@${{ inputs.server_tail }}"
-          A: "root@${{ inputs.agent_ip }}"
-          H: "${{ inputs.node_hostname }}"
-        run: |
-          set -euo pipefail
-          S69() { sudo tailscale ssh "$A69" "$@"; }
-          S69 "kubectl get node $H --no-headers 2>&1 || { echo 'NODE-NOT-FOUND, nothing to do'; exit 0; }"
-          S69 "kubectl drain $H --ignore-daemonsets --delete-emptydir-data --timeout=300s 2>&1 | tail -3"
-          S69 "kubectl delete node $H 2>&1 | head -1"
-          S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A '/usr/local/bin/k3s-agent-uninstall.sh 2>&1 | tail -2 || echo AGENT-NOT-INSTALLED'"
-          S69 "kubectl get node $H 2>&1 || echo NODE-GONE-OK"
-          echo TEARDOWN-OK
-      - name: 焚毁（跳板钥匙＋runner 身份）
-        if: always()
-        env:
-          A69: "root@${{ inputs.server_tail }}"
-        run: |
-          sudo tailscale ssh "$A69" 'shred -u /tmp/ci-edge.key 2>/dev/null; echo KEY-BURNED' || true
-          sudo tailscale logout || true
-
-  # —— selfjoin：runner 本机闭环（装 agent→入簇→验→拆，全一 job；节点名 ci-edge-$RUN_ID） ——
-  selfjoin:
-    if: inputs.mode == 'selfjoin'
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      TS_API_KEY: ${{ secrets.TS_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: 进网＋取号（user 身份，token 只读一次）
-        timeout-minutes: 8
-        run: |
-          set -euo pipefail
-          S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@"; }
+          [ -n "${{ inputs.agent_ip }}" ] || { echo "FAIL: 远机 leave 缺 agent_ip"; exit 1; }
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
           echo "::add-mask::$TSKEY"
@@ -385,63 +167,49 @@ jobs:
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
-          HN="ci-edge-$GITHUB_RUN_ID"
-          echo "HN=$HN" >> "$GITHUB_ENV"
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="$HN" --accept-routes=false --accept-dns=false
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edge-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          printf '%s\n' "${{ secrets.CADDY_SSH_KEY }}" | sudo tailscale ssh root@"${{ inputs.server_tail }}" 'cat > /tmp/ci-edge.key && chmod 600 /tmp/ci-edge.key && echo KEY-SHIPPED'
           unset MINTED
-          TSIP="$(sudo tailscale ip -4)"; [ -n "$TSIP" ] || { echo "FAIL: 取不到本机 tailnet IP"; exit 1; }
-          echo "TSIP=$TSIP" >> "$GITHUB_ENV"
-          echo "本机 tailnet IP（脱敏）: ${TSIP%.*.*}.x.x"
-          S69 "echo JUMP-OK"
-          VER="$(S69 'k3s --version | head -1' | awk '{print $3}')"; [ -n "$VER" ] || { echo "FAIL: 取不到 server 版本"; exit 1; }
-          echo "server k3s: $VER"
-          TOKEN="$(S69 'cat /var/lib/rancher/k3s/server/node-token')"; [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
-          echo "::add-mask::$TOKEN"
-          printf '%s' "$VER" > /tmp/edge-ver
-          printf '%s' "$TOKEN" > /tmp/edge-token && chmod 600 /tmp/edge-token
-          unset TOKEN
           echo NETMAP-OK
-        env:
-          A69: "root@${{ inputs.server_tail }}"
-      - name: 本机装 agent（OBS＋验签，900s 门）
+      - name: 弃节点（edge-leave action，remote=true）
+        uses: ./.github/actions/edge-leave
+        with:
+          remote: "true"
+          node_name: ${{ inputs.node_hostname }}
+          node_ip: ${{ inputs.agent_ip }}
+          server_tail: ${{ inputs.server_tail }}
+      - name: 焚毁（跳板钥匙＋runner 身份）
+        if: always()
+        run: |
+          sudo tailscale ssh root@"${{ inputs.server_tail }}" 'shred -u /tmp/ci-edge.key 2>/dev/null; echo KEY-BURNED' || true
+          sudo tailscale logout || true
+
+  # —— selfjoin：本机闭环回归（装→金丝雀→拆，always 摘） ——
+  selfjoin:
+    if: inputs.mode == 'selfjoin'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      HN: ci-edge-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 本机装机（edge-join action，remote=false）
+        uses: ./.github/actions/edge-join
+        with:
+          remote: "false"
+          node_name: ci-edge-${{ github.run_id }}
+          node_ip: "SELF（本机分支自动取 tailscale ip，忽略此值）"
+          server_tail: ${{ inputs.server_tail }}
+          k3s_bin_url: ${{ inputs.k3s_bin_url }}
+          k3s_sha_url: ${{ inputs.k3s_sha_url }}
+          pause_image: ${{ inputs.pause_image }}
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+      - name: 金丝雀（钉到本机，overlay 双向证明）
         run: |
           set -euo pipefail
           S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@"; }
-          VER="$(cat /tmp/edge-ver)"; TOKEN="$(cat /tmp/edge-token)"
-          [ -n "$VER" ] && [ -n "$TOKEN" ] || { echo "FAIL: token 缺失"; exit 1; }
-          echo "::add-mask::$TOKEN"
-          mkdir -p /tmp/k3s-bin
-          echo "== 下二进制（OBS 国内优先，境外兜底官方 release） =="
-          VERSAFE="${VER/+/%2B}"
-          if ! curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}'; then
-            echo "OBS 未果，切官方 release（runner 可能在境外）"
-            curl -sfL --retry 3 -o /tmp/k3s-bin/k3s "https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/k3s"
-          fi
-          if ! curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}'; then
-            echo "OBS sha 未果，切官方"
-            curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt "https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/sha256sum-amd64.txt"
-          fi
-          (cd /tmp/k3s-bin && grep -E ' +k3s$' sha256sum-amd64.txt | sha256sum -c -)
-          sudo install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s
-          rm -rf /tmp/k3s-bin
-          [ -x /usr/local/bin/k3s ] || { echo "FAIL: k3s 二进制未落盘"; exit 1; }
-          /usr/local/bin/k3s --version | head -1
-          echo "== 装 agent（900s 门，sudo env 传参） =="
-          timeout 900 sudo env "INSTALL_K3S_SKIP_DOWNLOAD=true" "INSTALL_K3S_VERSION=$VER" "INSTALL_K3S_EXEC=agent --server https://${{ inputs.server_tail }}:6443 --token \"$TOKEN\" --node-name $HN --node-ip $TSIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}" sh -c 'curl -sfL https://get.k3s.io | sh -'
-          unset TOKEN; sudo shred -u /tmp/edge-token || shred -u /tmp/edge-token || true
-          for i in $(seq 1 24); do
-            sleep 15
-            ST="$(S69 "kubectl get node $HN -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null" || true)"
-            echo "$HN Ready=$ST ($i/24)"
-            [ "$ST" = True ] && break
-            [ "$i" = 24 ] && { echo "FAIL: $HN 未 Ready"; S69 'kubectl get nodes -o wide'; exit 1; }
-          done
-          S69 "kubectl get node $HN -o wide"
-          echo AGENT-JOINED
-      - name: 金丝雀（钉到本机，overlay 双向首跑证明）
-        run: |
-          set -euo pipefail
-          S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@"; }
+          TSIP="$(sudo tailscale ip -4)"; [ -n "$TSIP" ] || { echo "FAIL: 取不到本机 tailnet IP"; exit 1; }
           S69 'kubectl delete pod canary-edge-self --wait=false --ignore-not-found 2>&1 | head -1'
           S69 "kubectl run canary-edge-self --image=swr.cn-north-9.myhuaweicloud.com/link-seek/edge-busybox:1.36 --overrides='{\"spec\":{\"nodeName\":\"$HN\",\"tolerations\":[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"edge\",\"effect\":\"NoSchedule\"}]}}' -- sleep 3600 2>&1 | head -2"
           S69 "kubectl wait --for=condition=Ready pod/canary-edge-self --timeout=300s 2>&1 | tail -1"
@@ -453,22 +221,14 @@ jobs:
           S69 "kubectl exec canary-edge-self -- wget -q -O- http://$OPODIP:4097/ 2>&1 | head -c 120; echo"
           S69 'kubectl delete pod canary-edge-self --wait=false 2>&1 | head -1 || true'
           echo OVERLAY-L7-OK
-      - name: 拆（drain＋delete＋uninstall，本 job 内闭环）
+      - name: 拆（edge-leave action，remote=false，always）
         if: always()
-        run: |
-          set -euo pipefail
-          S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@" || true; }
-          if S69 "kubectl get node $HN --no-headers 2>/dev/null" | grep -q .; then
-            S69 "kubectl drain $HN --ignore-daemonsets --delete-emptydir-data --timeout=300s 2>&1 | tail -2"
-            S69 "kubectl delete node $HN 2>&1 | head -1"
-          else
-            echo 'NODE-NOT-JOINED, skip drain/delete'
-          fi
-          sudo /usr/local/bin/k3s-agent-uninstall.sh 2>&1 | tail -2 || echo AGENT-NOT-INSTALLED
-          S69 "kubectl get node $HN 2>&1 || echo NODE-GONE-OK"
-          echo TEARDOWN-OK
+        uses: ./.github/actions/edge-leave
+        with:
+          remote: "false"
+          node_name: ci-edge-${{ github.run_id }}
+          server_tail: ${{ inputs.server_tail }}
       - name: 焚毁（runner 身份）
         if: always()
         run: |
-          shred -u /tmp/edge-token /tmp/edge-ver 2>/dev/null || true
           sudo tailscale logout || true
