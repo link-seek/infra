@@ -1,0 +1,30 @@
+name: k3s-egress-sni-tokyo-edge
+# 东京 mesh-oci-edge 薄触发层：只 preset 参数，逻辑全在 _sni-egress-node。
+# 节点未入簇前 deploy 会 fail-closed（先走 k3s-join-edge 入簇）；入簇后先 verify 再 deploy。
+# 同域另一节点见 k3s-egress-sni-tokyo-vm-proxy；广州见 k3s-egress-sni-ali-gz。三者独立点火互不触发。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "verify=只验（默认）；deploy=下发+验证"
+        required: false
+        default: "verify"
+        type: choice
+        options: [deploy, verify]
+
+concurrency:
+  group: k3s-egress-sni-tokyo-edge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    uses: ./.github/workflows/_sni-egress-node.yml
+    with:
+      node_hostname: mesh-oci-edge
+      ds_file: k8s/egress/daemonset-sni-tokyo-edge.yaml
+      ds_name: sni-egress-tokyo-edge
+      mode: ${{ inputs.mode || 'verify' }}
+    secrets: inherit
