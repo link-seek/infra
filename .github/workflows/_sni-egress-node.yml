@@ -1,0 +1,96 @@
+name: _sni-egress-node
+# SNI 出海单节点逻辑（复用链，被 3 个薄触发层调用，不直接点火）：
+# hostNetwork DaemonSet 一节点一对象独立滚动；TLS 端到端透传；网关 pod 用 hostAliases 指中继 tailnet IP。
+# 调用方只 preset：node_hostname / ds_file / ds_name；deploy=下发+验证，verify=只验。
+# 旧东京链的一次性清理（删旧 deploy/svc、coredns 回滚）已执行过，不迁移。
+on:
+  workflow_call:
+    inputs:
+      node_hostname:
+        description: "kubectl node 名（DS nodeSelector 同值）"
+        required: true
+        type: string
+      ds_file:
+        description: "该节点的 DS 文件（如 k8s/egress/daemonset.yaml）"
+        required: true
+        type: string
+      ds_name:
+        description: "DS 对象名（如 sni-egress）"
+        required: true
+        type: string
+      mode:
+        description: "deploy=下发+验证；verify=只验"
+        required: false
+        default: "verify"
+        type: string
+      server_tail:
+        description: "kubectl 视角 server（默认 .69）"
+        required: false
+        default: "100.93.119.21"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: runner 进 tailnet（user 身份，直达 .69，不经跳板）
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-egress-node-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          sudo tailscale ssh root@"${{ inputs.server_tail }}" 'echo JUMP-OK; hostname'
+          unset MINTED
+
+      - name: 下发（namespace+conf+本节点 DS，其余节点不动）
+        if: inputs.mode == 'deploy'
+        run: |
+          set -euo pipefail
+          SSH69='sudo tailscale ssh root@${{ inputs.server_tail }}'
+          tar czf /tmp/egress.tgz k8s/egress/namespace.yaml k8s/egress/nginx-conf.yaml "${{ inputs.ds_file }}"
+          $SSH69 "cat > /tmp/egress-node.tgz" < /tmp/egress.tgz
+          $SSH69 "set -e; rm -rf /tmp/egress-node && mkdir -p /tmp/egress-node && tar xzf /tmp/egress-node.tgz -C /tmp/egress-node && cd /tmp/egress-node && kubectl apply -f k8s/egress/namespace.yaml && kubectl apply -f k8s/egress/nginx-conf.yaml && kubectl apply -f '${{ inputs.ds_file }}'"
+          echo "== 等 ${{ inputs.ds_name }} Ready（只看本节点 DS） =="
+          for i in $(seq 1 20); do
+            sleep 15
+            READY="$($SSH69 "kubectl get daemonset -n egress '${{ inputs.ds_name }}' -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled}' 2>/dev/null" || true)"
+            echo "relay ready=$READY ($i/20)"
+            [ "$READY" = "1/1" ] && break
+            [ "$i" = 20 ] && { echo "FAIL: relay 未 Ready"; $SSH69 'kubectl -n egress get pods -o wide | grep ${{ inputs.ds_name }}'; exit 1; }
+          done
+          echo NODE-APPLY-OK
+
+      - name: 验（节点 IP 直测中转 + 网关 pod 解析回正）
+        run: |
+          set -euo pipefail
+          SSH69='sudo tailscale ssh root@${{ inputs.server_tail }}'
+          NODEIP="$($SSH69 "kubectl get node '${{ inputs.node_hostname }}' -o jsonpath='{.status.addresses[?(@.type==\"InternalIP\")].address}' 2>/dev/null" || true)"
+          [ -n "$NODEIP" ] || { echo "FAIL: 节点 ${{ inputs.node_hostname }} 不在簇里（先走 k3s-join-edge 入簇）"; exit 1; }
+          echo "== 直测 $NODEIP:14443（SNI=opencode.ai） =="
+          CODE="$($SSH69 "curl -s -m 20 -o /dev/null -w '%{http_code}' --resolve 'opencode.ai:14443:$NODEIP' https://opencode.ai:14443/")"
+          echo "relay https opencode.ai => http=$CODE"
+          [ "$CODE" = "200" ] || { echo "FAIL: 中转不通（want 200）"; exit 1; }
+          echo "== 网关 pod 解析回正（应为公网 IP） =="
+          GOT="$($SSH69 "kubectl exec -n opencode deploy/opencode -c opencode -- python3 -c \"import socket;print(socket.gethostbyname('opencode.ai'))\" 2>/dev/null | tail -1")"
+          echo "pod resolves opencode.ai => $GOT"
+          case "$GOT" in 10.43.*) echo "FAIL: rewrite 还在"; exit 1;; esac
+          echo NODE-VERIFY-DONE
+
+      - name: 退出 tailnet（焚毁节点）
+        if: always()
+        run: sudo tailscale logout || true
