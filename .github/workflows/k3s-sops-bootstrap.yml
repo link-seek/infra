@@ -1,0 +1,72 @@
+name: k3s-sops-bootstrap（一次性，用完即删）
+
+# SOPS 终局底座一次性自举（试点 yingxin 前置）：
+# ephemeral runner 生成 age 密钥对 → 私钥直装 flux-system/sops-age（不进仓不进日志）
+# + 建 reloader ns/swr-pull → 公钥打 Summary（填 docker-images/.sops.yaml）。
+# 跑完即删本文件。私钥只活 runner 内存 + 簇内 Secret，无备份；丢了重跑并重加密全部 secret.enc.yaml。
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "输入 YES 确认在生产簇建 sops-age + reloader 底座"
+        required: true
+        default: "NO"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sops-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+    steps:
+      - name: 二次确认
+        run: |
+          [ "${{ inputs.confirm }}" = "YES" ] || { echo "FAIL: 输入 YES 才执行"; exit 1; }
+
+      - name: runner 进 tailnet（user 身份）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="sops-boot-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale ip -4
+
+      - name: 生成 age 密钥对（只活本 run）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz -o /tmp/age.tgz
+          tar xzf /tmp/age.tgz -C /tmp && sudo install -m755 /tmp/age/age-keygen /usr/local/bin/age-keygen
+          umask 077
+          /usr/local/bin/age-keygen -o /tmp/age.agekey 2>/tmp/pub.txt
+          PUB="$(grep -ao 'age1[0-9a-z]*' /tmp/pub.txt | head -n 1)"
+          [ -n "$PUB" ] || { echo "FAIL: 公钥未生成"; exit 1; }
+          echo "::add-mask::$(grep -ao 'AGE-SECRET-KEY-[0-9A-Z]*' /tmp/age.agekey | head -n 1)"
+          echo "AGE_PUBLIC=$PUB" >> "$GITHUB_ENV"
+          echo "## age 公钥（填 docker-images/.sops.yaml）" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$PUB\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 私钥直装 flux-system/sops-age + reloader 底座
+        run: |
+          set -euo pipefail
+          SSH69="sudo tailscale ssh root@100.93.119.21"
+          $SSH69 "kubectl create namespace reloader --dry-run=client -o yaml | kubectl apply -f -" < /dev/null
+          $SSH69 "kubectl create secret docker-registry swr-pull -n reloader --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username='$SWR_LOGIN_USER' --docker-password='$SWR_LOGIN_PASS' --dry-run=client -o yaml | kubectl apply -f -" < /dev/null
+          $SSH69 "cat > /tmp/age.agekey && chmod 600 /tmp/age.agekey" < /tmp/age.agekey
+          $SSH69 "kubectl create secret generic sops-age -n flux-system --from-file=age.agekey=/tmp/age.agekey --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/age.agekey && kubectl -n flux-system get secret sops-age -o jsonpath='{.metadata.name}'"
+          echo BOOTSTRAP-OK
+          shred -u /tmp/age.agekey /tmp/age.tgz || rm -f /tmp/age.agekey /tmp/age.tgz
