@@ -57,8 +57,10 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          H69="${{ inputs.hw69_tail }}"
+          H69="${{ inputs.hw69_tail }}"; [ -n "$H69" ] || H69="100.93.119.21"
+          H41="${{ inputs.hw41_tail }}"; [ -n "$H41" ] || H41="100.73.182.4"
           ssh-keyscan -H "$H69" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -H "$H41" >> ~/.ssh/known_hosts 2>/dev/null || true
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
           tar czf /tmp/etcd-bak.tgz k8s/etcd-backup
           ssh $SOPT "root@$H69" 'rm -rf /tmp/etcd-bak && mkdir -p /tmp/etcd-bak'
@@ -90,7 +92,7 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          H69="${{ inputs.hw69_tail }}"; H41="${{ inputs.hw41_tail }}"
+          H69="${{ inputs.hw69_tail }}"; [ -n "$H69" ] || H69="100.93.119.21"; H41="${{ inputs.hw41_tail }}"; [ -n "$H41" ] || H41="100.73.182.4"
           ssh-keyscan -H "$H69" >> ~/.ssh/known_hosts 2>/dev/null || true
           ssh-keyscan -H "$H41" >> ~/.ssh/known_hosts 2>/dev/null || true
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
