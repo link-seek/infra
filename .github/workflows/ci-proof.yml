@@ -1,0 +1,54 @@
+name: ci-proof
+# P0-2 验证门：CI 身份边界自证（零变更，全 can-i，不断言外不写任何对象）。
+# 前置：repo secrets CI_KUBE_TOKEN / CI_KUBE_CA 已就位（runbook 见 #630）。
+# 用法：手动 dispatch；红=RBAC 口径与设计不符，先对 RBAC PR 不对 run。
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: can-i 边界矩阵（允许项必须 yes，拒绝项必须 no）
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="${{ steps.net.outputs.kubeconfig }}"
+          pass=0; fail=0
+          check() { # $1=期望 $2..=kubectl auth can-i 参数（只用朴素资源+动词）
+            local want="$1"; shift
+            local got; got="$(kubectl auth can-i "$@" --request-timeout=20s 2>/dev/null | grep -oE '^(yes|no)$' | head -1 || true)"
+            if [ "$got" = "$want" ]; then echo "OK   [$want] can-i $*"; pass=$((pass+1));
+            else echo "MISS [want=$want got=${got:-empty}] can-i $*"; fail=$((fail+1)); fi
+          }
+          echo "== 允许项（设计内能力） =="
+          check yes get nodes
+          check yes list pods -n default
+          check yes create secrets -n flux-system
+          check yes get secrets -n kube-system
+          check yes delete nodes
+          check yes create deployments -n default
+          echo "== 拒绝项（设计外能力） =="
+          check no delete customresourcedefinitions
+          check no delete clusterroles
+          check no delete clusterrolebindings
+          check no delete namespaces
+          echo "pass=$pass fail=$fail"
+          [ "$fail" = 0 ] || { echo "FAIL: 边界与设计不符，先修 RBAC"; exit 1; }
+          echo PROOF-OK
