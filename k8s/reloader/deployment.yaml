@@ -1,5 +1,5 @@
 # reloader Deployment（SOPS 终局自动 rollout）。
-# 镜像 digest pin 即版本（bake-reloader 转正 digest 回填，此处先 tag 占位，合前必 pin）。
+# 镜像 digest pin 即版本（bake-reloader run 44236180947 转正，tag 1.4.24）。
 # resources limits 必填（HW41 事故教训）；swr-pull 由 sops-age bootstrap workflow 同建。
 apiVersion: apps/v1
 kind: Deployment
@@ -23,7 +23,7 @@ spec:
         - name: swr-pull
       containers:
         - name: reloader
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/reloader:v1.4.24 # TODO: bake 转正后 pin digest
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/reloader@sha256:5d43f4892d43fbc6fcce46584dabace3abe178f51d4b48c23e374c7e2a5098eb # v1.4.24
           args:
             - --reload-strategy=annotations
             - --log-level=info
