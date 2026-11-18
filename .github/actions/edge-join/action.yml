@@ -115,6 +115,8 @@ runs:
           timeout 900 S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A \"mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 --max-time 300 -o /tmp/k3s-bin/k3s '$BIN_URL' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '$SHA_URL' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin\""
           echo "== 定位 get.k3s.io（set -x＋分段计时，hang 点即红） =="
           time timeout 120 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"curl -sfL --max-time 60 https://get.k3s.io -o /tmp/k3s-install.sh && wc -l /tmp/k3s-install.sh\"" || { echo "FAIL: get.k3s.io 下载超时（120s）"; exit 1; }
+          S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"grep -c 'systemctl restart \${SYSTEM_NAME}' /tmp/k3s-install.sh | grep -qx 1\"" || { echo "FAIL: 上游脚本 restart 行数变了，sed 不敢打"; exit 1; }
+          S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"sed -i 's/systemctl restart \${SYSTEM_NAME}/systemctl restart --no-block \${SYSTEM_NAME}/' /tmp/k3s-install.sh\""
           timeout --foreground -k 30 300 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"set -x; INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://${{ inputs.server_tail }}:6443 --token \\\"$TOKEN\\\" --node-ip ${{ inputs.node_ip }} --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}' sh -x /tmp/k3s-install.sh 2>&1 && rm -f /tmp/k3s-install.sh\""
         else
           TSIP="$(sudo tailscale ip -4)"; [ -n "$TSIP" ] || { echo "FAIL: 取不到本机 tailnet IP"; exit 1; }
@@ -127,6 +129,8 @@ runs:
           echo "== 定位 get.k3s.io（set -x＋分段计时） =="
           time curl -sfL --max-time 60 https://get.k3s.io -o /tmp/k3s-install.sh || { echo "FAIL: get.k3s.io 下载超时（60s）"; exit 1; }
           wc -l /tmp/k3s-install.sh
+          grep -c 'systemctl restart ${SYSTEM_NAME}' /tmp/k3s-install.sh | grep -qx 1 || { echo "FAIL: 上游脚本 restart 行数变了，sed 不敢打"; exit 1; }
+          sed -i 's/systemctl restart ${SYSTEM_NAME}/systemctl restart --no-block ${SYSTEM_NAME}/' /tmp/k3s-install.sh
           timeout --foreground -k 30 300 sudo env "INSTALL_K3S_SKIP_DOWNLOAD=true" "INSTALL_K3S_VERSION=$VER" "INSTALL_K3S_EXEC=agent --server https://${{ inputs.server_tail }}:6443 --token \"$TOKEN\" --node-name ${{ inputs.node_name }} --node-ip $TSIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}" sh -x /tmp/k3s-install.sh 2>&1
           rm -f /tmp/k3s-install.sh
         fi
@@ -143,7 +147,7 @@ runs:
           ST="$(S69 "kubectl get node $H -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null" || true)"
           echo "$H Ready=$ST ($i/24)"
           [ "$ST" = True ] && break
-          [ "$i" = 24 ] && { echo "FAIL: $H 未 Ready"; S69 'kubectl get nodes -o wide'; exit 1; }
+          [ "$i" = 24 ] && { echo "FAIL: $H 未 Ready"; S69 'kubectl get nodes -o wide'; echo "== agent 日志（真因） =="; if [ "${{ inputs.remote }}" = "true" ]; then S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key root@${{ inputs.node_ip }} 'journalctl -u k3s-agent --no-pager -n 50; echo ---; curl -k -m 10 https://${{ inputs.server_tail }}:6443/version; true'"; else sudo journalctl -u k3s-agent --no-pager -n 50 || true; echo ---; curl -k -m 10 https://${{ inputs.server_tail }}:6443/version || true; fi; exit 1; }
         done
         S69 "kubectl get node $H -o wide"
         echo "node_name=$H" >> "$GITHUB_OUTPUT"
