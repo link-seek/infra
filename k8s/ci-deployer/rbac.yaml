@@ -37,7 +37,8 @@ rules:
     verbs: [get, list, watch, create, update, patch]
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, create, update, patch]
+  # 注：namespaces 无 delete（删 ns 走人工；apply 需 create/update 做幂等）
   - apiGroups: ["apps"]
     resources: ["deployments", "daemonsets", "replicasets", "statefulsets"]
     verbs: [get, list, watch, create, update, patch]
