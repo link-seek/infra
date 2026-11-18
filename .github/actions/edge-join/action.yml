@@ -30,6 +30,10 @@ inputs:
   k3s_sha_url:
     description: "k3s sha256 国内中转 URL"
     required: true
+  bin_source:
+    description: "二进制源：auto=测速自选；obs=强制国内中转；github=强制官方"
+    required: false
+    default: "auto"
   pause_image:
     description: "agent pause 镜像（SWR 常驻）"
     required: false
@@ -88,22 +92,33 @@ runs:
         VER="$(cat /tmp/edge-ver)"; TOKEN="$(cat /tmp/edge-token)"
         [ -n "$VER" ] && [ -n "$TOKEN" ] || { echo "FAIL: token 缺失"; exit 1; }
         echo "::add-mask::$TOKEN"
+        VERSAFE="${VER/+/%2B}"
+        GH_BIN="https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/k3s"
+        GH_SHA="https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/sha256sum-amd64.txt"
+        OBS_BIN='${{ inputs.k3s_bin_url }}'; OBS_SHA='${{ inputs.k3s_sha_url }}'
+        pick_bin() {
+          # $1=obs_url $2=gh_url -> 打印选用 URL。auto：10s 探活＋测速，快的赢；都不通即红。
+          case "${{ inputs.bin_source }}" in
+            obs) echo "$1" ;;
+            github) echo "$2" ;;
+            *)
+              OBS_T="$(curl -sfL -o /dev/null -w '%{time_total}' --max-time 10 "$1" 2>/dev/null || echo 999)"
+              GH_T="$(curl -sfL -o /dev/null -w '%{time_total}' --max-time 10 "$2" 2>/dev/null || echo 999)"
+              echo "probe obs=${OBS_T}s github=${GH_T}s" >&2
+              if awk "BEGIN{exit !(($OBS_T+0) < ($GH_T+0) && ($OBS_T+0) < 9)}"; then echo "$1"; else echo "$2"; fi ;;
+          esac
+        }
+        BIN_URL="$(pick_bin "$OBS_BIN" "$GH_BIN")"; SHA_URL="$(pick_bin "$OBS_SHA" "$GH_SHA")"
+        echo "BIN_SOURCE=${{ inputs.bin_source }} -> $BIN_URL"
         if [ "${{ inputs.remote }}" = "true" ]; then
           A="root@${{ inputs.node_ip }}"
-          timeout 900 S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A \"mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin\""
+          timeout 900 S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A \"mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '$BIN_URL' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '$SHA_URL' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin\""
           timeout 900 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://${{ inputs.server_tail }}:6443 --token \\\"$TOKEN\\\" --node-ip ${{ inputs.node_ip }} --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}' sh -\""
         else
           TSIP="$(sudo tailscale ip -4)"; [ -n "$TSIP" ] || { echo "FAIL: 取不到本机 tailnet IP"; exit 1; }
           mkdir -p /tmp/k3s-bin
-          VERSAFE="${VER/+/%2B}"
-          if ! curl -sfL --retry 3 -o /tmp/k3s-bin/k3s '${{ inputs.k3s_bin_url }}'; then
-            echo "OBS 未果，切官方 release"
-            curl -sfL --retry 3 -o /tmp/k3s-bin/k3s "https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/k3s"
-          fi
-          if ! curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '${{ inputs.k3s_sha_url }}'; then
-            echo "OBS sha 未果，切官方"
-            curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt "https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/sha256sum-amd64.txt"
-          fi
+          curl -sfL --retry 3 -o /tmp/k3s-bin/k3s "$BIN_URL"
+          curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt "$SHA_URL"
           (cd /tmp/k3s-bin && grep -E ' +k3s$' sha256sum-amd64.txt | sha256sum -c -)
           sudo install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s
           rm -rf /tmp/k3s-bin
