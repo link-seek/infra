@@ -48,7 +48,7 @@ jobs:
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-etcd-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
       - name: 下发 RBAC+CronJob（digest 现取现钉）
-        if: inputs.mode == 'deploy'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
           SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
@@ -83,7 +83,7 @@ jobs:
           echo RBAC-CRONJOB-OK
           INNEREOF
       - name: 首刷 + config 下发 + 滚动重启 + 实传验证
-        if: inputs.mode == 'deploy'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
@@ -174,7 +174,8 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          H69="${{ inputs.hw69_tail }}"; H41="${{ inputs.hw41_tail }}"
+          H69="${{ inputs.hw69_tail }}"; [ -n "$H69" ] || H69="100.93.119.21"
+          H41="${{ inputs.hw41_tail }}"; [ -n "$H41" ] || H41="100.73.182.4"
           ssh-keyscan -H "$H69" >> ~/.ssh/known_hosts 2>/dev/null || true
           ssh-keyscan -H "$H41" >> ~/.ssh/known_hosts 2>/dev/null || true
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
