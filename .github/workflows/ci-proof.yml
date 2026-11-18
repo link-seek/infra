@@ -44,6 +44,8 @@ jobs:
           check yes get secrets -n kube-system
           check yes delete nodes
           check yes create deployments -n default
+          check yes create namespaces
+          check yes patch namespaces
           echo "== 拒绝项（设计外能力） =="
           check no delete customresourcedefinitions
           check no delete clusterroles
