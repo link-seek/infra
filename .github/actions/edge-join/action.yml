@@ -78,7 +78,7 @@ runs:
         S69 'echo JUMP-OK; hostname'
         VER="$(S69 'k3s --version | head -1' | awk '{print $3}')"; [ -n "$VER" ] || { echo "FAIL: 取不到 server 版本"; exit 1; }
         echo "server k3s: $VER"
-        TOKEN="$(S69 'cat /var/lib/rancher/k3s/server/node-token')"; [ -n "$TOKEN" ] || { echo "FAIL: 取不到 token"; exit 1; }
+        TOKEN="$(S69 "k3s token create --ttl 2h --description ci-$GITHUB_RUN_ID 2>/dev/null" | tr -d ' \r\n\t')"; [ -n "$TOKEN" ] || { echo "FAIL: bootstrap token 签发失败（tokencleaner/版本不支持？）"; exit 1; }
         echo "::add-mask::$TOKEN"
         printf '%s' "$VER" > /tmp/edge-ver
         printf '%s' "$TOKEN" > /tmp/edge-token && chmod 600 /tmp/edge-token
