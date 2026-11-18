@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "verify=只验（默认）；deploy=下发+验证"
+        description: "verify=只验（默认）；deploy=下发+验证；diagnose=只读排障"
         required: false
         default: "verify"
         type: choice
-        options: [deploy, verify]
+        options: [deploy, verify, diagnose]
 
 concurrency:
   group: k3s-egress-sni-tokyo-edge

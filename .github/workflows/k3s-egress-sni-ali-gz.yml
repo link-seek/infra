@@ -5,11 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "deploy=下发+验证；verify=只验广州中继"
+        description: "deploy=下发+验证；verify=只验广州中继；diagnose=只读排障"
         required: false
         default: "deploy"
         type: choice
-        options: [deploy, verify]
+        options: [deploy, verify, diagnose]
 
 concurrency:
   group: k3s-egress-sni-ali-gz
