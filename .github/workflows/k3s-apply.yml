@@ -85,6 +85,7 @@ jobs:
           S_MAAS: ${{ secrets.MAAS_KEY }}
           S_OBS_AK: ${{ secrets.PROD_HCLOUD_AK }}
           S_OBS_SK: ${{ secrets.PROD_HCLOUD_SK }}
+          S_BROWSERLESS: ${{ secrets.PROD_BROWSERLESS_TOKEN }}
         run: |
           set -euo pipefail
           if [ "$K3S_NS" = "erpnext" ]; then
@@ -127,7 +128,9 @@ jobs:
             echo "TS_JOIN_KEY=$TS_JOIN"; echo "SMTP_PASS=$S_SMTP"
           } > /tmp/opencode-env.txt
           if [ "$K3S_NS" = "opencode-team" ]; then
-            echo "BROWSERLESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(24))')" >> /tmp/opencode-env.txt
+            # BROWSERLESS_TOKEN 固定值（infra 仓级 PROD_BROWSERLESS_TOKEN，一次生成长期复用；随机现生成会导致双 Deployment 漂移 401）。
+            [ -n "${S_BROWSERLESS:-}" ] || { echo "FAIL: S_BROWSERLESS missing (PROD_BROWSERLESS_TOKEN)"; exit 1; }
+            echo "BROWSERLESS_TOKEN=$S_BROWSERLESS" >> /tmp/opencode-env.txt
           fi
           if [ "$K3S_NS" = "opencode-team" ]; then
             [ -n "${S_MAAS:-}" ] || { echo "FAIL: S_MAAS missing (MAAS_KEY)"; exit 1; }
@@ -201,6 +204,10 @@ jobs:
             [ -n "$OCI_B64" ] || { echo "FAIL: oci-key.pem 为空"; exit 1; }
             $SSH69 "kubectl patch secret $K3S_SECRET -n $K3S_NS -p '{\"data\":{\"OCI_CLI_KEY_CONTENT\":\"$OCI_B64\"}}'"
             echo "OCI KEY PATCHED: secret=$K3S_SECRET"
+          fi
+          if [ "$K3S_NS" = "opencode-team" ]; then
+            # Secret 只在 Pod 启动时注入：固定值切换后必须双重启对齐，否则 opencode/browserless 各执一值继续 401。
+            $SSH69 "kubectl -n $K3S_NS rollout restart deploy/opencode deploy/browserless && kubectl -n $K3S_NS rollout status deploy/opencode --timeout=600s && kubectl -n $K3S_NS rollout status deploy/browserless --timeout=600s"
           fi
           echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
       - name: migrate 卷（源 ns PVC → 目标 hostPath，fail-closed）
