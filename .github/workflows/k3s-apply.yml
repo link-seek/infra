@@ -203,6 +203,12 @@ jobs:
             echo "OCI KEY PATCHED: secret=$K3S_SECRET"
           fi
           echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
+          case "$K3S_NS" in
+            opencode-team) echo "restart by #608 (team dual restart), skip" ;;
+            opencode*) $SSH69 "kubectl -n $K3S_NS rollout restart deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s"
+              echo "ROLLOUT-RESTART OK: ns=$K3S_NS deploy=$K3S_DEPLOY" ;;
+            *) echo "no restart for ns=$K3S_NS (non-opencode)" ;;
+          esac
       - name: migrate 卷（源 ns PVC → 目标 hostPath，fail-closed）
         if: inputs.action == 'migrate'
         run: |
