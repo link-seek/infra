@@ -25,16 +25,18 @@ jobs:
           KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
         run: |
           set -euo pipefail
-          echo "=== nodes (lb labels) ==="
-          kubectl get nodes -o custom-columns=NAME:.metadata.name,READY:.status.conditions[?(@.type==\"Ready\")].status,ENABLELB:.metadata.labels.svccontroller\\.k3s\\.cattle\\.io/enablelb,LBPOOL:.metadata.labels.svccontroller\\.k3s\\.cattle\\.io/lbpool || true
-          echo "=== kube-system: traefik/svclb ==="
-          kubectl -n kube-system get deploy,svc,daemonset 2>&1 | grep -i -E "traefik|svclb|servicelb|loadbalancer|NAME" || echo "no match"
-          echo "=== traefik svc detail ==="
-          kubectl -n kube-system get svc traefik -o jsonpath='type={.spec.type} ports={.spec.ports[*].port} nodePorts={.spec.ports[*].nodePort}{"\n"}' 2>&1 || echo "no svc traefik"
+          echo "=== nodes wide ==="
+          kubectl get nodes -o wide
+          echo "=== nodes lb labels ==="
+          kubectl get nodes -o jsonpath='LBLABELS {range .items}{.metadata.name}={.metadata.labels}{"\n"}{end}' | tr ',' '\n' | grep -i -E "NAME|enablelb|lbpool|hostname" || kubectl describe nodes | grep -i -E "Name:|enablelb|lbpool" | head -20
+          echo "=== kube-system traefik/svclb ==="
+          kubectl -n kube-system get deploy,svc,daemonset | grep -i -E "traefik|svclb|NAME" || echo "no match"
+          echo "=== traefik svc wide ==="
+          kubectl -n kube-system get svc traefik -o wide || echo "no svc traefik"
           echo "=== HelmChartConfig ==="
           kubectl -n kube-system get helmchartconfig 2>&1 | head -10 || echo "no helmchartconfig CRD"
           echo "=== ingress all ns ==="
           kubectl get ingress -A 2>&1 | head -20 || echo "no ingress"
-          echo "=== LoadBalancer svc all ns ==="
-          kubectl get svc -A --field-selector spec.type=LoadBalancer 2>&1 | head -20 || kubectl get svc -A 2>&1 | grep -i LoadBalancer | head -20 || echo "none LB"
+          echo "=== LB svc ==="
+          kubectl get svc -A 2>&1 | awk '$4 ~ /LoadBalancer/ || NR==1' | head -20
           echo CHECK-DONE
