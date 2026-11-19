@@ -1,0 +1,41 @@
+name: tmp-who-serves-opencode-k3s
+# 一次性只读：老 opencode ns 和 opencode-yingxin ns，谁在跑、谁持有 tailnet 主机名。定拆老实例的依据。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-who-serves-opencode-k3s
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 只读（pods＋svc 状态＋endpoints）
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          for NS in opencode opencode-yingxin; do
+            echo "===== ns=$NS deploy ====="
+            kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name} replicas={.status.readyReplicas}/{.spec.replicas}{"\n"}{end}' || echo NO-DEPLOY
+            echo "===== ns=$NS pods ====="
+            kubectl -n $NS get pods -o jsonpath='{range .items[*]}{.metadata.name} phase={.status.phase} start={.status.startTime}{"\n"}{end}' || echo NO-PODS
+          done
+          echo "===== 老 svc opencode/opencode 状态 ====="
+          kubectl -n opencode get svc opencode -o json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('ingress=%r' % (d.get('status',{}).get('loadBalancer'),)); print('conds=%r' % (d.get('metadata',{}).get('annotations',{})))" || echo NO-OLD-SVC
+          echo "===== 新 svc opencode-yingxin/opencode-yingxin 状态 ====="
+          kubectl -n opencode-yingxin get svc opencode-yingxin -o json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('ingress=%r' % (d.get('status',{}).get('loadBalancer'),))" || echo NO-NEW-SVC
+          echo "===== endpoints（谁有后端） ====="
+          kubectl -n opencode get endpoints opencode -o jsonpath='{range .subsets[*].addresses[*]}{.ip} {end}{"\n"}' 2>/dev/null || echo NO-OLD-EP
+          kubectl -n opencode-yingxin get endpoints opencode-yingxin -o jsonpath='{range .subsets[*].addresses[*]}{.ip} {end}{"\n"}' 2>/dev/null || echo NO-NEW-EP
+          echo PROBE-DONE
