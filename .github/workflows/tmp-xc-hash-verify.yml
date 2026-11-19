@@ -1,0 +1,88 @@
+name: tmp-xc-hash-verify
+# 一次性：xieyucheng Secret 切换前后逐 key sha 对比（只打哈希，值不出 runner）。用完即删。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "snapshot=切前快照；verify=切后对比"
+        required: false
+        default: snapshot
+        type: choice
+        options: [snapshot, verify]
+permissions:
+  contents: read
+concurrency:
+  group: tmp-xc-hash-verify
+  cancel-in-progress: false
+jobs:
+  snapshot:
+    if: inputs.mode == 'snapshot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 快照哈希（只打 sha256）
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          kubectl -n opencode-xieyucheng get secret opencode-xieyucheng-env -o json | python3 -c "
+          import json, hashlib, sys
+          d = json.load(sys.stdin)['data']
+          out = {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(d.items())}
+          print('keys=%s' % sorted(out))
+          json.dump(out, open('/tmp/xc-hash-before.json', 'w'))
+          for k, h in sorted(out.items()): print('sha %s=%s' % (k, h[:16]))
+          "
+          echo "snapshot done (hashes only)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xc-hash-before
+          path: /tmp/xc-hash-before.json
+          retention-days: 1
+  verify:
+    if: inputs.mode == 'verify'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: xc-hash-before
+          path: /tmp/xc-hash
+      - name: 对比＋验活
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          echo "== 用 python 直比（值不出日志） =="
+          kubectl -n opencode-xieyucheng get secret opencode-xieyucheng-env -o json > /tmp/now.json
+          python3 - <<'EOF'
+          import json, hashlib
+          before = json.load(open('/tmp/xc-hash/xc-hash-before.json'))
+          now = {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(json.load(open('/tmp/now.json'))['data'].items())}
+          assert set(before) == set(now), 'key 集合变了: %s' % (set(before) ^ set(now))
+          same = [k for k in before if before[k] == now[k]]
+          diff = [k for k in before if before[k] != now[k]]
+          print('same=%s' % same)
+          print('diff=%s (应只有现签的 CF×2，其余 static 必须 same)' % diff)
+          assert set(diff) <= {'CLOUDFLARE_API_TOKEN', 'CF_AI_TOKEN'}, '非预期变更: %s' % diff
+          print('HASH-VERIFY-OK')
+          EOF
+          kubectl -n opencode-xieyucheng get pods -o jsonpath='{range .items[*]}{.metadata.name} ready={.status.conditions[?(@.type=="Ready")].status} start={.status.startTime}{"\n"}{end}'
+          curl -sS -m 15 -o /dev/null -w "xieyucheng http=%{http_code}\n" https://opencode.xieyucheng.top/
+          echo VERIFY-DONE
