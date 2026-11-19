@@ -41,6 +41,13 @@ opencode.yingxin.net.cn {
 			refresh 5s
 			resolvers 100.100.100.100
 		}
+		# 切流过渡：新实例代理（yingxin ns Service，-1 后缀因旧 Service 先占名；老 Service 摘除后此块保留）。
+		dynamic a {
+			name opencode-k3s-1.mackarel-polaris.ts.net.
+			port 4097
+			refresh 5s
+			resolvers 100.100.100.100
+		}
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
