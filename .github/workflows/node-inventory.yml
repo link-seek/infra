@@ -3,16 +3,17 @@ name: node-inventory
 # mode=report：只读（lsblk/df/版本/cgroup），默认，随便跑。
 # mode=mount-data：把数据盘（有且仅当未挂载的 data/дisk）挂到 /data（fstab UUID 持久化），不动 k3s 数据目录。
 # 全程直连 tailnet（user 身份，Tailscale SSH accept），无跳板。写操作只有 mount-data 的挂载本身。
+# 约定：远机 kubectl 一律用 `k3s kubectl`（部分主机无独立 kubectl 二进制）；一次性诊断走临时分支/PR，用完即删，不进常驻巡检。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "report=只读巡检；mount-data=挂载数据盘到 /data；fw-watch-6443=只读联调（.69 计数器前后快照判 SYN 到没到）"
+        description: "report=只读巡检；mount-data=挂载数据盘到 /data"
         required: false
         default: "report"
         type: choice
-        options: [report, mount-data, data-prep, data-sync, fw-watch-6443]
+        options: [report, mount-data, data-prep, data-sync]
       runner_tag:
         description: "runner 进网身份"
         required: false
@@ -47,7 +48,6 @@ jobs:
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-inv-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           tailscale status --self | head -2
       - name: 巡检（只读）
-        if: inputs.mode != 'fw-watch-6443'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
@@ -58,28 +58,10 @@ jobs:
           FAIL=0
           for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
             echo "===== $H ====="
-            ssh $SOPT "root@$H" 'hostname; grep -E "^(NAME|VERSION)=" /etc/os-release; KV="$(k3s --version 2>/dev/null)"; [ -n "$KV" ] || KV="k3s: 未装"; echo "$KV"; lsblk -d -o NAME,SIZE,TYPE 2>/dev/null; df -h / /data /var/lib/rancher 2>/dev/null; if test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroup: v2"; else echo "cgroup: v1"; fi; lsblk -rno NAME,MOUNTPOINT 2>/dev/null; echo "--- 6443 监听（含进程） ---"; ss -tlnp 2>/dev/null | grep -E "6443|10250" || echo "no-6443-listen"; echo "--- 抢端口嫌疑（kube-vip/caddy/代理） ---"; (ps aux 2>/dev/null | grep -iE "kube-vip|caddy|haproxy|nginx|envoy" | grep -v grep || echo "no-vip-caddy-proc"); echo "--- 防火墙 ---"; (iptables -S INPUT 2>/dev/null | head -25 || true); (ufw status 2>/dev/null || true); echo "--- ts-input（tailnet ACL 落点） ---"; (iptables -S ts-input 2>/dev/null || echo no-ts-input); (iptables -L ts-input -n -v 2>/dev/null | head -15 || true); echo "--- KUBE-ROUTER-INPUT（host policy，第一跳） ---"; (iptables -S KUBE-ROUTER-INPUT 2>/dev/null | head -40 || echo no-kube-router-chain); echo "--- nat 表 6443 相关 ---"; (iptables -t nat -S 2>/dev/null | grep -E "6443|10250" || echo "no-nat-6443"); echo "--- CI 身份（P0-2 落地检查） ---"; (k3s kubectl get sa ci-deployer -n kube-system --no-headers 2>/dev/null || echo "no-ci-sa-yet"); (k3s kubectl get clusterrole ci-deployer --no-headers 2>/dev/null || echo "no-ci-role-yet"); echo "--- 本机 API 存活（etcd 健康前置） ---"; curl -k -sS -m 8 -o /dev/null -w 'localhost:6443=%{http_code}\n' https://127.0.0.1:6443/livez 2>&1 || echo "localhost:6443 FAIL"; date -u; systemctl is-active k3s 2>/dev/null || echo "k3s NOT-ACTIVE"; echo "--- SOPS pilot（yingxin） ---"; (k3s kubectl get secret sops-pilot -n opencode-yingxin --no-headers 2>/dev/null || echo "no-pilot-secret-yet"); (k3s kubectl get deploy sops-pilot -n opencode-yingxin -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null || echo "no-pilot-deploy-yet"); echo "--- kubectl 报错原文（.95 诊断用） ---"; (k3s kubectl get secret sops-pilot -n opencode-yingxin 2>&1 | head -3 || true); (openssl x509 -in /var/lib/rancher/k3s/server/tls/client-admin.crt -noout -checkend 0 2>/dev/null && echo admin-cert-OK || echo "admin-cert-ISSUE"); echo; echo "--- SOPS pilot 解密层（secret 本体是明文还是密文） ---"; (k3s kubectl -n opencode-yingxin get secret sops-pilot -o jsonpath='{.data.PILOT_MARKER}' 2>/dev/null | base64 -d 2>/dev/null; echo) || echo "no-pilot-secret-yet"; echo "--- SOPS pilot pod 年龄（Reloader 有没有重载） ---"; (k3s kubectl -n opencode-yingxin get pods -o wide --no-headers 2>/dev/null || echo "no-pilot-pods"); echo "--- 网关钥匙验证（假 key 打 /v1/models，看上游验不验） ---"; (k3s kubectl exec deploy/sops-pilot -n opencode-yingxin -- wget -q -T 15 -O - --header="Authorization: Bearer DUMMY-PROBE-KEY-0000" http://litellm-gateway.litellm.svc.cluster.local:4000/v1/models 2>&1 | head -c 400; echo); echo "--- 主应用重载状态（假值切换后） ---"; (k3s kubectl -n opencode-yingxin rollout status deploy/opencode-yingxin --timeout=90s 2>&1 | tail -2 || echo "no-main-rollout"); (k3s kubectl -n opencode-yingxin get pods --no-headers 2>/dev/null || echo "no-main-pods"); echo "--- SOPS pilot 值验证（exec 读解密值，假值可日志） ---"; (k3s kubectl exec deploy/sops-pilot -n opencode-yingxin -- printenv PILOT_MARKER 2>/dev/null || echo "no-pilot-exec"); echo "--- netpol/svc 外部IP ---"; (k3s kubectl get networkpolicy -A 2>/dev/null || echo no-netpol); (k3s kubectl get svc -A -o wide 2>/dev/null | grep -vE "ClusterIP.*<none>" | head -20 || true)' || { echo "$H SSH-FAIL"; FAIL=1; }
+          ssh $SOPT "root@$H" 'hostname; grep -E "^(NAME|VERSION)=" /etc/os-release; KV="$(k3s --version 2>/dev/null)"; [ -n "$KV" ] || KV="k3s: 未装"; echo "$KV"; lsblk -d -o NAME,SIZE,TYPE 2>/dev/null; df -h / /data /var/lib/rancher 2>/dev/null; if test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroup: v2"; else echo "cgroup: v1"; fi; lsblk -rno NAME,MOUNTPOINT 2>/dev/null' || { echo "$H SSH-FAIL"; FAIL=1; }
           done
           [ "$FAIL" = 0 ] || { echo "FAIL: 有主机巡检失败"; exit 1; }
           shred -u ~/.ssh/ci_key
-      - name: 联调 6443 计数器（仅 fw-watch-6443，只读）
-        if: inputs.mode == 'fw-watch-6443'
-        env:
-          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
-          H=100.93.119.21
-          echo "===== $H 快照1（联调窗口起点） ====="; date -u
-          ssh $SOPT "root@$H" 'echo "--- ts-input 计数 ---"; iptables -L ts-input -n -v 2>/dev/null | head -8; echo "--- conntrack 总数 ---"; (conntrack -C 2>/dev/null || cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo no-conntrack); echo "--- SYN-RECV ---"; (ss -tn state SYN-RECV 2>/dev/null | wc -l || echo no-ss)'
-          echo "等待 150s（联调窗口：此时去 dispatch selfjoin 发包）..."
-          sleep 150
-          echo "===== $H 快照2（联调窗口终点） ====="; date -u
-          ssh $SOPT "root@$H" 'echo "--- ts-input 计数 ---"; iptables -L ts-input -n -v 2>/dev/null | head -8; echo "--- conntrack 总数 ---"; (conntrack -C 2>/dev/null || cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo no-conntrack); echo "--- dmesg 丢包/flood ---"; (dmesg 2>/dev/null | grep -iE "flood|drop|conntrack table full|martian" | tail -5 || echo no-dmesg-hit); echo "--- nft 6443 ---"; (nft list ruleset 2>/dev/null | grep -E "6443|10250" | head -10 || echo no-nft-6443)'
-          shred -u ~/.ssh/ci_key
-          echo FW-WATCH-OK
       - name: 挂载数据盘到 /data（仅 mount-data）
         if: inputs.mode == 'mount-data'
         env:
