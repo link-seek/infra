@@ -2,6 +2,7 @@
 # 由 flux-system（path ./clusters/k3s）收编 → 自动建对账链。
 # manifest 同仓 docker-images k8s/opencode-team（#461）；tag 即行为版本，首 bake 后改 digest pin。
 # Secret（opencode-team-env）不进仓不归 Flux：Flux 对账前先经 pipeline mint，缺 Secret 时 pod 报 CreateContainerConfigError，属预期。
+# SOPS 例外：k8s/opencode-team/*.enc.yaml 走 SOPS 解密（flux-system/sops-age）。
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -11,6 +12,10 @@ spec:
   interval: 5m0s
   path: ./k8s/opencode-team
   prune: true
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
   sourceRef:
     kind: GitRepository
     name: docker-images
