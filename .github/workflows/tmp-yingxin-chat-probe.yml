@@ -1,0 +1,36 @@
+name: tmp-yingxin-chat-probe
+# 一次性验证（用完即删，不合 main）：主 pod 的 LITELLM 值＋拿假 key 调一次真对话，看上游收不收。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-yingxin-chat-probe
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 主 pod 用的什么 key＋假 key 真聊一句
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          echo "== 主 pod LITELLM_API_KEY（应为 dummy） =="
+          kubectl -n opencode-yingxin exec deploy/opencode-yingxin -- printenv LITELLM_API_KEY || echo "no-main-exec"
+          echo "== 假 key 真聊一句（429 也算过：限流≠鉴权失败） =="
+          kubectl -n opencode-yingxin exec deploy/sops-pilot -- wget -q -T 30 -O - \
+            --header='Content-Type: application/json' \
+            --header='Authorization: Bearer DUMMY-PROBE-KEY-0000' \
+            --post-data='{"model":"big-pickle","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' \
+            http://litellm-gateway.litellm.svc.cluster.local:4000/v1/chat/completions 2>&1 | head -c 600; echo
+          echo PROBE-DONE
