@@ -131,7 +131,7 @@ jobs:
           cd /tmp/dimgs
           # team 例外：browserless 拆独立 Secret（同值单键），与主 Secret 同跑同 PR，不断层。
           EXTRA_FILES=""
-          if [ "$APP" = "opencode-team" ]; then
+          if [ "$APPDIR" = "opencode-team" ]; then
             python3 <<'EOF'
           import re
           import yaml
