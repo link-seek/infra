@@ -78,6 +78,10 @@ jobs:
           import re, hashlib
           import yaml
           d = yaml.safe_load(open("/tmp/opencode-yingxin-env.enc.yaml"))
+          print("DIAG topkeys=%s kind=%r" % (sorted(d.keys()), d.get("kind")))
+          print("DIAG metadata=%r" % (d.get("metadata"),))
+          sd = d.get("stringData", {})
+          print("DIAG stringkeys=%s" % sorted(sd.keys()))
           assert d["kind"] == "Secret" and d["metadata"]["name"] == "opencode-yingxin-env", "name mismatch"
           assert d["metadata"]["namespace"] == "opencode-yingxin", "ns mismatch"
           sd = d.get("stringData", {})
