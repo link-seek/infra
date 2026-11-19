@@ -43,10 +43,14 @@ jobs:
           import json,sys
           d = json.load(sys.stdin)
           print('rv=%s created=%s' % (d['metadata'].get('resourceVersion'), d['metadata'].get('creationTimestamp')))
+          print('annotations=%r' % (d['metadata'].get('annotations'),))
+          print('labels=%r' % (d['metadata'].get('labels'),))
           print('keys=%s' % sorted(d.get('data', {}).keys()))
           for m in d['metadata'].get('managedFields', []):
               print('mgr=%s op=%s time=%s' % (m.get('manager'), m.get('operation'), m.get('time')))
           "
+          echo "== 2b. ns 事件（Flux/Reloader 留言） =="
+          kubectl -n opencode-yingxin get events --sort-by=.lastTimestamp 2>&1 | tail -15 || echo "SKIP: 无权读 events"
           echo "== 3. kustomize-controller 近期报错（无权则跳过） =="
           kubectl -n flux-system logs deploy/kustomize-controller --tail=300 2>/dev/null | grep -a -i "opencode-yingxin" | tail -8 || echo "SKIP: 无权读 flux-system 日志"
           echo "== 4. reloader 近期动作（无权则跳过） =="
