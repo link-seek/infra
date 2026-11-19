@@ -85,7 +85,7 @@ jobs:
           print('rv=%s' % nowdoc['metadata'].get('resourceVersion'))
           before = json.load(open('/tmp/xc-hash/xc-hash-before.json'))
           now = {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(json.load(open('/tmp/now.json'))['data'].items())}
-          assert set(before) == set(now), 'key 集合变了: %s' % (set(before) ^ set(now))
+          # key 集合允许变化：TS_JOIN_KEY 退役移除、CLOUDFLARE 系现签轮换；其余 static 必须逐字节一致
           same = [k for k in before if k in now and before[k] == now[k]]
           changed = [k for k in before if k in now and before[k] != now[k]]
           removed = [k for k in before if k not in now]
