@@ -114,7 +114,9 @@ jobs:
           print("sha256=%s" % hashlib.sha256(open("/tmp/app-env.enc.yaml", "rb").read()).hexdigest())
           EOF
           echo "MINT_DAY=$MINT_DAY" >> "$GITHUB_ENV"
-          echo "SECRET_NAME=$SECRET_NAME NS=$NS APPDIR=$APPDIR" >> "$GITHUB_ENV"
+          echo "SECRET_NAME=$SECRET_NAME" >> "$GITHUB_ENV"
+          echo "NS=$NS" >> "$GITHUB_ENV"
+          echo "APPDIR=$APPDIR" >> "$GITHUB_ENV"
           echo "encrypt done (ciphertext only, plaintext shredded)"
       - name: 向 dimgs 开密文 PR（只碰目标 app）
         env:
