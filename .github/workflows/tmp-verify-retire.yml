@@ -1,0 +1,34 @@
+name: tmp-verify-retire
+# 一次性：确认老 opencode ns 已清＋yingxin 对外正常。用完即删。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-verify-retire
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 验退役
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          echo "== 老 ns（应 NotFound） =="
+          kubectl get ns opencode 2>&1 || echo NS-GONE
+          echo "== yingxin 活着 =="
+          kubectl -n opencode-yingxin get pods -o jsonpath='{range .items[*]}{.metadata.name} ready={.status.conditions[?(@.type=="Ready")].status} start={.status.startTime}{"\n"}{end}'
+          echo "== 公网 =="
+          for i in 1 2 3; do curl -sS -m 15 -o /dev/null -w "try$i http=%{http_code}\n" https://opencode.yingxin.net.cn/; sleep 2; done
+          echo RETIRE-VERIFY-DONE
