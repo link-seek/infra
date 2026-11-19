@@ -1,0 +1,22 @@
+name: xieyucheng-sops-reencrypt
+# 薄触发器：opencode-xieyucheng。逻辑在 _sops-reencrypt-core（别改这里，加能力改 core）。
+# 注意：Flux 解密 opt-in＋Reloader 注解＋kus 接线待办，齐了再 dispatch（否则 PR 无人接）。
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "key-updated=org 换 key 后同步；rotation-90d=定期轮换"
+        required: false
+        default: "key-updated"
+        type: choice
+        options: [key-updated, rotation-90d, other]
+permissions:
+  contents: read
+jobs:
+  call:
+    uses: ./.github/workflows/_sops-reencrypt-core.yml
+    with:
+      app: opencode-xieyucheng
+      dir: opencode-xieyucheng
+      reason: ${{ inputs.reason }}
+    secrets: inherit
