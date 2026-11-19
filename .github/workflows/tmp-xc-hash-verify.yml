@@ -80,7 +80,8 @@ jobs:
           python3 - <<'EOF'
           import json, hashlib
           nowdoc = json.load(open('/tmp/now.json'))
-          print('annotations=%r' % (nowdoc['metadata'].get('annotations')))
+          print('annotations=%r' % ({k: v for k, v in (nowdoc['metadata'].get('annotations') or {}).items() if k in ('sops-cutover', 'cf-minted-at')}))
+          print('flux-labels=%r' % ({k: v for k, v in (nowdoc['metadata'].get('labels') or {}).items() if k.startswith('kustomize.toolkit.fluxcd.io')}))
           print('rv=%s' % nowdoc['metadata'].get('resourceVersion'))
           before = json.load(open('/tmp/xc-hash/xc-hash-before.json'))
           now = {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(json.load(open('/tmp/now.json'))['data'].items())}
