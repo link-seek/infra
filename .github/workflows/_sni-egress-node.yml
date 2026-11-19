@@ -81,6 +81,7 @@ jobs:
           echo NODE-APPLY-OK
 
       - name: 验（节点 IP 直测中转 + 网关 pod 解析回正）
+        if: inputs.mode == 'verify'
         run: |
           set -euo pipefail
           SSH69='sudo tailscale ssh root@${{ inputs.server_tail }}'
