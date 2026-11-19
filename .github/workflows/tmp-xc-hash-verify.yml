@@ -9,6 +9,10 @@ on:
         default: snapshot
         type: choice
         options: [snapshot, verify]
+      snapshot_run:
+        description: "verify 用：snapshot 那次的 run id（默认上次）"
+        required: false
+        default: "44525825180"
 permissions:
   contents: read
 concurrency:
@@ -64,6 +68,8 @@ jobs:
         with:
           name: xc-hash-before
           path: /tmp/xc-hash
+          run-id: ${{ inputs.snapshot_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: 对比＋验活
         env:
           KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
