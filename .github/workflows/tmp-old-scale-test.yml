@@ -1,0 +1,37 @@
+name: tmp-old-scale-test
+# 一次性：老 opencode deployment 缩到 0（<1min），公网 200 即新 pod 真接流量，立刻缩回。用完即删。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-old-scale-test
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 缩老→验公网→缩回
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          kubectl -n opencode scale deploy opencode --replicas=0
+          kubectl -n opencode rollout status deploy/opencode --timeout=120s || true
+          sleep 10
+          echo "== 老已停，公网（应 200=新接住了，502=新不行） =="
+          for i in 1 2 3; do curl -sS -m 15 -o /dev/null -w "try$i http=%{http_code} time=%{time_total}s\n" https://opencode.yingxin.net.cn/; sleep 3; done
+          kubectl -n opencode scale deploy opencode --replicas=1
+          kubectl -n opencode rollout status deploy/opencode --timeout=300s
+          echo "== 恢复后 =="
+          curl -sS -m 15 -o /dev/null -w "restored http=%{http_code}\n" https://opencode.yingxin.net.cn/
+          echo SCALE-TEST-DONE
