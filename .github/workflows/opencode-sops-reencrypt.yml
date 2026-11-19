@@ -152,7 +152,7 @@ jobs:
           if [ -z "$(git status --porcelain -- "k8s/$APPDIR/$ENC_NAME")" ]; then echo "NO-CHANGE: 密文无变化，不开 PR"; exit 0; fi
           BR="chore/$APPDIR-reencrypt-$(date -u +%F)-$GITHUB_RUN_ID"
           git checkout -b "$BR"
-          git add "k8s/$APPDIR/$ENC_NAME"
+          git add "k8s/$APPDIR/$ENC_NAME" $EXTRA_FILES
           git commit -m "chore($APPDIR): 重加密主 Secret（${{ inputs.reason }}，cf-minted-at $MINT_DAY）"
           git push -u origin "$BR"
           SHA="$(sha256sum "k8s/$APPDIR/$ENC_NAME" | cut -d' ' -f1)"
