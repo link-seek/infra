@@ -1,0 +1,37 @@
+name: tmp-old-data-inspect
+# 一次性只读：老 PVC（local-path）vs 新 hostPath，大笑＋最新文件。定数据搬家方案的依据。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-old-data-inspect
+  cancel-in-progress: true
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 进 tailnet（user 身份）
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 只读看盘（.69 主机，ls/du/find）
+        run: |
+          set -euo pipefail
+          SSH69="sudo tailscale ssh root@100.93.119.21"
+          echo "== 老 PVC 对象还在不在 =="
+          $SSH69 "k3s kubectl -n opencode get pvc 2>&1" || echo NO-PVC-ACCESS
+          echo "== 老盘（local-path） =="
+          $SSH69 "ls -d /var/lib/rancher/k3s/storage/*opencode* 2>/dev/null || echo NO-OLD-DIRS"
+          $SSH69 "du -sh /var/lib/rancher/k3s/storage/*opencode* 2>/dev/null || true"
+          echo "== 老盘最新 5 个文件 =="
+          $SSH69 "find /var/lib/rancher/k3s/storage -maxdepth 4 -path '*opencode*' -type f -printf '%T+ %p\n' 2>/dev/null | sort -r | head -5 || echo NO-OLD-FILES"
+          echo "== 新盘（hostPath） =="
+          $SSH69 "du -sh /var/lib/opencode-yingxin/work /var/lib/opencode-yingxin/data 2>/dev/null || echo NO-NEW-DIRS"
+          $SSH69 "ls -la /var/lib/opencode-yingxin/work 2>/dev/null | head -8 || true"
+          $SSH69 "find /var/lib/opencode-yingxin -maxdepth 3 -type f -printf '%T+ %p\n' 2>/dev/null | sort -r | head -5 || echo NO-NEW-FILES"
+          echo INSPECT-DONE
