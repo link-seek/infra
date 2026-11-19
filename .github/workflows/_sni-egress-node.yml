@@ -19,7 +19,7 @@ on:
         required: true
         type: string
       mode:
-        description: "deploy=下发+验证；verify=只验"
+        description: "deploy=下发+验证；verify=只验；diagnose=只读排障（pod日志+本机出站）"
         required: false
         default: "verify"
         type: string
@@ -27,6 +27,11 @@ on:
         description: "kubectl 视角 server（默认 .69）"
         required: false
         default: "100.93.119.21"
+        type: string
+      node_tail_ip:
+        description: "节点 tailnet IP 直给（未入簇节点用，如 edge 100.86.159.48；空则走 kubectl）"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -90,6 +95,27 @@ jobs:
           echo "pod resolves opencode.ai => $GOT"
           case "$GOT" in 10.43.*) echo "FAIL: rewrite 还在"; exit 1;; esac
           echo NODE-VERIFY-DONE
+
+      - name: 排障（只读：tag取证+.69自查+DS事件+pod日志+本机监听+本机出站）
+        if: inputs.mode == 'diagnose'
+        run: |
+          set -euo pipefail
+          SSH69='sudo tailscale ssh root@${{ inputs.server_tail }}'
+          echo "== tailnet tag 取证（.69 视角，不依赖 k3s） =="
+          $SSH69 "sudo tailscale status --json 2>/dev/null | python3 -c \"import json,sys; d=json.load(sys.stdin); print('self:', d.get('Self',{}).get('HostName'), d.get('Self',{}).get('Tags')); [print(p.get('HostName'), p.get('TailscaleIPs'), p.get('Tags')) for p in (d.get('Peer') or {}).values() if '${{ inputs.node_hostname }}' in str(p.get('HostName','')) or ('${{ inputs.node_tail_ip }}' and '${{ inputs.node_tail_ip }}' in str(p.get('TailscaleIPs','')))]\"" || echo TAG-DUMP-FAIL
+          echo "== .69 本机 tailscaled 自查 =="
+          $SSH69 "systemctl is-active tailscaled 2>/dev/null || echo NO-SYSTEMD; sudo tailscale status --self 2>/dev/null | head -n 3; sudo journalctl -u tailscaled --no-pager --since '10 min ago' 2>/dev/null | grep -aiE 'error|fail|ssh|accept' | tail -n 10 || true"
+          echo "== DS/事件/pod（.69 视角，无 DS 则跳过） =="
+          $SSH69 "kubectl -n egress describe daemonset '${{ inputs.ds_name }}' 2>/dev/null | tail -n 25" || echo NO-DS-YET
+          $SSH69 "kubectl -n egress logs 'daemonset/${{ inputs.ds_name }}' --tail=50 2>&1 | tail -n 60" || true
+          NODEIP="$($SSH69 "kubectl get node '${{ inputs.node_hostname }}' -o jsonpath='{.status.addresses[?(@.type==\"InternalIP\")].address}' 2>/dev/null" || true)"
+          [ -n "$NODEIP" ] || NODEIP="${{ inputs.node_tail_ip }}"
+          echo "NODEIP=$NODEIP"
+          if [ -n "$NODEIP" ]; then
+            echo "== 本机 14443 监听＋出站（经 .69 跳上节点） =="
+            $SSH69 "sudo tailscale ssh 'root@$NODEIP' 'ss -lnt | grep 14443 || echo NO-LISTEN; echo ---; curl -s -m 10 -o /dev/null -w \"upstream %{http_code}\n\" https://opencode.ai:443/ || echo UPSTREAM-FAIL'" || echo "SSH-NODE-FAIL（.69 跳节点不通，见 ts-acl）"
+          fi
+          echo NODE-DIAGNOSE-DONE
 
       - name: 退出 tailnet（焚毁节点）
         if: always()
