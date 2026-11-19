@@ -10,7 +10,7 @@ on:
         required: false
         default: "encrypt"
         type: choice
-        options: [encrypt, activate, diagnose]
+        options: [encrypt, activate, diagnose, rekick]
 permissions:
   contents: read
 concurrency:
@@ -179,3 +179,32 @@ jobs:
           echo "== 公网 =="
           curl -sS -m 20 -o /dev/null -w "yingxin http=%{http_code}\n" https://opencode.yingxin.net.cn/
           echo ACTIVATE-OK
+  rekick:
+    if: inputs.mode == 'rekick'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 踢一脚（Reloader 竞态错过窗口，手工 rollout 一次；以后注解常驻自动走）
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          echo "== 踢前 pod =="
+          kubectl -n opencode-yingxin get pods -o jsonpath='{range .items[*]}{.metadata.name} start={.status.startTime}{"\n"}{end}'
+          kubectl -n opencode-yingxin rollout restart deploy/opencode-yingxin
+          kubectl -n opencode-yingxin rollout status deploy/opencode-yingxin --timeout=600s
+          echo "== 踢后 pod（startTime 应为本次） =="
+          kubectl -n opencode-yingxin get pods -o jsonpath='{range .items[*]}{.metadata.name} ready={.status.conditions[?(@.type=="Ready")].status} start={.status.startTime}{"\n"}{end}'
+          echo "== xieyucheng 未动 =="
+          kubectl -n opencode-xieyucheng get pods -o jsonpath='{range .items[*]}{.metadata.name} start={.status.startTime}{"\n"}{end}'
+          echo "== 公网 =="
+          curl -sS -m 20 -o /dev/null -w "yingxin http=%{http_code}\n" https://opencode.yingxin.net.cn/
+          echo REKICK-OK
