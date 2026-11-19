@@ -69,7 +69,7 @@ jobs:
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
           for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
             echo "===== $H ====="
-            ssh $SOPT "root@$H" 'echo "-- config.yaml --"; cat /etc/rancher/k3s/config.yaml 2>/dev/null; echo "-- unit disable? --"; systemctl cat k3s 2>/dev/null | grep -i -E "disable|ExecStart=" || echo "unit: no disable"; echo "-- manifests ${{ inputs.component }}? --"; ls /var/lib/rancher/k3s/server/manifests/ | grep -i "${{ inputs.component }}" || echo "manifests: absent"' || echo "$H SSH-FAIL"
+            ssh $SOPT "root@$H" 'echo "-- config.yaml (token 脱敏) --"; sed "s/^\\(token:\\)\\s.*\\$/\\1 ***/" /etc/rancher/k3s/config.yaml 2>/dev/null; echo "-- unit disable? --"; systemctl cat k3s 2>/dev/null | grep -i -E "disable|ExecStart=" || echo "unit: no disable"; echo "-- manifests ${{ inputs.component }}? --"; ls /var/lib/rancher/k3s/server/manifests/ | grep -i "${{ inputs.component }}" || echo "manifests: absent"' || echo "$H SSH-FAIL"
           done
           shred -u ~/.ssh/ci_key
           echo RECON-DONE
@@ -83,12 +83,14 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
           FNAME="$(basename "${{ inputs.manifest_path }}")"
+          scp $SOPT scripts/k3s-unit-disable.py "root@${{ inputs.hw69_tail }}:/tmp/k3s-unit-disable.py"
+          for H in ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do scp $SOPT scripts/k3s-unit-disable.py "root@$H:/tmp/k3s-unit-disable.py"; done
           for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
             echo "===== ship $H ====="
             scp $SOPT "${{ inputs.manifest_path }}" "root@$H:/var/lib/rancher/k3s/server/manifests/$FNAME"
             ssh $SOPT "root@$H" 'set -euo pipefail; C=/etc/rancher/k3s/config.yaml; M="${{ inputs.component }}";
               case "${{ inputs.disable }}" in
-                remove) [ -f "$C" ] && sed -i "/^[[:space:]]*-[[:space:]]*$M[[:space:]]*$/d" "$C" || true; U=/etc/systemd/system/k3s.service; [ -f "$U" ] && sed -i "s/--disable[= ]$M//g" "$U" || true; systemctl daemon-reload || true; echo "disable removed" ;;
+                remove) [ -f "$C" ] && sed -i "/^[[:space:]]*-[[:space:]]*$M[[:space:]]*$/d" "$C" || true; U=/etc/systemd/system/k3s.service; [ -f "$U" ] && python3 /tmp/k3s-unit-disable.py "$U" "$M" remove || true; systemctl daemon-reload || true; echo "disable removed" ;;
                 add) grep -q "disable:" "$C" 2>/dev/null || printf "disable:\n" >> "$C"; grep -q "$M" "$C" || sed -i "/disable:/a\\  - $M" "$C"; echo "disable added" ;;
                 keep) echo "disable kept" ;;
               esac; grep -i -A3 "disable" "$C" 2>/dev/null || echo "config: no disable stanza"'
