@@ -1,6 +1,7 @@
 # Flux Kustomization: yingxin 主实例（prod，opencode 改名）。
 # 由 flux-system（path ./clusters/k3s）收编 → 自动建对账链。
 # Secret（opencode-yingxin-env）不进仓不归 Flux，沿用 pipeline 已建好的。
+# SOPS pilot 例外：k8s/opencode-yingxin/*.enc.yaml 走 SOPS 解密（flux-system/sops-age），见 .sops.yaml。
 # 首同步会重启一次：镜像 linkseed→link-seek 改名，同 digest（下周 linkseed 消失前必须切）。
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -11,6 +12,8 @@ spec:
   interval: 5m0s
   path: ./k8s/opencode-yingxin
   prune: true
+  decryption:
+    provider: sops
   sourceRef:
     kind: GitRepository
     name: docker-images
