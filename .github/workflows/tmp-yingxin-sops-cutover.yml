@@ -10,13 +10,48 @@ on:
         required: false
         default: "encrypt"
         type: choice
-        options: [encrypt, activate]
+        options: [encrypt, activate, diagnose]
 permissions:
   contents: read
 concurrency:
   group: tmp-yingxin-sops-cutover
   cancel-in-progress: false
 jobs:
+  diagnose:
+    if: inputs.mode == 'diagnose'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 只读深挖（Flux＋Secret 经手人＋控制器日志）
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          echo "== 1. Flux KS 状态 =="
+          kubectl -n flux-system get kustomization opencode-yingxin -o json | python3 -c "import json,sys; d=json.load(sys.stdin); print('rev=%s' % d['status'].get('lastAppliedRevision')); [print('cond=%s status=%s %s' % (c['type'], c['status'], c.get('message','')[:300])) for c in d['status'].get('conditions', [])]"
+          kubectl -n flux-system describe kustomization opencode-yingxin 2>&1 | grep -a -iE "decrypt|sops|error|fail|age" | head -8 || echo "no-decrypt-events"
+          echo "== 2. Secret 经手人（只打 metadata，不碰值） =="
+          kubectl -n opencode-yingxin get secret opencode-yingxin-env -o json | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          print('rv=%s created=%s' % (d['metadata'].get('resourceVersion'), d['metadata'].get('creationTimestamp')))
+          print('keys=%s' % sorted(d.get('data', {}).keys()))
+          for m in d['metadata'].get('managedFields', []):
+              print('mgr=%s op=%s time=%s' % (m.get('manager'), m.get('operation'), m.get('time')))
+          "
+          echo "== 3. kustomize-controller 近期报错 =="
+          kubectl -n flux-system logs deploy/kustomize-controller --tail=300 2>&1 | grep -a -i "opencode-yingxin" | tail -8 || echo "no-controller-log-access"
+          echo "== 4. reloader 近期动作 =="
+          kubectl -n reloader logs deploy/reloader-reloader --tail=300 2>&1 | grep -a -i "yingxin" | tail -8 || echo "no-reloader-log-access"
+          echo DIAGNOSE-DONE
   encrypt:
     if: inputs.mode == 'encrypt'
     runs-on: ubuntu-latest
