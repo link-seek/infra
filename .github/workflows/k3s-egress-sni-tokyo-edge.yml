@@ -24,6 +24,7 @@ jobs:
     uses: ./.github/workflows/_sni-egress-node.yml
     with:
       node_hostname: mesh-oci-edge
+      node_tail_ip: 100.86.159.48
       ds_file: k8s/egress/daemonset-sni-tokyo-edge.yaml
       ds_name: sni-egress-tokyo-edge
       mode: ${{ inputs.mode || 'verify' }}
