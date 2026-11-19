@@ -76,11 +76,16 @@ jobs:
           before = json.load(open('/tmp/xc-hash/xc-hash-before.json'))
           now = {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(json.load(open('/tmp/now.json'))['data'].items())}
           assert set(before) == set(now), 'key 集合变了: %s' % (set(before) ^ set(now))
-          same = [k for k in before if before[k] == now[k]]
-          diff = [k for k in before if before[k] != now[k]]
-          print('same=%s' % same)
-          print('diff=%s (应只有现签的 CF×2，其余 static 必须 same)' % diff)
-          assert set(diff) <= {'CLOUDFLARE_API_TOKEN', 'CF_AI_TOKEN'}, '非预期变更: %s' % diff
+          same = [k for k in before if k in now and before[k] == now[k]]
+          changed = [k for k in before if k in now and before[k] != now[k]]
+          removed = [k for k in before if k not in now]
+          added = [k for k in now if k not in before]
+          print('changed=%s (应只有现签的 CF×2)' % changed)
+          print('removed=%s (应只有已退役的 TS_JOIN_KEY)' % removed)
+          print('added=%s (应无)' % added)
+          assert set(changed) <= {'CLOUDFLARE_API_TOKEN', 'CF_AI_TOKEN'}, '非预期变更: %s' % changed
+          assert removed == ['TS_JOIN_KEY'] or removed == [], '非预期删除: %s' % removed
+          assert added == [], '非预期新增: %s' % added
           print('HASH-VERIFY-OK')
           EOF
           kubectl -n opencode-xieyucheng get pods -o jsonpath='{range .items[*]}{.metadata.name} ready={.status.conditions[?(@.type=="Ready")].status} start={.status.startTime}{"\n"}{end}'
