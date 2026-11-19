@@ -1,0 +1,50 @@
+name: edge-leave（drain→delete→uninstall，远机/自体双模式）
+# composite action：弃节点唯一正本（leave 远机版 / selfjoin 本机版共用）。
+# 远机（remote=true）：经 server_tail 跳执行 drain/delete＋ssh 卸 agent。
+# 本机（remote=false）：drain/delete 经跳板执行（kubectl 必须走 server），uninstall 本地执行。
+description: "弃节点（drain＋delete＋uninstall），需外部双确认"
+
+inputs:
+  remote:
+    description: "true=远机（跳板卸）；false=本机（本地卸）"
+    required: false
+    default: "true"
+  node_name:
+    description: "要摘的节点名（垃圾名可摘，不限自己）"
+    required: true
+  node_ip:
+    description: "远机 tailnet IP（仅 remote=true 卸 agent 用）"
+    required: false
+    default: ""
+  server_tail:
+    description: "kubectl 视角 server（默认 .69；VIP 上线后填 VIP）"
+    required: false
+    default: "100.93.119.21"
+  ssh_key:
+    description: "跳板钥匙（仅 remote=true 用）"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: 弃节点（drain＋delete＋uninstall）
+      shell: bash
+      run: |
+        set -euo pipefail
+        S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@" || true; }
+        H="${{ inputs.node_name }}"
+        if S69 "kubectl get node $H --no-headers 2>/dev/null" | grep -q .; then
+          S69 "kubectl drain $H --ignore-daemonsets --delete-emptydir-data --timeout=300s 2>&1 | tail -2"
+          S69 "kubectl delete node $H 2>&1 | head -1"
+        else
+          echo 'NODE-NOT-FOUND, nothing to do'
+        fi
+        if [ "${{ inputs.remote }}" = "true" ]; then
+          [ -n "${{ inputs.node_ip }}" ] || { echo "FAIL: 远机模式缺 node_ip"; exit 1; }
+          S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key root@${{ inputs.node_ip }} '/usr/local/bin/k3s-agent-uninstall.sh 2>&1 | tail -2 || echo AGENT-NOT-INSTALLED'"
+        else
+          sudo /usr/local/bin/k3s-agent-uninstall.sh 2>&1 | tail -2 || echo AGENT-NOT-INSTALLED
+        fi
+        S69 "kubectl get node $H 2>&1 || echo NODE-GONE-OK"
+        echo TEARDOWN-OK

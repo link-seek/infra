@@ -1,0 +1,32 @@
+name: tmp-old-scale-test
+# 一次性：直打两个 tailnet 代理设备 IP（老 .85 vs 新 -1 的 .33），零集群写入。都 200=新链路通。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-old-scale-test
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 直打设备 IP（只读 curl）
+        run: |
+          set -euo pipefail
+          echo "== 老设备 100.112.216.85（干净名持有者） =="
+          curl -sS -m 15 -o /dev/null -w "old-device http=%{http_code} time=%{time_total}s\n" http://100.112.216.85:4097/ || echo "old-device FAIL"
+          echo "== 新设备 100.104.166.33（opencode-k3s-1） =="
+          curl -sS -m 15 -o /dev/null -w "new-device http=%{http_code} time=%{time_total}s\n" http://100.104.166.33:4097/ || echo "new-device FAIL"
+          echo "== 公网对照 =="
+          curl -sS -m 15 -o /dev/null -w "public http=%{http_code}\n" https://opencode.yingxin.net.cn/
+          echo DEVICE-TEST-DONE

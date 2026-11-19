@@ -3,6 +3,7 @@ name: node-inventory
 # mode=report：只读（lsblk/df/版本/cgroup），默认，随便跑。
 # mode=mount-data：把数据盘（有且仅当未挂载的 data/дisk）挂到 /data（fstab UUID 持久化），不动 k3s 数据目录。
 # 全程直连 tailnet（user 身份，Tailscale SSH accept），无跳板。写操作只有 mount-data 的挂载本身。
+# 约定：远机 kubectl 一律用 `k3s kubectl`（部分主机无独立 kubectl 二进制）；一次性诊断走临时分支/PR，用完即删，不进常驻巡检。
 
 on:
   workflow_dispatch:
@@ -57,7 +58,7 @@ jobs:
           FAIL=0
           for H in 100.100.246.95 100.73.182.4 100.93.119.21; do
             echo "===== $H ====="
-            ssh $SOPT "root@$H" 'hostname; grep -E "^(NAME|VERSION)=" /etc/os-release; KV="$(k3s --version 2>/dev/null)"; [ -n "$KV" ] || KV="k3s: 未装"; echo "$KV"; lsblk -d -o NAME,SIZE,TYPE 2>/dev/null; df -h / /data /var/lib/rancher 2>/dev/null; if test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroup: v2"; else echo "cgroup: v1"; fi; lsblk -rno NAME,MOUNTPOINT 2>/dev/null' || { echo "$H SSH-FAIL"; FAIL=1; }
+          ssh $SOPT "root@$H" 'hostname; grep -E "^(NAME|VERSION)=" /etc/os-release; KV="$(k3s --version 2>/dev/null)"; [ -n "$KV" ] || KV="k3s: 未装"; echo "$KV"; lsblk -d -o NAME,SIZE,TYPE 2>/dev/null; df -h / /data /var/lib/rancher 2>/dev/null; if test -f /sys/fs/cgroup/cgroup.controllers; then echo "cgroup: v2"; else echo "cgroup: v1"; fi; lsblk -rno NAME,MOUNTPOINT 2>/dev/null' || { echo "$H SSH-FAIL"; FAIL=1; }
           done
           [ "$FAIL" = 0 ] || { echo "FAIL: 有主机巡检失败"; exit 1; }
           shred -u ~/.ssh/ci_key

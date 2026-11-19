@@ -1,0 +1,166 @@
+name: edge-join（装 agent→Ready，远机/自体双模式）
+# composite action：k3s-join-edge 的装机段唯一正本（join 远机版 / selfjoin 本机版共用）。
+# 远机（remote=true）：经 server_tail 跳 ssh -i key 装机（目标机可无 tailnet；SSH_KEY 现递现焚）。
+# 本机（remote=false）：runner 本地装（selfjoin/bootstrap 用；不用跳板/钥匙）。
+# 输出：node_name（join 钉死＋Ready 门用）。
+description: "edge agent 入簇（远机跳装 / 本机直装），Ready 门止"
+
+inputs:
+  remote:
+    description: "true=经跳板装远机；false=本机直装"
+    required: false
+    default: "true"
+  node_name:
+    description: "kubectl node 名（join 钉死；selfjoin 传 ci-edge-$RUN_ID）"
+    required: true
+  node_ip:
+    description: "agent --node-ip（远机=agent_ip；本机=runner tailnet IP）"
+    required: true
+  server_tail:
+    description: "取号＋6443 server（默认 .69；VIP 上线后填 VIP）"
+    required: false
+    default: "100.93.119.21"
+  ssh_key:
+    description: "跳板钥匙（CADDY_SSH_KEY；仅 remote=true 用）"
+    required: false
+    default: ""
+  k3s_bin_url:
+    description: "k3s 二进制国内中转 URL"
+    required: true
+  k3s_sha_url:
+    description: "k3s sha256 国内中转 URL"
+    required: true
+  bin_source:
+    description: "二进制源：auto=测速自选；obs=强制国内中转；github=强制官方"
+    required: false
+    default: "auto"
+  pause_image:
+    description: "agent pause 镜像（SWR 常驻）"
+    required: false
+    default: "swr.cn-north-9.myhuaweicloud.com/link-seek/edge-pause:3.10.2"
+  ts_api_key:
+    description: "tailnet 进网 key（TS_API_KEY）"
+    required: true
+
+outputs:
+  node_name:
+    description: "已 Ready 节点名"
+    value: ${{ steps.ready.outputs.node_name }}
+
+runs:
+  using: composite
+  steps:
+    - name: 进网＋取号（token 只读一次，用完即焚）
+      shell: bash
+      env:
+        TS_API_KEY: ${{ inputs.ts_api_key }}
+        SSH_KEY: ${{ inputs.ssh_key }}
+      run: |
+        set -euo pipefail
+        S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@"; }
+        curl -fsSL https://tailscale.com/install.sh | sh
+        TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+        echo "::add-mask::$TSKEY"
+        MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+          -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:mesh","tag:user"]}}},"expirySeconds":3600}' \
+          https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+        [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
+        echo "::add-mask::$MINTED"
+        if [ "${{ inputs.remote }}" = "true" ]; then
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edge-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          [ -n "${SSH_KEY:-}" ] || { echo "FAIL: 远机模式缺 ssh_key"; exit 1; }
+          echo "::add-mask::$SSH_KEY"
+          printf '%s\n' "$SSH_KEY" | S69 'cat > /tmp/ci-edge.key && chmod 600 /tmp/ci-edge.key && echo KEY-SHIPPED'
+        else
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="${{ inputs.node_name }}" --accept-routes=false --accept-dns=false
+        fi
+        unset MINTED
+        echo "== 预热数据面（等 server 可达，最长 3 分钟；美国 runner 建连慢） =="
+        warmed=false
+        for i in $(seq 1 18); do
+          if sudo tailscale ping --c=1 --timeout=10s "${{ inputs.server_tail }}" >/dev/null 2>&1; then warmed=true; break; fi
+          sleep 10
+        done
+        [ "$warmed" = true ] || { echo "FAIL: server 数据面 3 分钟未就绪"; exit 1; }
+        echo TAILNET-WARM
+        S69 'echo JUMP-OK; hostname'
+        VER="$(S69 'k3s --version | head -1' | awk '{print $3}')"; [ -n "$VER" ] || { echo "FAIL: 取不到 server 版本"; exit 1; }
+        echo "server k3s: $VER"
+        TOKEN="$(S69 "k3s token create --ttl 2h --description ci-$GITHUB_RUN_ID 2>/dev/null" | tr -d ' \r\n\t')"; [ -n "$TOKEN" ] || { echo "FAIL: bootstrap token 签发失败（tokencleaner/版本不支持？）"; exit 1; }
+        echo "::add-mask::$TOKEN"
+        printf '%s' "$VER" > /tmp/edge-ver
+        printf '%s' "$TOKEN" > /tmp/edge-token && chmod 600 /tmp/edge-token
+        unset TOKEN
+        echo NETMAP-OK
+    - name: 装 agent（OBS＋验签，900s 门）
+      shell: bash
+      run: |
+        set -euo pipefail
+        S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@"; }
+        VER="$(cat /tmp/edge-ver)"; TOKEN="$(cat /tmp/edge-token)"
+        [ -n "$VER" ] && [ -n "$TOKEN" ] || { echo "FAIL: token 缺失"; exit 1; }
+        echo "::add-mask::$TOKEN"
+        VERSAFE="${VER/+/%2B}"
+        GH_BIN="https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/k3s"
+        GH_SHA="https://github.com/k3s-io/k3s/releases/download/${VERSAFE}/sha256sum-amd64.txt"
+        OBS_BIN='${{ inputs.k3s_bin_url }}'; OBS_SHA='${{ inputs.k3s_sha_url }}'
+        pick_bin() {
+          # $1=obs_url $2=gh_url -> 打印选用 URL。auto：10s 探活＋测速，快的赢；都不通即红。
+          case "${{ inputs.bin_source }}" in
+            obs) echo "$1" ;;
+            github) echo "$2" ;;
+            *)
+              OBS_T="$(curl -sfL -o /dev/null -w '%{time_total}' --max-time 10 "$1" 2>/dev/null || echo 999)"
+              GH_T="$(curl -sfL -o /dev/null -w '%{time_total}' --max-time 10 "$2" 2>/dev/null || echo 999)"
+              echo "probe obs=${OBS_T}s github=${GH_T}s" >&2
+              if awk "BEGIN{exit !(($OBS_T+0) < ($GH_T+0) && ($OBS_T+0) < 9)}"; then echo "$1"; else echo "$2"; fi ;;
+          esac
+        }
+        BIN_URL="$(pick_bin "$OBS_BIN" "$GH_BIN")"; SHA_URL="$(pick_bin "$OBS_SHA" "$GH_SHA")"
+        echo "BIN_SOURCE=${{ inputs.bin_source }} -> $BIN_URL"
+        if [ "${{ inputs.remote }}" = "true" ]; then
+          A="root@${{ inputs.node_ip }}"
+          timeout 900 S69 "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i /tmp/ci-edge.key $A \"mkdir -p /tmp/k3s-bin && curl -sfL --retry 3 --max-time 300 -o /tmp/k3s-bin/k3s '$BIN_URL' && curl -sfL -o /tmp/k3s-bin/sha256sum-amd64.txt '$SHA_URL' && cd /tmp/k3s-bin && grep -E ' +k3s\$' sha256sum-amd64.txt | sha256sum -c - && install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s && rm -rf /tmp/k3s-bin\""
+          echo "== pre-flight: 远机→server 6443（通不过 agent 必挂，先红） =="
+          S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"curl -k -sS -m 20 -o /dev/null -w 'apiserver http=%{http_code} time=%{time_total}s\n' https://${{ inputs.server_tail }}:6443/version\"" || { echo "FAIL: 远机到 ${{ inputs.server_tail }}:6443 不通（ACL 只给 tag:mesh 开 6443，见 policy.hujson）"; S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"ip route get ${{ inputs.server_tail }} || true\""; exit 1; }
+          echo "== 定位 get.k3s.io（set -x＋分段计时，hang 点即红） =="
+          time timeout 120 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"curl -sfL --max-time 60 https://get.k3s.io -o /tmp/k3s-install.sh && wc -l /tmp/k3s-install.sh\"" || { echo "FAIL: get.k3s.io 下载超时（120s）"; exit 1; }
+          S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"grep -c 'systemctl restart \${SYSTEM_NAME}' /tmp/k3s-install.sh | grep -qx 1\"" || { echo "FAIL: 上游脚本 restart 行数变了，sed 不敢打"; exit 1; }
+          S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"sed -i 's/systemctl restart \${SYSTEM_NAME}/systemctl restart --no-block \${SYSTEM_NAME}/' /tmp/k3s-install.sh\""
+          timeout --foreground -k 30 300 S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key $A \"set -x; INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$VER INSTALL_K3S_EXEC='agent --server https://${{ inputs.server_tail }}:6443 --token \\\"$TOKEN\\\" --node-ip ${{ inputs.node_ip }} --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}' sh -x /tmp/k3s-install.sh 2>&1 && rm -f /tmp/k3s-install.sh\""
+        else
+          TSIP="$(sudo tailscale ip -4)"; [ -n "$TSIP" ] || { echo "FAIL: 取不到本机 tailnet IP"; exit 1; }
+          echo "== pre-flight: 本机→server 6443（通不过 agent 必挂，先红） =="
+          curl -k -sS -m 20 -o /dev/null -w 'apiserver http=%{http_code} time=%{time_total}s\n' https://${{ inputs.server_tail }}:6443/version || { echo "FAIL: 本机到 ${{ inputs.server_tail }}:6443 不通（ACL 只给 tag:mesh 开 6443，见 policy.hujson）"; ip route get ${{ inputs.server_tail }} || true; exit 1; }
+          mkdir -p /tmp/k3s-bin
+          curl -sfL --retry 3 --max-time 300 -o /tmp/k3s-bin/k3s "$BIN_URL"
+          curl -sfL --max-time 120 -o /tmp/k3s-bin/sha256sum-amd64.txt "$SHA_URL"
+          (cd /tmp/k3s-bin && grep -E ' +k3s$' sha256sum-amd64.txt | sha256sum -c -)
+          sudo install -m 0755 /tmp/k3s-bin/k3s /usr/local/bin/k3s
+          rm -rf /tmp/k3s-bin
+          echo "== 定位 get.k3s.io（set -x＋分段计时） =="
+          time curl -sfL --max-time 60 https://get.k3s.io -o /tmp/k3s-install.sh || { echo "FAIL: get.k3s.io 下载超时（60s）"; exit 1; }
+          wc -l /tmp/k3s-install.sh
+          grep -c 'systemctl restart ${SYSTEM_NAME}' /tmp/k3s-install.sh | grep -qx 1 || { echo "FAIL: 上游脚本 restart 行数变了，sed 不敢打"; exit 1; }
+          sed -i 's/systemctl restart ${SYSTEM_NAME}/systemctl restart --no-block ${SYSTEM_NAME}/' /tmp/k3s-install.sh
+          timeout --foreground -k 30 300 sudo env "INSTALL_K3S_SKIP_DOWNLOAD=true" "INSTALL_K3S_VERSION=$VER" "INSTALL_K3S_EXEC=agent --server https://${{ inputs.server_tail }}:6443 --token \"$TOKEN\" --node-name ${{ inputs.node_name }} --node-ip $TSIP --flannel-iface tailscale0 --node-label dedicated=edge --node-taint dedicated=edge:NoSchedule --pause-image=${{ inputs.pause_image }}" sh -x /tmp/k3s-install.sh 2>&1
+          rm -f /tmp/k3s-install.sh
+        fi
+        unset TOKEN; shred -u /tmp/edge-token || true
+    - name: Ready 门
+      id: ready
+      shell: bash
+      run: |
+        set -euo pipefail
+        S69() { sudo tailscale ssh root@"${{ inputs.server_tail }}" "$@"; }
+        H="${{ inputs.node_name }}"
+        for i in $(seq 1 24); do
+          sleep 15
+          ST="$(S69 "kubectl get node $H -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null" || true)"
+          echo "$H Ready=$ST ($i/24)"
+          [ "$ST" = True ] && break
+          [ "$i" = 24 ] && { echo "FAIL: $H 未 Ready"; S69 'kubectl get nodes -o wide'; echo "== agent 日志（真因） =="; if [ "${{ inputs.remote }}" = "true" ]; then S69 "ssh -o BatchMode=yes -i /tmp/ci-edge.key root@${{ inputs.node_ip }} 'journalctl -u k3s-agent --no-pager -n 50; echo ---; curl -k -m 10 https://${{ inputs.server_tail }}:6443/version; true'"; else sudo journalctl -u k3s-agent --no-pager -n 50 || true; echo ---; curl -k -m 10 https://${{ inputs.server_tail }}:6443/version || true; fi; exit 1; }
+        done
+        S69 "kubectl get node $H -o wide"
+        echo "node_name=$H" >> "$GITHUB_OUTPUT"
+        echo AGENT-JOINED

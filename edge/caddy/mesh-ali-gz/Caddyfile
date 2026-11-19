@@ -35,8 +35,9 @@ opencode.xieyucheng.top {
 # 后端用 MagicDNS 全称＋dynamic a（refresh 5s＋被动健康检查；deliver-caddy 保证本机首选 100.100.100.100）。
 opencode.yingxin.net.cn {
 	reverse_proxy {
+		# 单后端：yingxin 新实例代理（旧名被占，-1 为现行名；哪天重建抢回干净名再改回）。
 		dynamic a {
-			name opencode-k3s.mackarel-polaris.ts.net.
+			name opencode-k3s-1.mackarel-polaris.ts.net.
 			port 4097
 			refresh 5s
 			resolvers 100.100.100.100

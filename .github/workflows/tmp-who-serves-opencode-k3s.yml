@@ -1,0 +1,68 @@
+name: tmp-who-serves-opencode-k3s
+# 一次性只读：老 opencode ns 和 opencode-yingxin ns，谁在跑、谁持有 tailnet 主机名。定拆老实例的依据。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-who-serves-opencode-k3s
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 只读（pods＋svc 状态＋endpoints）
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          for NS in opencode opencode-yingxin; do
+            echo "===== ns=$NS deploy ====="
+            kubectl -n $NS get deploy -o jsonpath='{range .items[*]}{.metadata.name} replicas={.status.readyReplicas}/{.spec.replicas}{"\n"}{end}' || echo NO-DEPLOY
+            echo "===== ns=$NS pods ====="
+            kubectl -n $NS get pods -o jsonpath='{range .items[*]}{.metadata.name} phase={.status.phase} start={.status.startTime}{"\n"}{end}' || echo NO-PODS
+          done
+          echo "===== 老 svc opencode/opencode 状态 ====="
+          kubectl -n opencode get svc opencode -o json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('ingress=%r' % (d.get('status',{}).get('loadBalancer'),)); print('conds=%r' % (d.get('metadata',{}).get('annotations',{})))" || echo NO-OLD-SVC
+          echo "===== 新 svc opencode-yingxin/opencode-yingxin 状态 ====="
+          kubectl -n opencode-yingxin get svc opencode-yingxin -o json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('ingress=%r' % (d.get('status',{}).get('loadBalancer'),))" || echo NO-NEW-SVC
+          echo "===== 老 svc describe ====="
+          kubectl -n opencode describe svc opencode 2>&1 | grep -a -E "Annotations|Endpoints|tailscale|CreationTimestamp|IP:" | head -12 || echo NO-OLD-DESC
+          echo "===== 新 svc describe ====="
+          kubectl -n opencode-yingxin describe svc opencode-yingxin 2>&1 | grep -a -E "Annotations|Endpoints|tailscale|CreationTimestamp|IP:" | head -12 || echo NO-NEW-DESC
+          echo "===== 创建时间 ====="
+          kubectl -n opencode get svc opencode -o jsonpath='old-created={.metadata.creationTimestamp}{"\n"}' 2>/dev/null || echo NO-OLD-TS
+          kubectl -n opencode-yingxin get svc opencode-yingxin -o jsonpath='new-created={.metadata.creationTimestamp}{"\n"}' 2>/dev/null || echo NO-NEW-TS
+          echo "===== tailnet 视角（runner 直连，无需密钥） ====="
+          tailscale status --json 2>/dev/null | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          for p in list((d.get('Peer') or {}).values()):
+              n = (p.get('DNSName') or '') + ' ' + (p.get('HostName') or '')
+              if 'opencode' in n:
+                  print('peer host=%s dns=%s ip=%s os=%s lastseen=%s' % (p.get('HostName'), p.get('DNSName'), (p.get('TailscaleIPs') or ['?'])[0], p.get('OS'), p.get('LastSeen')))
+          " || echo NO-TS-STATUS
+      - name: admin API 看设备世代（只读 GET，真值不出 runner）
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -sS -m 30 -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            https://api.tailscale.com/api/v2/tailnet/-/devices | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          for dev in d.get('devices', []):
+              n = dev.get('hostname', '')
+              if 'opencode' in n:
+                  print('dev host=%s ip=%s os=%s tags=%s created=%s lastseen=%s' % (n, (dev.get('addresses') or ['?'])[0], dev.get('os'), dev.get('tags'), dev.get('created'), dev.get('lastSeen')))
+          "
+          echo ADMIN-API-DONE

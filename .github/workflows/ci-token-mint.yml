@@ -1,0 +1,79 @@
+name: ci-token-mint
+# CI kubeconfig 凭证签发/轮换口（90d 一次）：现签 k8s SA token＋取集群 CA，GPG 加密交接。
+# 明文不出 runner 内存；签发不管分发。用法：dispatch（recipient_key=GPG 公钥 armor＋purpose）→ 日志取 PGP 密文 → 持私钥方解密 → gh secret set CI_KUBE_TOKEN / CI_KUBE_CA。
+# 90d 到期重跑一次即轮换（老 token 到期自废）。S69 跳板仅用于取凭据本身；日常操作一律直连。
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_key:
+        description: "收件方 GPG 公钥（armor 整段，一次一换）"
+        required: true
+        type: string
+      purpose:
+        description: "用途（审计留痕，如 ci-90d-rotate-20261118）"
+        required: true
+        type: string
+      expiry_seconds:
+        description: "token 有效期秒（默认 7776000=90d，硬顶，不得延长）"
+        required: false
+        default: "7776000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-token-mint
+  cancel-in-progress: false
+
+jobs:
+  mint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - name: 进网（tag:user；取凭据只需 ssh）
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-tokenmint-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          unset MINTED
+          S69() { sudo tailscale ssh root@100.93.119.21 "$@"; }
+          S69 'echo JUMP-OK; hostname' | head -1
+      - name: 签发＋加密（明文不出日志）
+        env:
+          RECIPIENT_KEY: ${{ inputs.recipient_key }}
+          PURPOSE: ${{ inputs.purpose }}
+          EXPIRY: ${{ inputs.expiry_seconds }}
+        run: |
+          set -euo pipefail
+          [ "$EXPIRY" -gt 0 ] 2>/dev/null && [ "$EXPIRY" -le 7776000 ] || { echo "FAIL: expiry 非法（1~7776000）"; exit 1; }
+          [ -n "${RECIPIENT_KEY:-}" ] || { echo "FAIL: recipient_key 为空"; exit 1; }
+          S69() { sudo tailscale ssh root@100.93.119.21 "$@"; }
+          echo "::add-mask::$RECIPIENT_KEY"
+          TOKEN="$(S69 "kubectl create token ci-deployer -n kube-system --duration=${EXPIRY}s" 2>/dev/null)"
+          [ -n "$TOKEN" ] || { echo "FAIL: token 签发失败（SA 不存在或 apiserver 拒绝）"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          CA="$(S69 "kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}'; echo" 2>/dev/null)"
+          [ -n "$CA" ] || { echo "FAIL: 取 CA 失败"; exit 1; }
+          echo "::add-mask::$CA"
+          printf '%s' "$RECIPIENT_KEY" > /tmp/recipient.asc && chmod 600 /tmp/recipient.asc
+          gpg --batch --import /tmp/recipient.asc 2>&1 | head -2
+          FPR="$(gpg --batch --with-colons --list-keys 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+          [ -n "$FPR" ] || { echo "FAIL: 公钥导入失败"; exit 1; }
+          BUNDLE="$(python3 -c "import json,sys; print(json.dumps({'token': sys.argv[1], 'ca': sys.argv[2], 'expiry_s': int(sys.argv[3]), 'purpose': sys.argv[4]}))" "$TOKEN" "$CA" "$EXPIRY" "$PURPOSE")"
+          unset TOKEN CA
+          CIPHER="$(printf '%s' "$BUNDLE" | gpg --batch --trust-model always --encrypt -r "$FPR" --armor 2>/dev/null)"
+          [ -n "$CIPHER" ] || { echo "FAIL: 加密失败"; exit 1; }
+          unset BUNDLE; shred -u /tmp/recipient.asc 2>/dev/null || true
+          echo "===== CI-TOKEN-CIPHERTEXT-BEGIN purpose=$PURPOSE ====="
+          printf '%s\n' "$CIPHER"
+          echo "===== CI-TOKEN-CIPHERTEXT-END ====="
+          echo MINT-OK

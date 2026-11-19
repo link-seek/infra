@@ -1,0 +1,75 @@
+# CI 部署身份（统一 runner 直连 K3s 的 K8s 凭证载体，P0-2）。
+# 终态：runner 进网后用此 SA 的 token 直连 :6443，不再经 S69 跳板。
+# 口径：verbs 按各链实际调用收敛（join/leave/bootstrap/apply/canary），can-i 门禁验证；
+# rbac 写权限是提权口，约束靠 repo review + token 90d 轮换（见 runbook 注释）。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployer
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/purpose: ci-direct-access
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ci-deployer
+rules:
+  # join/leave/排障：节点读＋cordon/drain（update/patch）＋摘节点（delete）
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: [get, list, watch, update, patch, delete]
+  # 金丝雀/排障：pod 全生命周期子集
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: [get, create]
+  # drain 驱逐
+  - apiGroups: ["policy"]
+    resources: ["pods/eviction"]
+    verbs: [create]
+  # apply 系（k3s-apply/bootstrap）：只建改不删；删只留给节点和 pod（leave/金丝雀）
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "services", "serviceaccounts", "persistentvolumeclaims"]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: [get, list, watch, create, update, patch]
+  # 注：namespaces 无 delete（删 ns 走人工；apply 需 create/update 做幂等）
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "replicasets", "statefulsets"]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: [get, list, watch, create]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: [get, list, watch, create, update, patch]
+  # apply 自带 RBAC（提权口：约束靠 repo review；无 delete，删 RBAC 走人工）
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+    verbs: [get, list, watch, create, update, patch]
+  # apply CRD（禁 delete 防误删）
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: [get, list, watch, create, update, patch]
+  # 排障只读
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ci-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ci-deployer
+subjects:
+  - kind: ServiceAccount
+    name: ci-deployer
+    namespace: kube-system

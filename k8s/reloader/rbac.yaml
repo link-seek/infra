@@ -1,0 +1,32 @@
+# reloader 最小 RBAC（对标上游 chart 2.x，--reload-strategy=annotations）。
+# 全簇读 Secret/ConfigMap 变更 + patch 有注解的工作负载；不读 Secret 值以外的任何东西。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: reloader
+  namespace: reloader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: reloader
+rules:
+  - apiGroups: [""]
+    resources: [secrets, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, daemonsets, statefulsets, replicasets]
+    verbs: [get, list, watch, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: reloader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: reloader
+subjects:
+  - kind: ServiceAccount
+    name: reloader
+    namespace: reloader

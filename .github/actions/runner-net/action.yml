@@ -1,0 +1,82 @@
+name: runner-net（标准进网：mesh+user 进 tailnet，直连 :6443）
+# 统一入口：所有操作 K3s 的链只调它，不再各自 mint/进网。
+# 终态标准：runner 进网（mesh+user 身份）→ 直打 server:6443。流水线内零 SSH、零跳板。
+# 输入 kube_ca_data（base64）＋ kube_token（CI SA token，均存 repo 级 secrets）。
+description: "标准进网：mint mesh+user（ephemeral 1h）＋ tailscale up ＋组 kubeconfig＋pre-flight 门"
+
+inputs:
+  ts_api_key:
+    description: "TAILSCALE_API_KEY（mint 用）"
+    required: true
+  server_tail:
+    description: "apiserver 的 tailnet 地址"
+    required: false
+    default: "100.93.119.21"
+  kube_ca_data:
+    description: "集群 CA（base64，repo secret）"
+    required: true
+  kube_token:
+    description: "CI SA token（repo secret，90d 轮换）"
+    required: true
+  node_name:
+    description: "本机 tailnet hostname（空则 ci-net-$GITHUB_RUN_ID）"
+    required: false
+    default: ""
+  kubeconfig_path:
+    description: "kubeconfig 写到哪"
+    required: false
+    default: "/tmp/ci-kubeconfig"
+
+outputs:
+  kubeconfig:
+    description: "kubeconfig 路径"
+    value: ${{ steps.kube.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: 进网（mint mesh+user，ephemeral 1h）
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fsSL https://tailscale.com/install.sh | sh
+        TSKEY="$(printf '%s' "${{ inputs.ts_api_key }}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: ts_api_key 未配"; exit 1; }
+        echo "::add-mask::$TSKEY"
+        MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+          -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:mesh","tag:user"]}}},"expirySeconds":3600}' \
+          https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+        [ -n "$MINTED" ] || { echo "FAIL: key mint 失败"; exit 1; }
+        echo "::add-mask::$MINTED"
+        HN="${{ inputs.node_name }}"; [ -n "$HN" ] || HN="ci-net-$GITHUB_RUN_ID"
+        timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="$HN" --accept-routes=false --accept-dns=false
+        unset MINTED
+        sudo tailscale ip -4
+        echo NETMAP-OK
+    - name: pre-flight（本机→server :6443，401 即通）
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -k -sS -m 20 -o /dev/null -w 'apiserver http=%{http_code} time=%{time_total}s\n' https://${{ inputs.server_tail }}:6443/version || { echo "FAIL: 本机到 ${{ inputs.server_tail }}:6443 不通（须 tag:mesh，见 policy.hujson）"; ip route get ${{ inputs.server_tail }} || true; exit 1; }
+        echo PREFLIGHT-OK
+    - name: 组 kubeconfig＋验身份
+      id: kube
+      shell: bash
+      run: |
+        set -euo pipefail
+        KCFG="${{ inputs.kubeconfig_path }}"
+        python3 - "$KCFG" <<'EOF'
+        import sys, base64
+        ca = """${{ inputs.kube_ca_data }}""".strip()
+        base64.b64decode(ca)  # base64 合法性即红
+        tok = """${{ inputs.kube_token }}""".strip()
+        assert tok, 'kube_token 为空'
+        open(sys.argv[1], 'w').write(
+          f'apiVersion: v1\nkind: Config\nclusters:\n- name: ci\n  cluster:\n    server: https://${{ inputs.server_tail }}:6443\n    certificate-authority-data: {ca}\n'
+          f'users:\n- name: ci\n  user:\n    token: {tok}\ncontexts:\n- name: ci\n  context:\n    cluster: ci\n    user: ci\ncurrent-context: ci\n')
+        EOF
+        chmod 600 "$KCFG"
+        echo "::add-mask::${{ inputs.kube_token }}"
+        export KUBECONFIG="$KCFG"
+        kubectl --request-timeout=30s auth whoami
+        echo "path=$KCFG" >> "$GITHUB_OUTPUT"
+        echo KUBECONFIG-OK

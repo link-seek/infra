@@ -1,0 +1,17 @@
+# Flux Kustomization: ci-deployer（统一直连的 CI 身份：SA＋ClusterRole＋Binding）。
+# P0-2：合入即由 Flux 下发；token 用 `kubectl create token ci-deployer -n kube-system --duration=2160h`
+# 现签 90d（不进仓），存 repo 级 secrets（CI_KUBE_TOKEN）＋轮换 runbook 见讨论 #630。
+# 轮换：到期前重签 → 更新 secret → 老 token 到期自废，无需回收动作。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ci-deployer
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/ci-deployer
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
