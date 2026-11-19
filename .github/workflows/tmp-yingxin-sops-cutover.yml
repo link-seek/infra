@@ -71,7 +71,9 @@ jobs:
           open("/tmp/yingxin-env-plain.yaml", "w").write("\n".join(L) + "\n")
           print("plain assembled keys=%d" % len(keys))
           EOF
+          # 只加密 data|stringData（与 docker-images/.sops.yaml 同规矩；kind/metadata 保持明文 Flux 才能认）。
           /tmp/sops --encrypt --age age1xa3yp8xdquu3v0wlg3n2gmlmah7z60uz8m9e0py7xx30ct4vlu8sjhd87z \
+            --encrypted-regex '^(data|stringData)$' \
             --output /tmp/opencode-yingxin-env.enc.yaml /tmp/yingxin-env-plain.yaml
           shred -u /tmp/yingxin-env-plain.yaml /tmp/sops
           python3 <<'EOF'
