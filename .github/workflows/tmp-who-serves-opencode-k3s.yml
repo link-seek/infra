@@ -35,7 +35,11 @@ jobs:
           kubectl -n opencode get svc opencode -o json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('ingress=%r' % (d.get('status',{}).get('loadBalancer'),)); print('conds=%r' % (d.get('metadata',{}).get('annotations',{})))" || echo NO-OLD-SVC
           echo "===== 新 svc opencode-yingxin/opencode-yingxin 状态 ====="
           kubectl -n opencode-yingxin get svc opencode-yingxin -o json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('ingress=%r' % (d.get('status',{}).get('loadBalancer'),))" || echo NO-NEW-SVC
-          echo "===== endpoints（谁有后端） ====="
-          kubectl -n opencode get endpoints opencode -o jsonpath='{range .subsets[*].addresses[*]}{.ip} {end}{"\n"}' 2>/dev/null || echo NO-OLD-EP
-          kubectl -n opencode-yingxin get endpoints opencode-yingxin -o jsonpath='{range .subsets[*].addresses[*]}{.ip} {end}{"\n"}' 2>/dev/null || echo NO-NEW-EP
+          echo "===== 老 svc describe ====="
+          kubectl -n opencode describe svc opencode 2>&1 | grep -a -E "Annotations|Endpoints|tailscale|CreationTimestamp|IP:" | head -12 || echo NO-OLD-DESC
+          echo "===== 新 svc describe ====="
+          kubectl -n opencode-yingxin describe svc opencode-yingxin 2>&1 | grep -a -E "Annotations|Endpoints|tailscale|CreationTimestamp|IP:" | head -12 || echo NO-NEW-DESC
+          echo "===== 创建时间 ====="
+          kubectl -n opencode get svc opencode -o jsonpath='old-created={.metadata.creationTimestamp}{"\n"}' 2>/dev/null || echo NO-OLD-TS
+          kubectl -n opencode-yingxin get svc opencode-yingxin -o jsonpath='new-created={.metadata.creationTimestamp}{"\n"}' 2>/dev/null || echo NO-NEW-TS
           echo PROBE-DONE
