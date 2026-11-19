@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           case "${K3S_NS:-}" in
-            opencode|opencode-yingxin|opencode-team)
+            opencode|opencode-yingxin|opencode-team|opencode-xieyucheng)
               echo "FAIL: $K3S_NS 已转 SOPS（opencode 已退役），pipeline 不再写它的 Secret；重加密走 opencode-sops-reencrypt（手动 dispatch）"; exit 1 ;;
           esac
           echo "ns=$K3S_NS 未迁移，继续 pipeline 流程"
@@ -87,9 +87,6 @@ jobs:
           S_AK: ${{ secrets.PROD_HCLOUD_AK }}
           S_SK: ${{ secrets.PROD_HCLOUD_SK }}
           S_SMTP: ${{ secrets.PROD_SMTP_PASS }}
-          S_OK: ${{ secrets.OCI_API_PRIVATE_KEY }}
-          S_ALI_AK: ${{ secrets.ALI_AK }}
-          S_ALI_SK: ${{ secrets.ALI_SK }}
         run: |
           set -euo pipefail
           if [ "$K3S_NS" = "erpnext" ]; then
@@ -131,24 +128,6 @@ jobs:
             echo "CF_AI_TOKEN=$CF_AI"; echo "HCLOUD_AK=$S_AK"; echo "HCLOUD_SK=$S_SK"
             echo "TS_JOIN_KEY=$TS_JOIN"; echo "SMTP_PASS=$S_SMTP"
           } > /tmp/opencode-env.txt
-          # OBS 上传身份：复用 PROD_HCLOUD（与 xieyucheng 同账号；team 专用 key 另立后再切）。
-          if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
-            # 阿里云身份（pilot 专用；单行键，env-file 直装；CLI 读原生 env 名）
-            for v in S_ALI_AK S_ALI_SK; do
-              [ -n "${!v:-}" ] || { echo "FAIL: $v missing (ALI identity)"; exit 1; }
-            done
-            {
-              echo "ALIBABACLOUD_ACCESS_KEY_ID=$S_ALI_AK"
-              echo "ALIBABACLOUD_ACCESS_KEY_SECRET=$S_ALI_SK"
-            } >> /tmp/opencode-env.txt
-            echo "ali identity staged (xieyucheng only)"
-          fi
-          if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
-            # OCI 身份（pilot 专用；PEM 多行走 --from-file，不进 env-file）
-            [ -n "${S_OK:-}" ] || { echo "FAIL: S_OK missing (OCI private key)"; exit 1; }
-            printf '%s' "$S_OK" > /tmp/oci-key.pem && chmod 600 /tmp/oci-key.pem
-            echo "oci identity staged (xieyucheng only)"
-          fi
           chmod 600 /tmp/opencode-env.txt
           echo "secret-render-ok: $(grep -c '' /tmp/opencode-env.txt) entries (values masked)"
 
@@ -184,18 +163,6 @@ jobs:
           set -euo pipefail
           SSH69="sudo tailscale ssh root@100.93.119.21"
           $SSH69 "cat > /tmp/opencode-env.txt && chmod 600 /tmp/opencode-env.txt" < /tmp/opencode-env.txt
-          # kubectl 禁止 from-env-file 混 from-file：key 改 patch 追加（merge 不剪枝；下次 apply 若剪掉本步照补，幂等）
-          OCI_PATCH_NEED="no"
-          [ -f /tmp/oci-key.pem ] && OCI_PATCH_NEED="yes"
-          $SSH69 "set -e; kubectl create namespace $K3S_NS --dry-run=client -o yaml | kubectl apply -f - && \
-             kubectl create secret docker-registry swr-pull -n $K3S_NS --docker-server=swr.cn-north-9.myhuaweicloud.com --docker-username=\"$SWR_LOGIN_USER\" --docker-password=\"$SWR_LOGIN_PASS\" --dry-run=client -o yaml | kubectl apply -f - && \
-             kubectl create secret generic $K3S_SECRET -n $K3S_NS --from-env-file=/tmp/opencode-env.txt --dry-run=client -o yaml | kubectl apply -f - && rm -f /tmp/opencode-env.txt"
-          if [ "$OCI_PATCH_NEED" = "yes" ]; then
-            OCI_B64="$(base64 -w0 /tmp/oci-key.pem)"
-            [ -n "$OCI_B64" ] || { echo "FAIL: oci-key.pem 为空"; exit 1; }
-            $SSH69 "kubectl patch secret $K3S_SECRET -n $K3S_NS -p '{\"data\":{\"OCI_CLI_KEY_CONTENT\":\"$OCI_B64\"}}'"
-            echo "OCI KEY PATCHED: secret=$K3S_SECRET"
-          fi
           echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
           case "$K3S_NS" in
             opencode*) $SSH69 "kubectl -n $K3S_NS rollout restart deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s"
