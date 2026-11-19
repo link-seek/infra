@@ -42,4 +42,27 @@ jobs:
           echo "===== 创建时间 ====="
           kubectl -n opencode get svc opencode -o jsonpath='old-created={.metadata.creationTimestamp}{"\n"}' 2>/dev/null || echo NO-OLD-TS
           kubectl -n opencode-yingxin get svc opencode-yingxin -o jsonpath='new-created={.metadata.creationTimestamp}{"\n"}' 2>/dev/null || echo NO-NEW-TS
-          echo PROBE-DONE
+          echo "===== tailnet 视角（runner 直连，无需密钥） ====="
+          tailscale status --json 2>/dev/null | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          for p in list((d.get('Peer') or {}).values()):
+              n = (p.get('DNSName') or '') + ' ' + (p.get('HostName') or '')
+              if 'opencode' in n:
+                  print('peer host=%s dns=%s ip=%s os=%s lastseen=%s' % (p.get('HostName'), p.get('DNSName'), (p.get('TailscaleIPs') or ['?'])[0], p.get('OS'), p.get('LastSeen')))
+          " || echo NO-TS-STATUS
+      - name: admin API 看设备世代（只读 GET，真值不出 runner）
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -sS -m 30 -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
+            https://api.tailscale.com/api/v2/tailnet/-/devices | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          for dev in d.get('devices', []):
+              n = dev.get('hostname', '')
+              if 'opencode' in n:
+                  print('dev host=%s ip=%s os=%s tags=%s created=%s lastseen=%s' % (n, (dev.get('addresses') or ['?'])[0], dev.get('os'), dev.get('tags'), dev.get('created'), dev.get('lastSeen')))
+          "
+          echo ADMIN-API-DONE
