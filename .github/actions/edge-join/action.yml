@@ -75,6 +75,14 @@ runs:
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="${{ inputs.node_name }}" --accept-routes=false --accept-dns=false
         fi
         unset MINTED
+        echo "== 预热数据面（等 server 可达，最长 3 分钟；美国 runner 建连慢） =="
+        warmed=false
+        for i in $(seq 1 18); do
+          if sudo tailscale ping --c=1 --timeout=10s "${{ inputs.server_tail }}" >/dev/null 2>&1; then warmed=true; break; fi
+          sleep 10
+        done
+        [ "$warmed" = true ] || { echo "FAIL: server 数据面 3 分钟未就绪"; exit 1; }
+        echo TAILNET-WARM
         S69 'echo JUMP-OK; hostname'
         VER="$(S69 'k3s --version | head -1' | awk '{print $3}')"; [ -n "$VER" ] || { echo "FAIL: 取不到 server 版本"; exit 1; }
         echo "server k3s: $VER"
