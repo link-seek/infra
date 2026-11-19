@@ -54,6 +54,14 @@ jobs:
           if [ "$APP" = "erpnext" ]; then echo "K3S_SECRET=erpnext" >> "$GITHUB_ENV"; fi
           echo "stack=$APP deploy=$DEPLOY port=$PORT join=$JT"
 
+      - name: 已转 SOPS/退役的栈直接拦（fail-closed）
+        run: |
+          set -euo pipefail
+          case "${K3S_NS:-}" in
+            opencode|opencode-yingxin|opencode-team)
+              echo "FAIL: $K3S_NS 已转 SOPS（opencode 已退役），pipeline 不再写它的 Secret；重加密走 opencode-sops-reencrypt（手动 dispatch）"; exit 1 ;;
+          esac
+          echo "ns=$K3S_NS 未迁移，继续 pipeline 流程"
       - name: join tailnet (guest, mint-only)
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
@@ -82,10 +90,6 @@ jobs:
           S_OK: ${{ secrets.OCI_API_PRIVATE_KEY }}
           S_ALI_AK: ${{ secrets.ALI_AK }}
           S_ALI_SK: ${{ secrets.ALI_SK }}
-          S_MAAS: ${{ secrets.MAAS_KEY }}
-          S_OBS_AK: ${{ secrets.PROD_HCLOUD_AK }}
-          S_OBS_SK: ${{ secrets.PROD_HCLOUD_SK }}
-          S_BROWSERLESS: ${{ secrets.PROD_BROWSERLESS_TOKEN }}
         run: |
           set -euo pipefail
           if [ "$K3S_NS" = "erpnext" ]; then
@@ -127,20 +131,7 @@ jobs:
             echo "CF_AI_TOKEN=$CF_AI"; echo "HCLOUD_AK=$S_AK"; echo "HCLOUD_SK=$S_SK"
             echo "TS_JOIN_KEY=$TS_JOIN"; echo "SMTP_PASS=$S_SMTP"
           } > /tmp/opencode-env.txt
-          if [ "$K3S_NS" = "opencode-team" ]; then
-            # BROWSERLESS_TOKEN 固定值（infra 仓级 PROD_BROWSERLESS_TOKEN，一次生成长期复用；随机现生成会导致双 Deployment 漂移 401）。
-            [ -n "${S_BROWSERLESS:-}" ] || { echo "FAIL: S_BROWSERLESS missing (PROD_BROWSERLESS_TOKEN)"; exit 1; }
-            echo "BROWSERLESS_TOKEN=$S_BROWSERLESS" >> /tmp/opencode-env.txt
-          fi
-          if [ "$K3S_NS" = "opencode-team" ]; then
-            [ -n "${S_MAAS:-}" ] || { echo "FAIL: S_MAAS missing (MAAS_KEY)"; exit 1; }
-            echo "MAAS_KEY=$S_MAAS" >> /tmp/opencode-env.txt
-          fi
           # OBS 上传身份：复用 PROD_HCLOUD（与 xieyucheng 同账号；team 专用 key 另立后再切）。
-          if [ "$K3S_NS" = "opencode-team" ]; then
-            [ -n "${S_OBS_AK:-}" ] || { echo "FAIL: S_OBS_AK missing"; exit 1; }
-            { echo "OBS_AK=$S_OBS_AK"; echo "OBS_SK=$S_OBS_SK"; } >> /tmp/opencode-env.txt
-          fi
           if [ "$K3S_NS" = "opencode-xieyucheng" ]; then
             # 阿里云身份（pilot 专用；单行键，env-file 直装；CLI 读原生 env 名）
             for v in S_ALI_AK S_ALI_SK; do
@@ -205,13 +196,8 @@ jobs:
             $SSH69 "kubectl patch secret $K3S_SECRET -n $K3S_NS -p '{\"data\":{\"OCI_CLI_KEY_CONTENT\":\"$OCI_B64\"}}'"
             echo "OCI KEY PATCHED: secret=$K3S_SECRET"
           fi
-          if [ "$K3S_NS" = "opencode-team" ]; then
-            # Secret 只在 Pod 启动时注入：固定值切换后必须双重启对齐，否则 opencode/browserless 各执一值继续 401。
-            $SSH69 "kubectl -n $K3S_NS rollout restart deploy/opencode deploy/browserless && kubectl -n $K3S_NS rollout status deploy/opencode --timeout=600s && kubectl -n $K3S_NS rollout status deploy/browserless --timeout=600s"
-          fi
           echo "SECRET-ONLY OK: ns=$K3S_NS secret=$K3S_SECRET"
           case "$K3S_NS" in
-            opencode-team) echo "restart by #608 (team dual restart), skip" ;;
             opencode*) $SSH69 "kubectl -n $K3S_NS rollout restart deploy/$K3S_DEPLOY && kubectl -n $K3S_NS rollout status deploy/$K3S_DEPLOY --timeout=600s"
               echo "ROLLOUT-RESTART OK: ns=$K3S_NS deploy=$K3S_DEPLOY" ;;
             *) echo "no restart for ns=$K3S_NS (non-opencode)" ;;
