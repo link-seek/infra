@@ -1,0 +1,27 @@
+# SOPS 密文（Traefik ACME DNS-01 用；90 天随 CF 轮换）：仅 Flux 解密，明文只活加密当次 runner 内存。
+apiVersion: v1
+kind: Secret
+metadata:
+    name: acme-cf
+    namespace: kube-system
+    annotations:
+        sops-cutover: "2026-11-20"
+        cf-minted-at: "2026-11-20"
+type: Opaque
+stringData:
+    CF_DNS_API_TOKEN: ENC[AES256_GCM,data:KHQ7uwKMtKGMiPa4I2yU6fk1U2YgVVWQ6imY9KsCVsiQrIw5WDf5dDMomg72WWYzqzZpi1I=,iv:zeFOgBAUqAZPoRV+fQ6kplfBLCeQv/NeSrXdS7UudN4=,tag:Gc7vsBhJRfvnhWsu3rZLeg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBOZHRQbFNUNHlkbFp3Wi90
+            ZExCNlE2QWhjempNS3NlL3VJK2VyTGlid0ZzCkdOTEV0eHpnclM5eVNZU0taRUhk
+            OWgrbk5uY1dLWEI2MWp2N0UxY21XWkkKLS0tIEZ1TDR2YTM4OWtwbmd5Zkpvdm93
+            ZWdPRlUvYjhRQ1F6NmorYzVBSzZpbXMKCiytS0sL5mvtIuDfoNfsV+n044tt6HzO
+            BSfNUa5EOK+p8Dq3UyAi2PUUahw5/ZboaeH34Hfu7FlF7VJaBswIpA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1xa3yp8xdquu3v0wlg3n2gmlmah7z60uz8m9e0py7xx30ct4vlu8sjhd87z
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-20T10:49:29Z"
+    mac: ENC[AES256_GCM,data:W64Rjad0Bb2RRkYlJbcyF6e6EjWomI+O2P7MEtuTc+RHTTOO0E4VP5UE+34Cawn8ewkBnDPk7HxL/cuUY2oeqDNDffzViVHB1BCvgDjRxAj6+VFvkIcc1/5OYPIenx2xcP02xzqflH5hv1HbrYSDxnLMkimgOg1yb7J1j3MHeAk=,iv:bvPxikrRTDOzOeOzfDVYqf4q5TSwRunTBJnvFRoGVaM=,tag:kwK50PcM6hR/JRH3CyiG/A==,type:str]
+    version: 3.13.3
