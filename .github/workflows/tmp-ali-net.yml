@@ -1,0 +1,38 @@
+name: tmp-ali-net
+# 一次性：ali-gz→pod 覆盖网三板斧（ClusterIP 直打/路由/iptables）+ pod 分布。只读，用完即删。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-ali-net
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SSH_KEY: ${{ secrets.CADDY_SSH_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 取证
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          kubectl get pods -A -o wide | grep -E "mesh-ali-gz|NAME" | head -12
+          kubectl -n kube-system get endpoints kube-dns 2>/dev/null || true
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          ssh $SOPT root@100.85.128.116 'echo "== clusterIP =="; curl -sS -m 8 -o /dev/null -w "team %{http_code} %{time_total}s\n" http://10.43.185.188:4097/ || true; echo "== route =="; ip route get 10.43.185.188; ip link show flannel.1 2>/dev/null | head -3 || echo "no flannel.1"; echo "== nat =="; iptables -t nat -S 2>/dev/null | grep -c KUBE- || echo "no nat rules"; iptables -t nat -S 2>/dev/null | grep 30080 | head -3 || echo "no 30080 rule"'
+          shred -u ~/.ssh/ci_key
+          echo PROBE-DONE
