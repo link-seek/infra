@@ -43,7 +43,7 @@ jobs:
 
       - name: Caddyfile 一致性检查
         run: |
-          docker run --rm -v "$PWD/edge/caddy:/c" caddy:2 caddy fmt --overwrite /c/${{ inputs.node_dir || 'mesh-ali-gz' }}/Caddyfile
+          docker run --rm -v "$PWD/edge/caddy:/c" swr.cn-north-9.myhuaweicloud.com/link-seek/k3s-caddy:2 caddy fmt --overwrite /c/${{ inputs.node_dir || 'mesh-ali-gz' }}/Caddyfile
           git diff --exit-code -- edge/caddy/ || { echo 'caddy fmt 有改动，请本地 fmt 后再提交'; exit 1; }
 
       - name: 加入 tailnet（一次性节点，用完即焚）

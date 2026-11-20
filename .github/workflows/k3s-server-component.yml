@@ -22,6 +22,14 @@ on:
         default: "edge/traefik/k3s-traefik-config.yaml"
       disable:
         description: "config.yaml+unit 内 disable 条目：remove=去掉；add=加上；keep=不动"
+      reg_src:
+        description: "registries.yaml 声明路径（空=跳过下发）"
+        required: false
+        default: "edge/registries/registries.yaml"
+      reg_dest:
+        description: "registries.yaml 落点"
+        required: false
+        default: "/etc/rancher/k3s/registries.yaml"
         required: false
         default: "remove"
         type: choice
@@ -97,6 +105,20 @@ jobs:
           done
           shred -u ~/.ssh/ci_key
           echo APPLY-DONE
+      - name: ship registries.yaml（空即跳过）
+        if: inputs.mode == 'apply' && inputs.reg_src != ''
+        run: |
+          set -euo pipefail
+          [ -f "${{ inputs.reg_src }}" ] || { echo "FAIL: 声明不在仓：${{ inputs.reg_src }}"; exit 1; }
+          python3 -c "import yaml; yaml.safe_load(open('${{ inputs.reg_src }}'))"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
+            scp $SOPT "${{ inputs.reg_src }}" "root@$H:${{ inputs.reg_dest }}" && echo "shipped $H"
+          done
+          shred -u ~/.ssh/ci_key
+          echo REGISTRIES-DONE
       - name: rolling restart（逐台＋quorum 门）
         if: inputs.mode == 'apply' || inputs.mode == 'restart'
         run: |

@@ -1,0 +1,18 @@
+# k3s 私服期望态：docker.io 经 SWR 国内镜像，生产与 docker.io 直连解耦。
+# 由 k3s-server-component 下发到三 server /etc/rancher/k3s/registries.yaml，重启生效。
+# 规则与 SWR 仓库一一对应（link-seek/k3s-* 常驻 public 豁免过期，edge-pause 沿用既有）。
+# 加镜像=加一条 rewrite＋翻仓（img-to-swr，expire_days=0）；coredns 待翻，规则预置。
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://swr.cn-north-9.myhuaweicloud.com"
+    rewrite:
+      "^rancher/mirrored-library-traefik$": "link-seek/k3s-traefik"
+      "^rancher/mirrored-coredns-coredns$": "link-seek/k3s-coredns"
+      "^rancher/mirrored-metrics-server$": "link-seek/k3s-metrics-server"
+      "^rancher/local-path-provisioner$": "link-seek/k3s-local-path"
+      "^rancher/klipper-helm$": "link-seek/k3s-klipper-helm"
+      "^rancher/klipper-lb$": "link-seek/k3s-klipper-lb"
+      "^rancher/mirrored-library-busybox$": "link-seek/k3s-busybox"
+      "^rancher/mirrored-pause$": "link-seek/edge-pause"
+      "^library/caddy$": "link-seek/k3s-caddy"
