@@ -1,0 +1,54 @@
+name: tmp-seed-traefik
+# 一次性：runner 拉 traefik 镜像→三 server 空投→重建 pod。用完即删。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-seed-traefik
+  cancel-in-progress: false
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: 拉包＋空投＋重建
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          IMG="rancher/mirrored-library-traefik:3.7.15"
+          docker pull "$IMG"
+          docker save -o /tmp/traefik.tar "$IMG"
+          ls -lh /tmp/traefik.tar
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          for H in 100.93.119.21 100.100.246.95 100.73.182.4; do
+            echo "===== seed $H ====="
+            scp $SOPT /tmp/traefik.tar "root@$H:/tmp/traefik.tar"
+            ssh $SOPT "root@$H" 'k3s ctr -n k8s.io images import /tmp/traefik.tar && rm -f /tmp/traefik.tar && echo IMPORTED'
+          done
+          rm -f /tmp/traefik.tar
+          kubectl -n kube-system delete pod -l app.kubernetes.io/name=traefik
+          for i in $(seq 1 12); do
+            sleep 20
+            ST=$(kubectl -n kube-system get pod -l app.kubernetes.io/name=traefik -o jsonpath='{range .items[*]}{.status.phase}/{.status.containerStatuses[0].ready}{" "}{end}' || echo "?")
+            echo "traefik=[$ST] ($i/12)"
+            [ "$ST" = "Running/true " ] && break
+            [ "$i" = 12 ] && { kubectl -n kube-system describe pod -l app.kubernetes.io/name=traefik | grep -a -E "Failed|Back-off|ErrImage|Message" | head -5; exit 1; }
+          done
+          kubectl -n kube-system get svc traefik -o wide
+          shred -u ~/.ssh/ci_key
+          echo SEED-DONE
