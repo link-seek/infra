@@ -31,6 +31,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          ssh $SOPT root@100.85.128.116 'mkdir -p /etc/rancher/k3s' && echo MKDIR-OK
           scp $SOPT edge/registries/registries.yaml root@100.85.128.116:/etc/rancher/k3s/registries.yaml && echo SHIPPED
           ssh $SOPT root@100.85.128.116 'systemctl restart k3s-agent && sleep 15 && systemctl is-active k3s-agent'
           ssh $SOPT root@100.85.128.116 'k3s crictl images 2>/dev/null | grep -c -i traefik || echo "no traefik yet (expected, pulls on schedule)"'
