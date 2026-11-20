@@ -1,0 +1,17 @@
+name: image-policy
+# 门禁：cluster 镜像只认 SWR（k8s/edge/clusters）。CI runner 侧除外（断圈）。
+# 跑在 PR＋push main，双保险。逻辑在 scripts/image-policy.py。
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: SWR-only 门禁
+        run: python3 scripts/image-policy.py
