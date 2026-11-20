@@ -1,6 +1,7 @@
 name: _sops-reencrypt-core
 # 共用 core（reusable）：只实现固定机制（读配方→组装→加密→PR），不认识任何具体 app。
-# 加 app：dimgs 加 k8s/<dir>/sops-secrets.yaml＋一个薄触发器，core 一行不动（开闭）。
+# 加 app：dimgs 加 k8s/<dir>/sops-secrets.yaml＋一个薄触发器（默认走生产 age recipient）。
+# 非生产密文（如 preflight test）：触发器传 age_recipient＋配方用 LITERAL: 值，core 不动逻辑只走参。
 # 别直接 dispatch 本文件。
 on:
   workflow_call:
@@ -15,6 +16,10 @@ on:
         required: false
         type: string
         default: key-updated
+      age_recipient:
+        required: false
+        type: string
+        default: age1xa3yp8xdquu3v0wlg3n2gmlmah7z60uz8m9e0py7xx30ct4vlu8sjhd87z
     secrets:
       OPENCODE_API_KEY: { required: true }
       PROD_GH_TOKEN: { required: true }
@@ -89,7 +94,7 @@ jobs:
             [ -n "${!v:-}" ] && echo "::add-mask::${!v}" || true
           done
           MINT_DAY="$(date -u +%F)"
-          export MINT_DAY RUN_ID="$GITHUB_RUN_ID" APP DIR RECIPE
+          export MINT_DAY RUN_ID="$GITHUB_RUN_ID" APP DIR RECIPE AGE_RECIPIENT="${{ inputs.age_recipient }}"
           python3 <<'EOF'
           import os, re
           import yaml
@@ -100,6 +105,10 @@ jobs:
                   assert kind in ("child", "ai"), "unknown mint verb %s" % src
                   v = os.environ["CF_CHILD" if kind == "child" else "CF_AI"]
                   assert v, "minted value missing for %s" % key
+                  return v
+              if src.startswith("LITERAL:"):
+                  v = src.split(":", 1)[1]
+                  assert v, "empty literal for %s" % key
                   return v
               assert re.fullmatch(r"[A-Z0-9_]+", src), "bad source %r" % src
               v = os.environ.get(src, "")
@@ -126,7 +135,7 @@ jobs:
           EOF
           # 只加密 data|stringData（kind/metadata 明文 Flux 才认）。
           for f in $(cat /tmp/out-list.txt); do
-            /tmp/sops --encrypt --age age1xa3yp8xdquu3v0wlg3n2gmlmah7z60uz8m9e0py7xx30ct4vlu8sjhd87z \
+            /tmp/sops --encrypt --age "$AGE_RECIPIENT" \
               --encrypted-regex '^(data|stringData)$' \
               --output "/tmp/enc-$f" "/tmp/out-$f"
             shred -u "/tmp/out-$f"
@@ -138,7 +147,7 @@ jobs:
           assert d["kind"] == "Secret", fn
           sd = d.get("stringData", {})
           assert sd and all(re.fullmatch(r"ENC\[AES256_GCM,data:[A-Za-z0-9+/=]+,.*", v) for v in sd.values()), "non-ciphertext in %s" % fn
-          assert [x.get("recipient") for x in d["sops"]["age"]] == ["age1xa3yp8xdquu3v0wlg3n2gmlmah7z60uz8m9e0py7xx30ct4vlu8sjhd87z"]
+          assert [x.get("recipient") for x in d["sops"]["age"]] == [os.environ["AGE_RECIPIENT"]]
           print("ENC-OK %s keys=%s" % (fn, sorted(sd)))
           EOF
           done
