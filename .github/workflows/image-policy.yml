@@ -1,7 +1,6 @@
 name: image-policy
-# 门禁：生产镜像只认 SWR。k8s/edge/clusters 下所有 image: 必须 swr. 前缀；
-# workflows/k8s 中出现境外 registry 即红（唯一豁免：edge-images-seed.yml 翻仓桥＋本文件注释）。
-# 跑在 PR＋push main，双保险。
+# 门禁：cluster 镜像只认 SWR（k8s/edge/clusters）。CI runner 侧除外（断圈）。
+# 跑在 PR＋push main，双保险。逻辑在 scripts/image-policy.py。
 on:
   pull_request:
   push:
@@ -15,18 +14,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: SWR-only 门禁
-        run: |
-          set -euo pipefail
-          FAIL=0
-          echo "=== 1) manifests image: 必须 swr. 前缀 ==="
-          while IFS= read -r line; do
-            f="${line%%:*}"; img="$(echo "${line#*:}" | grep -oE 'image:[[:space:]]*["'"'"']?[^"'"'"' ]+' | sed -E 's/image:[[:space:]]*["'"'"']?//')"
-            case "$img" in
-              swr.*) ;;
-              *) echo "VIOLATION $f -> $img"; FAIL=1 ;;
-            esac
-          done < <(grep -rnE '^[[:space:]-]*image:[[:space:]]*["'"'"']?[^"'"'"' ]+' k8s clusters edge 2>/dev/null --include='*.yaml' || true)
-          echo "=== 2) 境外 registry 零容忍（翻仓桥豁免） ==="
-          HITS="$(grep -rnE '(^[[:space:]-]*image:[[:space:]]*["'"'']?|FROM[[:space:]]+|docker[[:space:]]+(pull|run)[[:space:]]+.*)(docker\.io|ghcr\.io|quay\.io|gcr\.io|registry\.k8s\.io|k8s\.gcr\.io|mcr\.microsoft\.com)[/:]' .github/workflows k8s edge clusters scripts 2>/dev/null | grep -v -E 'edge-images-seed\.yml|image-policy\.yml' || true)"
-          if [ -n "$HITS" ]; then echo "$HITS"; echo "VIOLATION foreign registry"; FAIL=1; fi
-          [ "$FAIL" = 0 ] && echo POLICY-OK || { echo "FAIL: 镜像必须走 SWR"; exit 1; }
+        run: python3 scripts/image-policy.py
