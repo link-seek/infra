@@ -1,0 +1,23 @@
+name: tmp-swr-verify
+# 一次性：runner 直拉 7 个 SWR 镜像验存在。用完即删。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-swr-verify
+  cancel-in-progress: false
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 拉取验证
+        run: |
+          set -euo pipefail
+          REG="swr.cn-north-9.myhuaweicloud.com/link-seek"
+          for IMG in k3s-traefik:3.7.15 k3s-metrics-server:v0.9.0 k3s-local-path:v0.0.37 k3s-caddy:2 k3s-klipper-helm:v0.13.3-build20261021 k3s-klipper-lb:v0.4.17 k3s-busybox:1.37.0; do
+            docker pull "$REG/$IMG" 2>&1 | tail -1
+            docker inspect "$REG/$IMG" --format="{{.RepoDigests}}" | tr ',' '\n' | head -2
+          done
+          echo PULL-VERIFY-DONE
