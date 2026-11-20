@@ -1,0 +1,27 @@
+# ACME 证书落 secret：k3s 自带 ClusterRole 只给 secrets get/list/watch，Traefik 写不进 tls secret。
+# 加法授权（不动 chart 自带 role）：仅 secrets 写动作，读权限不动。ACME 必需（上游文档同款）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: traefik-acme-secrets
+  labels:
+    app.kubernetes.io/managed-by: flux
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: traefik-acme-secrets
+  labels:
+    app.kubernetes.io/managed-by: flux
+subjects:
+  - kind: ServiceAccount
+    name: traefik
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: traefik-acme-secrets
+  apiGroup: rbac.authorization.k8s.io
