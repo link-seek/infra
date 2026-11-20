@@ -22,6 +22,9 @@ spec:
     providers:
       kubernetesIngress:
         allowExternalNameServices: true
+      # litellm IngressRoute 后端是 ExternalName（opencode-ai），CRD provider 也要显式放行（与上面同因）。
+      kubernetesCRD:
+        allowExternalNameServices: true
     # ACME（Cloudflare DNS-01）：staging 先验，production 随后。token 经 SOPS（acme-cf），envFrom optional 保证 secret 未到前 pod 照起。
     certificatesResolvers:
       le-staging:
