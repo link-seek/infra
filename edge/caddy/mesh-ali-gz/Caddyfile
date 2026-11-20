@@ -1,21 +1,14 @@
 # 后端 k3s xieyucheng：单代理 ha-a（钉 41，与 pod 同节点；ha-b 已摘，2026-11-19）。
 # 健康检查保留：pod 重建窗口内摘掉后端，不让用户撞 502。
 # 回滚=加回 ha-b dynamic 块（见 git 历史）。
+# xieyucheng 公测：Caddy 只终结 TLS，后端改指 Traefik 的 TS 代理（operator 暴露，Host 透传）。
+# 回滚=改回 dynamic 块（见 git 历史）。去主动检查（Host 不对会 404 误判，只用被动熔断；后端健康由 Traefik 兜）。
 opencode.xieyucheng.top {
 	reverse_proxy {
-		dynamic a {
-			name opencode-xieyucheng-ha-a.mackarel-polaris.ts.net.
-			port 4097
-			refresh 5s
-			resolvers 100.100.100.100
-		}
+		to http://traefik-edge.mackarel-polaris.ts.net:8080
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
-		# 主动健康检查：后端 pod 重建窗口内摘掉它，不让用户撞 502。
-		health_uri /
-		health_interval 10s
-		health_timeout 5s
 	}
 	# 注：本机 caddy 为定制构建，不支持 handle_error/status matcher，维护页不上；
 	# 后端全死时仍是空 502/503（与之前一致）。
