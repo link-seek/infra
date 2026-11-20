@@ -52,7 +52,7 @@ opencode.yingxin.net.cn {
 # 回滚=改回 dynamic 块（见 git 历史）。切流完成即删本段（Traefik 接管 443）。
 team-agent.xieyucheng.top {
 	reverse_proxy {
-		to http://traefik-edge.mackarel-polaris.ts.net
+		to http://traefik-edge.mackarel-polaris.ts.net:8080
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
