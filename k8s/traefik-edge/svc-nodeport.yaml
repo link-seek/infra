@@ -1,0 +1,16 @@
+# Traefik 边缘入口（试点）：NodePort 直挂 traefik pod，供宿主机 Caddy 回指本机（127.0.0.1:30080），TS 都不出。
+# 切流完成即删（Traefik 切 LoadBalancer 缩池后本 Service 无用）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-edge
+  namespace: kube-system
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: traefik
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+      nodePort: 30080
