@@ -1,0 +1,93 @@
+# SNI 入站中继（hostNetwork DaemonSet，钉 ali-gz；与 sni-egress 同模，方向相反）。
+# 公网 443/80 → 直通 traefik-edge TS 代理。TLS 端到端不解密（SNI 透传，证书 Traefik 侧 ACME）。
+# Caddy 下线后由它接管 443/80。回滚=起 Caddy（本 DaemonSet 因端口冲突 CrashLoop，原地待命）。
+# 上游用变量+resolver（MagicDNS 首选，30s 过期重解；代理重建换 IP 不用改配置）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sni-ingress-conf
+  namespace: egress
+data:
+  nginx.conf: |
+    worker_processes 1;
+    error_log /dev/stderr info;
+    events { worker_connections 512; }
+    stream {
+      log_format edge '$remote_addr [$time_local] sni=$ssl_preread_server_name up=$upstream_addr bytes=$bytes_sent/$bytes_received time=$session_time';
+      access_log /dev/stdout edge;
+      resolver 100.100.100.100 valid=30s;
+      resolver_timeout 5s;
+      # 443 SNI 透传到 Traefik（operator 代理；SNI 保留，证书 Traefik 侧终结）
+      server {
+        listen 443;
+        ssl_preread on;
+        set $up_traefik traefik-edge.mackarel-polaris.ts.net;
+        proxy_pass $up_traefik:443;
+        proxy_connect_timeout 5s;
+      }
+      # 80 明文直通（ACME HTTP-01 与 http→https 跳转走 Traefik）
+      server {
+        listen 80;
+        set $up_traefik80 traefik-edge.mackarel-polaris.ts.net;
+        proxy_pass $up_traefik80:8080;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sni-ingress-ali-gz
+  namespace: egress
+  labels:
+    app: sni-ingress-ali-gz
+spec:
+  selector:
+    matchLabels:
+      app: sni-ingress-ali-gz
+  template:
+    metadata:
+      labels:
+        app: sni-ingress-ali-gz
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: mesh-ali-gz
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: edge
+          effect: NoSchedule
+      initContainers:
+        - name: conf-test
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/edge-nginx-relay:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
+          imagePullPolicy: IfNotPresent
+          command: ["nginx", "-t", "-c", "/etc/nginx/nginx.conf"]
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/nginx.conf
+              readOnly: true
+              subPath: nginx.conf
+      containers:
+        - name: relay
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/edge-nginx-relay:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 443
+              hostPort: 443
+              protocol: TCP
+            - containerPort: 80
+              hostPort: 80
+              protocol: TCP
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/nginx.conf
+              readOnly: true
+              subPath: nginx.conf
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+      volumes:
+        - name: conf
+          configMap:
+            name: sni-ingress-conf
