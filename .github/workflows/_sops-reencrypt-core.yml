@@ -131,7 +131,7 @@ jobs:
               --output "/tmp/enc-$f" "/tmp/out-$f"
             shred -u "/tmp/out-$f"
             python3 - "$f" <<'EOF'
-          import re, sys
+          import os, re, sys
           import yaml
           fn = sys.argv[1]
           d = yaml.safe_load(open("/tmp/enc-" + fn))
