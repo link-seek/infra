@@ -1,5 +1,6 @@
 # Traefik 期望态声明（阶段一：影子 ClusterIP，不占 80/443，内网验路由）。
 # 切流时改 service.spec.type=LoadBalancer + 縮池標籤（另議，不在本文件混）。
+# allowExternalNameServices：models 路由直透上游（ExternalName），Ingress 经 PR 评审。
 # 由 k3s-server-component workflow 下发到三 server manifests 目录。
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
@@ -11,3 +12,6 @@ spec:
     service:
       spec:
         type: ClusterIP
+    providers:
+      kubernetesIngress:
+        allowExternalNameServices: true

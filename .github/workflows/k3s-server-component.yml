@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "recon=只读三处抓现状；apply=下发＋去disable＋滚动重启；restart=仅滚动重启"
+        description: "recon=只读；apply=下发＋去disable＋滚动重启；restart=仅滚动重启；ship=只下发（HelmChartConfig 热生效类）"
         required: false
         default: "recon"
         type: choice
-        options: [recon, apply, restart]
+        options: [recon, apply, restart, ship]
       component:
         description: "packaged component 名（traefik/coredns/servicelb…）"
         required: false
@@ -69,7 +69,7 @@ jobs:
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-srvcomp-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
       - name: recon 三处抓现状
-        if: inputs.mode == 'recon' || inputs.mode == 'apply'
+        if: inputs.mode == 'recon' || inputs.mode == 'apply' || inputs.mode == 'ship'
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -81,8 +81,8 @@ jobs:
           done
           shred -u ~/.ssh/ci_key
           echo RECON-DONE
-      - name: apply 下发＋去disable
-        if: inputs.mode == 'apply'
+      - name: 下发声明（apply 含去disable；ship 需传 disable=keep）
+        if: inputs.mode == 'apply' || inputs.mode == 'ship'
         run: |
           set -euo pipefail
           [ -f "${{ inputs.manifest_path }}" ] || { echo "FAIL: 声明文件不在仓：${{ inputs.manifest_path }}"; exit 1; }
@@ -106,7 +106,7 @@ jobs:
           shred -u ~/.ssh/ci_key
           echo APPLY-DONE
       - name: ship registries.yaml（空即跳过）
-        if: inputs.mode == 'apply' && inputs.reg_src != ''
+        if: (inputs.mode == 'apply' || inputs.mode == 'ship') && inputs.reg_src != ''
         run: |
           set -euo pipefail
           [ -f "${{ inputs.reg_src }}" ] || { echo "FAIL: 声明不在仓：${{ inputs.reg_src }}"; exit 1; }
