@@ -27,6 +27,6 @@ jobs:
             esac
           done < <(grep -rnE '^[[:space:]-]*image:[[:space:]]*["'"'"']?[^"'"'"' ]+' k8s clusters edge 2>/dev/null --include='*.yaml' || true)
           echo "=== 2) 境外 registry 零容忍（翻仓桥豁免） ==="
-          HITS="$(grep -rnE '(docker\.io|ghcr\.io|quay\.io|gcr\.io|registry\.k8s\.io|k8s\.gcr\.io|mcr\.microsoft\.com)[/:]' .github/workflows k8s edge clusters scripts 2>/dev/null | grep -v -E 'edge-images-seed\.yml|image-policy\.yml|registries\.ya?ml|/edge/registries/' || true)"
+          HITS="$(grep -rnE '(^[[:space:]-]*image:[[:space:]]*["'"'']?|FROM[[:space:]]+|docker[[:space:]]+(pull|run)[[:space:]]+.*)(docker\.io|ghcr\.io|quay\.io|gcr\.io|registry\.k8s\.io|k8s\.gcr\.io|mcr\.microsoft\.com)[/:]' .github/workflows k8s edge clusters scripts 2>/dev/null | grep -v -E 'edge-images-seed\.yml|image-policy\.yml' || true)"
           if [ -n "$HITS" ]; then echo "$HITS"; echo "VIOLATION foreign registry"; FAIL=1; fi
           [ "$FAIL" = 0 ] && echo POLICY-OK || { echo "FAIL: 镜像必须走 SWR"; exit 1; }
