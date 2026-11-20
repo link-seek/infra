@@ -1,0 +1,24 @@
+# Traefik 边缘入口：经 tailscale operator 暴露（proxy-class ha-b 钉 .69）。8080 给 Caddy 试点用；443 给边缘 SNI 中继。
+# Caddy 指 http://traefik-edge.mackarel-polaris.ts.net:8080（试点）；SNI 中继指 :443。
+# 切流后 Caddy 退役，本 Service 作为 TS 入口保留（回滚通道）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-edge
+  namespace: kube-system
+  labels:
+    tailscale.com/proxy-class: ha-b
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: traefik-edge
+    tailscale.com/tags: tag:k8s
+spec:
+  selector:
+    app.kubernetes.io/name: traefik
+  ports:
+    - name: web
+      port: 8080
+      targetPort: web
+    - name: websecure
+      port: 443
+      targetPort: websecure
