@@ -114,14 +114,11 @@ litellm.linkseek.net.cn {
 # 主动健康检查不上：frappe 无站点时 / 与 /api/method/ping 均非 200（404），会被误摘；
 # 只用被动熔断（fail_duration/max_fails，与 opencode.yingxin 块同 pattern）。
 # 回滚=删本段（DNS 另清）；首登需 admin 密码（Secret erpnext，不进仓）。
+# erp 试点：Caddy 只终结 TLS，后端改指 Traefik 的 TS 代理（operator 暴露，Host 透传）。
+# 回滚=改回 dynamic 块（见 git 历史）。主动健康检查不上（frappe 非 200 误摘，Caddy 侧沿用被动熔断）。
 erp.xieyucheng.top {
 	reverse_proxy {
-		dynamic a {
-			name erpnext.mackarel-polaris.ts.net.
-			port 8080
-			refresh 5s
-			resolvers 100.100.100.100
-		}
+		to http://traefik-edge.mackarel-polaris.ts.net:8080
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
