@@ -19,7 +19,7 @@ on:
       manifest_path:
         description: "仓内 HelmChartConfig 声明路径（apply 时下发到 manifests 目录）"
         required: false
-        default: "edge/traefik/k3s-traefik-config.yaml"
+        default: "k8s/traefik-edge/k3s-traefik-config.yaml"
       disable:
         description: "config.yaml+unit 内 disable 条目：remove=去掉；add=加上；keep=不动"
         required: false
