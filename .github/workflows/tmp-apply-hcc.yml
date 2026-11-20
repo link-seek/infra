@@ -1,0 +1,31 @@
+name: tmp-apply-hcc
+# 一次性：直 apply HelmChartConfig CR（热生效，免重启）。用完即删。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: tmp-apply-hcc
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 标准进网＋组 kubeconfig
+        id: net
+        uses: ./.github/actions/runner-net
+        with:
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          kube_ca_data: ${{ secrets.CI_KUBE_CA }}
+          kube_token: ${{ secrets.CI_KUBE_TOKEN }}
+      - name: apply＋验
+        env:
+          KUBECONFIG: ${{ steps.net.outputs.kubeconfig }}
+        run: |
+          set -euo pipefail
+          kubectl apply -f edge/traefik/k3s-traefik-config.yaml
+          sleep 60
+          kubectl -n kube-system get helmchartconfig traefik -o jsonpath='{.spec.valuesContent}' | head -c 400; echo
+          echo APPLY-DONE
