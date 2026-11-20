@@ -1,0 +1,24 @@
+name: team-preflight-sops-reencrypt
+# 薄触发器：opencode-team 预检 test 密文（dummy 值，test age key 加密）。
+# 与生产触发器隔离（concurrency 按 app 分组）；recipient 固定 test 公钥，生产 key 碰不到。
+# 逻辑在 _sops-reencrypt-core（别改这里，加能力改 core）。
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "test 密文重打原因（dummy 值，正常不需要轮换）"
+        required: false
+        default: "other"
+        type: choice
+        options: [key-updated, rotation-90d, other]
+permissions:
+  contents: read
+jobs:
+  call:
+    uses: ./.github/workflows/_sops-reencrypt-core.yml
+    with:
+      app: opencode-team-preflight
+      dir: opencode-team-preflight
+      reason: ${{ inputs.reason }}
+      age_recipient: age167s7vc9ctur6vnfxkdg3yzrrwv3ske245q77v6dlzqf9tu5g8d5svj53mh
+    secrets: inherit
