@@ -22,6 +22,10 @@ on:
         default: "edge/traefik/k3s-traefik-config.yaml"
       disable:
         description: "config.yaml+unit 内 disable 条目：remove=去掉；add=加上；keep=不动"
+        required: false
+        default: "remove"
+        type: choice
+        options: [remove, add, keep]
       reg_src:
         description: "registries.yaml 声明路径（空=跳过下发）"
         required: false
@@ -30,10 +34,6 @@ on:
         description: "registries.yaml 落点"
         required: false
         default: "/etc/rancher/k3s/registries.yaml"
-        required: false
-        default: "remove"
-        type: choice
-        options: [remove, add, keep]
       hw69_tail:
         required: false
         default: "100.93.119.21"
