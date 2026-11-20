@@ -48,14 +48,11 @@ opencode.yingxin.net.cn {
 # 部门共用实例 team-agent（trial，单后端；稳定后再议 ha）。ops 习惯叫 agent，2026-11-16 改名（旧 opencode-team.xieyucheng.top 同 day 退役）。
 # 后端 = k8s 独立 browserless 旁的 opencode-team Pod（operator 代理，ha-b 钉 .69）。
 # 回滚=删本段（DNS 另清）；opencode 自带密码门，公网直达无妨。
+# team-agent 试点：Caddy 只终结 TLS，后端改指本机 Traefik NodePort（127.0.0.1:30080，TS 都不出）。
+# 回滚=改回上面 dynamic 块（见 git 历史）。切流完成即删本段（Traefik 接管 443）。
 team-agent.xieyucheng.top {
 	reverse_proxy {
-		dynamic a {
-			name opencode-team.mackarel-polaris.ts.net.
-			port 4097
-			refresh 5s
-			resolvers 100.100.100.100
-		}
+		to 127.0.0.1:30080
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
