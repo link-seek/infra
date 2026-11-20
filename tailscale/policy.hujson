@@ -38,6 +38,9 @@
 		// 东京出海中转（#423）：k3s 网关 pod 经宿主机 SNAT（tag:prod 身份）打 vm-proxy:14443；
 		// 22/10250 是 edge 白盒排障通道（exec/log），逐 IP 开（vm-proxy＋ali-gz），用完可关。
 		{"src": ["tag:prod"], "dst": ["100.73.221.121", "100.85.128.116"], "ip": ["14443", "22", "10250"]},
+		// B 计划（Traefik 落 ali-gz）：边缘 Traefik 经宿主机 SNAT（tag:mesh 身份）打东京中继取 opencode.ai；
+		// 中继侧 SNI allowlist 只放 opencode.ai，14443 无横向风险。HW 网关走 tag:prod 那条，不动。
+		{"src": ["tag:mesh"], "dst": ["100.73.221.121"], "ip": ["14443"]},
 		// yingxin：ali-gz Caddy（tag:mesh）反代 hw41:4097（opencode-prod-ali-gz 落点）。
 		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["4097"]},
 		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["2222"]},

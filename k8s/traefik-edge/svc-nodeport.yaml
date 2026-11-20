@@ -1,0 +1,21 @@
+# Traefik 边缘入口（试点）：经 tailscale operator 暴露（proxy-class ha-b 钉 .69，无 default class 不挂则忽略）。
+# Caddy 指 http://traefik-edge.mackarel-polaris.ts.net（Host 透传，TLS 仍 Caddy）。
+# 切流完成（Traefik 拿 443）即删本文件。
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-edge
+  namespace: kube-system
+  labels:
+    tailscale.com/proxy-class: ha-b
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: traefik-edge
+    tailscale.com/tags: tag:k8s
+spec:
+  selector:
+    app.kubernetes.io/name: traefik
+  ports:
+    - name: web
+      port: 8080
+      targetPort: web
