@@ -39,10 +39,14 @@ spec:
           dnsChallenge:
             provider: cloudflare
             delayBeforeCheck: 30s
-    envFrom:
-      - secretRef:
-          name: acme-cf
-          optional: true
+    # secret key 叫 CF_DNS_API_TOKEN（90 天轮换时正名为 CLOUDFLARE_DNS_API_TOKEN），此处显式映射到 lego 要的变量名。
+    env:
+      - name: CLOUDFLARE_DNS_API_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: acme-cf
+            key: CF_DNS_API_TOKEN
+            optional: true
     persistence:
       enabled: true
       size: 128Mi
