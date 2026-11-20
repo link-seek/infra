@@ -27,9 +27,8 @@ jobs:
           set -euo pipefail
           kubectl -n opencode-team get ingress team-agent -o wide || echo "no ingress yet"
           kubectl -n kube-system get svc traefik-edge -o wide || echo "no nodeport yet"
-          kubectl port-forward -n kube-system svc/traefik 8080:80 >/tmp/pf.log 2>&1 &
-          PF=$!
-          sleep 8
-          for i in $(seq 1 5); do curl -sS -m 10 -o /dev/null -w "shadow try$i http=%{http_code}\n" -H "Host: team-agent.xieyucheng.top" http://127.0.0.1:8080/ || true; sleep 3; done
-          kill $PF || true
+          for T in 100.93.119.21 100.85.128.116; do
+            echo "== via $T:30080 =="
+            for i in $(seq 1 3); do curl -sS -m 10 -o /dev/null -w "shadow $T try$i http=%{http_code} time=%{time_total}s\n" -H "Host: team-agent.xieyucheng.top" http://$T:30080/ || true; sleep 2; done
+          done
           echo SHADOW-DONE
