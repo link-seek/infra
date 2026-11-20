@@ -56,9 +56,7 @@ team-agent.xieyucheng.top {
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
-		health_uri /
-		health_interval 10s
-		health_timeout 5s
+		# 无主动检查：Traefik 按 Host 路由，探活 Host 不对会 404 误判；只用被动熔断（真实请求 Host 正确）。
 	}
 	log {
 		output file /var/log/caddy/team-agent.log
