@@ -27,15 +27,12 @@ opencode.xieyucheng.top {
 # mesh-ali-gz 入口 opencode.yingxin.net.cn：Caddy → tailnet → k3s pod（P4 直切，2026-11-12）。
 # 旧后端 hw41:4097 保留 7 天（compose 栈原地不动，回滚=改回即发）；7 天无异常再下。
 # 后端用 MagicDNS 全称＋dynamic a（refresh 5s＋被动健康检查；deliver-caddy 保证本机首选 100.100.100.100）。
+# yingxin 公测：Caddy 只终结 TLS，后端改指 Traefik 的 TS 代理（operator 暴露，Host 透传）。
+# 回滚=改回 dynamic 块（见 git 历史）。无主动检查（探活 Host 不对会 404 误判，只用被动熔断）。
 opencode.yingxin.net.cn {
 	reverse_proxy {
-		# 单后端：yingxin 新实例代理（旧名被占，-1 为现行名；哪天重建抢回干净名再改回）。
-		dynamic a {
-			name opencode-k3s-1.mackarel-polaris.ts.net.
-			port 4097
-			refresh 5s
-			resolvers 100.100.100.100
-		}
+		# 单后端：经 Traefik（旧名被占，-1 为现行名；哪天重建抢回干净名再改回）。
+		to http://traefik-edge.mackarel-polaris.ts.net:8080
 		fail_duration 30s
 		max_fails 2
 		lb_try_duration 5s
