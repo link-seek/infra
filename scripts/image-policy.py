@@ -6,6 +6,14 @@ img_re = re.compile(r'^\s*(?:-\s+)?image:\s*["\']?([^\s"\']+)')
 ext_re = re.compile(
     r'(^\s*(?:-\s+)?image:\s*["\']?|^\s*FROM\s+|docker\s+(?:pull|run)\b.*?\s)'
     r'(docker\.io|ghcr\.io|quay\.io|gcr\.io|registry\.k8s\.io|k8s\.gcr\.io|mcr\.microsoft\.com)[/:]')
+for p in list(pathlib.Path('edge').rglob('Caddyfile')) + list(pathlib.Path('edge').rglob('*.caddy')):
+    try:
+        sz = p.stat().st_size
+    except OSError:
+        continue
+    if sz == 0:
+        print(f'VIOLATION {p} is empty')
+        fail = True
 for base in ['k8s', 'edge', 'clusters']:
     for p in sorted(pathlib.Path(base).rglob('*')):
         if not p.is_file() or p.suffix not in ('.yaml', '.yml', ''):
