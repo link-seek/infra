@@ -9,16 +9,7 @@ metadata:
   namespace: kube-system
 spec:
   valuesContent: |-
-    # 切流：hostNetwork 钉 ali-gz，直接绑 80/443（Caddy 停后）。单副本＋反亲和注释见 chart。
     deployment:
-      hostNetwork: true
-      nodeSelector:
-        kubernetes.io/hostname: mesh-ali-gz
-      tolerations:
-        - key: dedicated
-          operator: Equal
-          value: edge
-          effect: NoSchedule
       # opencode.ai 经东京 SNI 中继出海：hostAliases 指 vm-proxy tailnet IP（抄网关作业）。
       # pod 内无 MagicDNS，此处硬编码 IP（与网关同水位；relay 迁移时同步改）。
       hostAliases:
@@ -28,12 +19,6 @@ spec:
     service:
       spec:
         type: ClusterIP
-    # hostNetwork 下容器直绑宿主端口：web 8000→80，websecure 8443→443（exposedPort 管 svc，不管宿主）。
-    ports:
-      web:
-        port: 80
-      websecure:
-        port: 443
     providers:
       kubernetesIngress:
         allowExternalNameServices: true
