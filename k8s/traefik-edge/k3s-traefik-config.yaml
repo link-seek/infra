@@ -9,6 +9,13 @@ metadata:
   namespace: kube-system
 spec:
   valuesContent: |-
+    deployment:
+      # opencode.ai 经东京 SNI 中继出海：hostAliases 指 vm-proxy tailnet IP（抄网关作业）。
+      # pod 内无 MagicDNS，此处硬编码 IP（与网关同水位；relay 迁移时同步改）。
+      hostAliases:
+        - ip: "100.73.221.121"
+          hostnames:
+            - "opencode.ai"
     service:
       spec:
         type: ClusterIP
