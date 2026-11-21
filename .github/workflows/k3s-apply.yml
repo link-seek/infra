@@ -99,16 +99,10 @@ jobs:
             exit 0
           fi
           if [ "$K3S_NS" = "litellm" ]; then
-            # 网关：隻要 TS key（tag:gateway）+ 现场随机 master key；无状态，不吃业务 secret。
-            [ -n "${TS_API_KEY:-}" ] || { echo "FAIL: TS_API_KEY missing"; exit 1; }
-            BODY="$(printf '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["%s"]}}},"expirySeconds":7776000}' "$K3S_JOIN_TAG")"
-            TS_JOIN="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $(printf '%s' "$TS_API_KEY" | tr -d '\r\n ')" \
-              -H 'Content-Type: application/json' -d "$BODY" \
-              https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
-            [ -n "$TS_JOIN" ] || { echo "FAIL: TS mint"; exit 1; }
+            # 网关：容器已退役 TS 身份（不再入 tailnet），只需现场随机 master key；无状态，不吃业务 secret。
             MASTER="sk-$(python3 -c 'import secrets;print(secrets.token_hex(16))')"
-            { echo "TS_JOIN_KEY=$TS_JOIN"; echo "LITELLM_MASTER_KEY=$MASTER"; } > /tmp/opencode-env.txt
-            echo "litellm identity: $K3S_JOIN_TAG (TS_HOSTNAME 由 manifest 定)"
+            { echo "LITELLM_MASTER_KEY=$MASTER"; } > /tmp/opencode-env.txt
+            echo "litellm secret: LITELLM_MASTER_KEY only（无 TS 身份）"
             exit 0
           fi
           for v in S_LITELLM S_GH S_PWD S_AK S_SK S_SMTP CF_TOKEN TS_API_KEY; do
