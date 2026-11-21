@@ -16,7 +16,7 @@ on:
       runner_tag:
         description: "runner 进网身份"
         required: false
-        default: "tag:user"
+        default: "tag:github"
 
 permissions:
   contents: read
@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
-          RTAG="${{ inputs.runner_tag }}"; [ -n "$RTAG" ] || RTAG="tag:user"
+          RTAG="${{ inputs.runner_tag }}"; [ -n "$RTAG" ] || RTAG="tag:github"
           MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
             -d "{\"capabilities\":{\"devices\":{\"create\":{\"reusable\":false,\"ephemeral\":true,\"preauthorized\":true,\"tags\":[\"$RTAG\"]}}},\"expirySeconds\":21600}" \
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
