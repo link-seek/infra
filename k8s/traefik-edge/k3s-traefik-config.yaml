@@ -16,6 +16,9 @@ spec:
           hostnames:
             - "opencode.ai"
     # L2 终态：Traefik 在公网入口节点 hostNetwork 直接接管 80/443，宿主 Caddy 退役。
+    # hostNetwork 单副本入口必须 Recreate：RollingUpdate 会因端口(80/443)/RWO 卷冲突卡在 Pending。
+    updateStrategy:
+      type: Recreate
     hostNetwork: true
     nodeSelector:
       kubernetes.io/hostname: mesh-ali-gz
