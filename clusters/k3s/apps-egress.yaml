@@ -1,0 +1,16 @@
+# Flux Kustomization: egress（L7 CONNECT 出口代理，钉东京 vm-proxy）。
+# 由 flux-system（path ./clusters/k3s）收编 → 与 traefik/litellm 等一样 merge 即生效，不再 workflow SSH 直发。
+# prune: true → 删清单即删对象（用于后续退役旧 SNI relay）。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: egress
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/egress
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: flux-system
+  wait: false

@@ -1,0 +1,68 @@
+# egress 出口代理 Deployment + Service（钉东京 vm-proxy，提供固定出口 IP）。
+# 只有 litellm 网关用它（HTTPS_PROXY 指向 egress-proxy.egress.svc:3128）；其它直连，不掺和。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-proxy
+  namespace: egress
+  labels:
+    app: egress-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: egress-proxy
+  template:
+    metadata:
+      labels:
+        app: egress-proxy
+    spec:
+      # 出口必须落在东京 vm-proxy（opencode.ai 按来源地区放行部分模型）。
+      nodeSelector:
+        kubernetes.io/hostname: vm-proxy
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: edge
+          effect: NoSchedule
+      containers:
+        - name: squid
+          image: docker.io/ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
+          ports:
+            - name: proxy
+              containerPort: 3128
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+              readOnly: true
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          readinessProbe:
+            tcpSocket: {port: 3128}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: 3128}
+            initialDelaySeconds: 20
+            periodSeconds: 30
+      volumes:
+        - name: conf
+          configMap:
+            name: egress-proxy-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-proxy
+  namespace: egress
+  labels:
+    app: egress-proxy
+spec:
+  selector:
+    app: egress-proxy
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 3128

@@ -6,3 +6,6 @@
 - path: k8s/egress/daemonset-sni-tokyo-edge.yaml
   image: docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7
   reason: 同上（东京第二节点）。
+- path: k8s/egress/proxy.yaml
+  image: docker.io/ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
+  reason: 东京 vm-proxy 拉不到 SWR（121.37.64.12:443 i/o timeout 实测），L7 CONNECT 出口代理直拉 docker.io。
