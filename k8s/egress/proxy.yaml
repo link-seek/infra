@@ -10,8 +10,10 @@ metadata:
 spec:
   replicas: 1
   # hostNetwork 单副本：必须 Recreate，RollingUpdate 会因新 pod 抢不到节点 :3128 卡 Pending。
+  # rollingUpdate: null 必须显式置空，否则 apply 会残留旧字段报 "may not be specified when type is Recreate"。
   strategy:
     type: Recreate
+    rollingUpdate: null
   selector:
     matchLabels:
       app: egress-proxy
