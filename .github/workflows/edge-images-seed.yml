@@ -45,7 +45,8 @@ jobs:
           seed "docker.io/rancher/mirrored-pause:3.10.2" "$REG/edge-pause:3.10.2" ""
           seed "docker.io/library/busybox:1.36" "$REG/edge-busybox:1.36" ""
           # k3s 内置 addon（registries.yaml rewrite 目标，常驻 public）
-          seed "docker.io/rancher/mirrored-coredns-coredns:1.14.7" "$REG/k3s-coredns:1.14.7" ""
+          # coredns 是多架构 manifest list：用 buildx imagetools 直接复制（docker tag/push 会丢 platform 报错）
+          docker buildx imagetools create --tag "$REG/k3s-coredns:1.14.7" "docker.io/rancher/mirrored-coredns-coredns:1.14.7"
           seed "docker.io/library/nginx@sha256:bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7" "$REG/edge-nginx-relay:bb8f722b" "bb8f722b4be005fcd7827816a136ab779fd40185d85b5171be915cc7fc0575c7"
           docker logout "$REG" || true
           echo SEED-OK
