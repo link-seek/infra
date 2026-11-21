@@ -39,6 +39,8 @@
 		{"src": ["tag:pc"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"], "ip": ["*"]},
 		// CI deploy runner
 		{"src": ["tag:github"], "dst": ["tag:hw", "tag:prod"], "ip": ["6443"]},
+		// [normalize-step1] deploy runner 全端口到自有节点（expand，为迁移 mint tag→github 预留；旧规则保留）
+		{"src": ["tag:github"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "ip": ["*"]},
 		{
 			"src": ["tag:mesh"],
 			"dst": ["100.91.222.51", "100.85.128.116", "100.69.220.112", "100.111.231.85"],
