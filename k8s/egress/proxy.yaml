@@ -9,6 +9,9 @@ metadata:
     app: egress-proxy
 spec:
   replicas: 1
+  # hostNetwork 单副本：必须 Recreate，RollingUpdate 会因新 pod 抢不到节点 :3128 卡 Pending。
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: egress-proxy
