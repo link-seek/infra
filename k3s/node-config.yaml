@@ -1,0 +1,24 @@
+# k3s 节点配置声明（k3s over TS underlay）
+# 真相源：workflow `k3s-node-config.yml` 以此为准做 verify(漂移检查)/apply(写入)。
+# 纪律：node-ip 钉 LAN（etcd/API 确定性）；node-external-ip=该机 tailnet IP（让 flannel
+#       public-ip = VTEP，跨云才能通）；flannel-iface=tailscale0（VXLAN over TS，MTU 1230）。
+# 2026-11-21 L1 迁移（.41→.21→.69）已验证并落地。
+hosts:
+  - name: mesh-hw-21
+    ssh: 100.100.246.95
+    node_ip: 192.168.1.21
+    node_external_ip: 100.100.246.95
+    flannel_iface: tailscale0
+    expect_flannel_mtu: 1230
+  - name: mesh-hw-41
+    ssh: 100.73.182.4
+    node_ip: 192.168.1.41
+    node_external_ip: 100.73.182.4
+    flannel_iface: tailscale0
+    expect_flannel_mtu: 1230
+  - name: mesh-hw-69
+    ssh: 100.93.119.21
+    node_ip: 192.168.1.69
+    node_external_ip: 100.93.119.21
+    flannel_iface: tailscale0
+    expect_flannel_mtu: 1230
