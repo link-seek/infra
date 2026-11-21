@@ -11,6 +11,6 @@ spec:
   path: ./k8s/litellm
   prune: true
   sourceRef:
-    kind: GitRepository
+    kind: OCIRepository
     name: docker-images
   wait: false

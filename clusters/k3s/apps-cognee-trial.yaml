@@ -12,6 +12,6 @@ spec:
   path: ./k8s/cognee-trial
   prune: true
   sourceRef:
-    kind: GitRepository
+    kind: OCIRepository
     name: docker-images
   wait: false
