@@ -1,7 +1,6 @@
-# Traefik 期望态：ClusterIP 影子 verified；ACME 双 resolver（staging→prod）；切流时再加 hostNetwork/钉点。
-# 切流时改 service.spec.type=LoadBalancer + 縮池標籤（另議，不在本文件混）。
-# allowExternalNameServices：models 路由直透上游（ExternalName），Ingress 经 PR 评审。
-# 由 k3s-server-component workflow 下发到三 server manifests 目录。
+# Traefik 终态（L2）：在公网入口节点 mesh-ali-gz hostNetwork 直接接管 80/443，宿主 Caddy 退役。
+# 证书存静态 PV（hostPath /var/lib/traefik-data，acme.json le-prod）；ACME Cloudflare DNS-01。
+# 由 Flux kustomization traefik-edge 从本目录同步。
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:
@@ -10,22 +9,43 @@ metadata:
 spec:
   valuesContent: |-
     deployment:
-      # opencode.ai 经东京 SNI 中继出海：hostAliases 指 vm-proxy tailnet IP（抄网关作业）。
-      # pod 内无 MagicDNS，此处硬编码 IP（与网关同水位；relay 迁移时同步改）。
+      dnsPolicy: ClusterFirstWithHostNet
+      # opencode.ai 经东京 SNI 中继出海：hostAliases 指 vm-proxy tailnet IP。
       hostAliases:
         - ip: "100.73.221.121"
           hostnames:
             - "opencode.ai"
+    # L2 终态：Traefik 在公网入口节点 hostNetwork 直接接管 80/443，宿主 Caddy 退役。
+    hostNetwork: true
+    nodeSelector:
+      kubernetes.io/hostname: mesh-ali-gz
+    # mesh-ali-gz 带污点 dedicated=edge:NoSchedule；并保留 base chart 的 addon/control-plane toleration（列表覆盖语义，需全量列出）。
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: dedicated
+        operator: Equal
+        value: edge
+        effect: NoSchedule
     service:
       spec:
         type: ClusterIP
+    ports:
+      web:
+        port: 80
+      websecure:
+        port: 443
+      traefik:
+        port: 18080
     providers:
       kubernetesIngress:
         allowExternalNameServices: true
-      # litellm IngressRoute 后端是 ExternalName（opencode-ai），CRD provider 也要显式放行（与上面同因）。
       kubernetesCRD:
         allowExternalNameServices: true
-    # ACME（Cloudflare DNS-01）：staging 先验，production 随后。token 经 SOPS（acme-cf），envFrom optional 保证 secret 未到前 pod 照起。
+    # ACME（Cloudflare DNS-01）：production resolver；证书落在持久卷 /data/acme.json。
     certificatesResolvers:
       le-staging:
         acme:
@@ -42,7 +62,6 @@ spec:
           dnsChallenge:
             provider: cloudflare
             delayBeforeCheck: 30s
-    # secret key 叫 CF_DNS_API_TOKEN（90 天轮换时正名为 CLOUDFLARE_DNS_API_TOKEN），此处显式映射到 lego 要的变量名。
     env:
       - name: CLOUDFLARE_DNS_API_TOKEN
         valueFrom:
@@ -50,7 +69,9 @@ spec:
             name: acme-cf
             key: CF_DNS_API_TOKEN
             optional: true
+    # 证书持久化：用静态 PV（hostPath /var/lib/traefik-data on mesh-ali-gz，已预置 acme.json），
+    # 避免 local-path 默认 PVC 的节点亲和把 pod 钉在旧节点、以及重复签发。
     persistence:
       enabled: true
-      size: 128Mi
+      existingClaim: traefik-data
       path: /data
