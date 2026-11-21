@@ -1,0 +1,30 @@
+# egress 出口代理（Squid，CONNECT-only）：只允许隧道到 opencode.ai:443，其余一律拒绝。
+# 目的：给 litellm 网关提供东京 vm-proxy 的出口 IP（部分模型按来源地区放行）。
+# 与旧 SNI relay 的区别：这是 L7 CONNECT 正向代理，客户端连代理、代理用真域名建 TLS，无需 opencode.ai DNS 映射。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-proxy-conf
+  namespace: egress
+  labels:
+    app: egress-proxy
+data:
+  squid.conf: |
+    http_port 3128
+
+    acl SSL_ports port 443
+    acl CONNECT method CONNECT
+    acl allowed_domains dstdomain opencode.ai
+
+    # 只放行：CONNECT -> 443 -> opencode.ai
+    http_access allow CONNECT SSL_ports allowed_domains
+    # 其余全部拒绝（纯出口隧道代理，不做普通 HTTP 转发）
+    http_access deny all
+
+    cache deny all
+    access_log stdio:/dev/stdout
+    cache_log /dev/stderr
+    pid_filename /tmp/squid.pid
+    coredump_dir /var/spool/squid
+    via off
+    forwarded_for delete
