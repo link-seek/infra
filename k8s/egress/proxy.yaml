@@ -17,6 +17,10 @@ spec:
       labels:
         app: egress-proxy
     spec:
+      # 普通 pod 在 vm-proxy 上无法出网（flannel 出口坏，实测 TCP 挂起）；用 hostNetwork 走节点网络，
+      # 出口 IP 即 vm-proxy 公网 IP。ClusterFirstWithHostNet 保证 hostNetwork 下仍用集群 DNS。
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       # 出口必须落在东京 vm-proxy（opencode.ai 按来源地区放行部分模型）。
       nodeSelector:
         kubernetes.io/hostname: vm-proxy
