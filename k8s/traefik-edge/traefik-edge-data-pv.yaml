@@ -1,0 +1,41 @@
+# Traefik 证书持久卷：静态 PV（hostPath on mesh-ali-gz）+ PVC，供 traefik 的 persistence.existingClaim 使用。
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: traefik-edge-data
+spec:
+  capacity:
+    storage: 128Mi
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    namespace: kube-system
+    name: traefik-data
+  hostPath:
+    path: /var/lib/traefik-data
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - mesh-ali-gz
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: traefik-data
+  namespace: kube-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+  volumeName: traefik-edge-data
+  resources:
+    requests:
+      storage: 128Mi
