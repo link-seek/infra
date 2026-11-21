@@ -1,9 +1,6 @@
 name: edge-probe
-# 只读探针：edge 双节点（vm-proxy/ali-gz）状态＋SNI 中继逐个打。
-# 双身份（ACL 现实）：user 看得到 .69/vm-proxy（看不见 ali-gz）；
-#   admin 看得到 ali-gz（看不见 .69）。都是 ephemeral，用完焚毁。
-# 用途：vm-proxy 健康判定、ali-gz 中继验收。不做任何变更。
-
+# 只读探针：集群节点 + egress L7 出口代理（东京 vm-proxy）健康。不做任何变更。
+# 注：SNI relay 已于 2026-11-22 退役，改用 L7 CONNECT 代理（egress/egress-proxy），出口=vm-proxy。
 on:
   workflow_dispatch:
 
@@ -21,7 +18,7 @@ jobs:
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
-      - name: 进网（user 身份）＋ 簇视角 ＋ vm-proxy 中继
+      - name: 进网（user 身份）＋ 簇视角 ＋ egress 代理探测
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
@@ -32,37 +29,15 @@ jobs:
           [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edgeprobe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          echo "== user netmap（hostname 列表） =="
-          sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(sorted(set([str(p.get('HostName','')) for p in peers.values()])))"
           echo "== 簇节点（.69 视角） =="
           sudo tailscale ssh root@100.93.119.21 'kubectl get nodes -o wide'
-          echo "== egress DaemonSet（.69 视角） =="
-          sudo tailscale ssh root@100.93.119.21 'kubectl -n egress get ds sni-egress -o wide 2>/dev/null; kubectl -n egress get pods -o wide 2>/dev/null'
-          echo "== vm-proxy 中继直打 =="
-          VIP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if 'mesh-oci-proxy' in str(p.get('HostName','')) or 'vm-proxy' in str(p.get('HostName',''))),''))")
+          echo "== egress 出口代理（.69 视角） =="
+          sudo tailscale ssh root@100.93.119.21 'kubectl -n egress get deploy egress-proxy -o wide; kubectl -n egress get pods -o wide'
+          echo "== 经代理 CONNECT opencode.ai（403 可能为 opencode bot 拦截；隧道成功即可，详见 squid 访问日志） =="
+          VIP=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(next((p['TailscaleIPs'][0] for p in peers.values() if 'vm-proxy' in str(p.get('HostName',''))),''))")
           [ -n "$VIP" ] || { echo "WARN: user 看不见 vm-proxy（只记现象，不拦门）"; }
           if [ -n "$VIP" ]; then
-            CODE=$(curl -sk -m 20 -o /dev/null -w '%{http_code}' --resolve opencode.ai:14443:"$VIP" https://opencode.ai:14443/ || true)
-            echo "vm-proxy relay https => http=$CODE"
-            [ "$CODE" = 200 ] && echo VM-RELAY-OK || echo VM-RELAY-FAIL
+            CODE=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -x "http://$VIP:3128" https://opencode.ai/ || true)
+            echo "egress-proxy CONNECT opencode.ai => http=$CODE"
           fi
-          sudo tailscale logout || true
-
-      - name: 进网（admin 身份）＋ ali-gz 中继直打
-        run: |
-          set -euo pipefail
-          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
-          echo "::add-mask::$TSKEY"
-          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:admin"]}}},"expirySeconds":3600}' \
-            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
-          [ -n "$MINTED" ] || { echo "FAIL: admin key mint 失败"; exit 1; }
-          echo "::add-mask::$MINTED"
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edgeprobe-adm-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
-          echo "== admin netmap（hostname 列表） =="
-          sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); peers=d.get('Peer') or {}; print(sorted(set([str(p.get('HostName','')) for p in peers.values()])))"
-          AIP="100.85.128.116"
-          CODE=$(curl -sk -m 20 -o /dev/null -w '%{http_code}' --resolve opencode.ai:14443:"$AIP" https://opencode.ai:14443/ || true)
-          echo "ali-gz relay https => http=$CODE"
-          [ "$CODE" = 200 ] && echo ALI-RELAY-OK || echo "ALI-RELAY-NOT-YET（预期：中继还没部署）"
           sudo tailscale logout || true
