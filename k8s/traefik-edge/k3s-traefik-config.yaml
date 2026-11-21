@@ -10,11 +10,8 @@ spec:
   valuesContent: |-
     deployment:
       dnsPolicy: ClusterFirstWithHostNet
-      # opencode.ai 经东京 SNI 中继出海：hostAliases 指 vm-proxy tailnet IP。
-      hostAliases:
-        - ip: "100.73.221.121"
-          hostnames:
-            - "opencode.ai"
+      # 去 hostAliases：Traefik 直连 opencode.ai（SNI 由 ServersTransport 保证）。
+      # 仅 litellm 网关需要东京 vm-proxy 出口（部分模型按来源地区放行），中继只服务它。
     # L2 终态：Traefik 在公网入口节点 hostNetwork 直接接管 80/443，宿主 Caddy 退役。
     # hostNetwork 单副本入口必须 Recreate：RollingUpdate 会因端口(80/443)/RWO 卷冲突卡在 Pending。
     updateStrategy:
