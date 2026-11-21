@@ -16,8 +16,8 @@ on:
       restart:
         description: "apply 后是否重启 k3s（配置有变化时）"
         type: choice
-        options: [no, yes]
-        default: no
+        options: ["no", "yes"]
+        default: "no"
         required: true
   schedule:
     - cron: "17 1 * * *"   # 每天 01:17 UTC 巡检
