@@ -1,275 +1,37 @@
 {
 	"groups": {"group:admin": ["xieyucheng123@github"]},
 	"tagOwners": {
-		"tag:mesh":      ["autogroup:admin"],
-		"tag:connector": ["autogroup:admin"],
-		// S1 三权拆分（#202）：guest=访客（bake/preflight/probe 靶机，全网可达不可登录）；
-		// user=配送（deliver/deliver-caddy，可达＋可登点名生产机）；admin=值班（全网，手动）。
-		"tag:guest":     ["autogroup:admin"],
-		"tag:user":      ["autogroup:admin"],
-		"tag:admin":     ["autogroup:admin"],
-		// 常驻生产机（hw-21）。
-		"tag:prod":      ["autogroup:admin"],
-		// 机器专属 tag（#202 修正案：tag 精确到单机，node_ip 降为防呆）。
-		"tag:opencode-hw21": ["autogroup:admin"],
-		"tag:opencode-hw41": ["autogroup:admin"],
-		// opencode-prod 容器（userspace tailscaled），独立 tailnet 节点。
-		"tag:opencode":  ["autogroup:admin"],
-		// k8s operator 自身 + 它起的代理（去容器 TS 身份：身份迁 operator，见 k8s/tailscale-operator）。
-		// 官方要求：operator 的 tag 拥有代理 tag，代理才能带 tag:k8s 入网。
-		"tag:k8s-operator": ["autogroup:admin"],
-		"tag:k8s": ["tag:k8s-operator", "autogroup:admin"],
-		// litellm-gateway 容器（userspace tailscaled，不开 --ssh），独立 tailnet 节点（#181）。
-		"tag:gateway":   ["autogroup:admin"],
-		// ===== v2：TS 只按来源分 tag（迁移期与旧 tag 并存）=====
-		"tag:hw":        ["autogroup:admin"],
-		"tag:ali":       ["autogroup:admin"],
-		"tag:oci":       ["autogroup:admin"],
-		"tag:github":    ["autogroup:admin"],
-		"tag:pc":        ["autogroup:admin"]
+		"tag:hw":     ["autogroup:admin"],
+		"tag:ali":    ["autogroup:admin"],
+		"tag:oci":    ["autogroup:admin"],
+		"tag:github": ["autogroup:admin"],
+		"tag:pc":     ["autogroup:admin"]
 	},
-	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
 	"grants": [
-		// ===== v2 迁移 expand：新 5-tag 规则（旧规则保留，切完再收）=====
-		// k8s underlay：所有 k8s 主机互通 flannel vxlan（新+旧 tag 并存）
-		{"src": ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"], "ip": ["8472"]},
-		// edge agent → server 的 apiserver
-		{"src": ["tag:ali", "tag:oci"], "dst": ["tag:hw", "tag:prod"], "ip": ["6443"]},
-		// 个人电脑（最高权限）
-		{"src": ["tag:pc"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"], "ip": ["*"]},
-		// CI deploy runner
-		{"src": ["tag:github"], "dst": ["tag:hw", "tag:prod"], "ip": ["6443"]},
-		// [normalize-step1] deploy runner 全端口到自有节点（expand，为迁移 mint tag→github 预留；旧规则保留）
+		// 集群内网：hw/ali/oci 均为自有 k3s 节点，全端口互通。
+		// 覆盖 underlay VXLAN(udp 8472)/apiserver(6443)/etcd(2379-2380)/kubelet(10250)/Tokyo 中继(14443) 等。
+		{"src": ["tag:hw", "tag:ali", "tag:oci"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "ip": ["*"]},
+		// 个人电脑：最高权限，可达集群与其它个人电脑。
+		{"src": ["tag:pc"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:pc"], "ip": ["*"]},
+		// CI deploy runner（tag:github，仅它进网）：自有节点全端口（部署/校验/etcd obs 等）。
 		{"src": ["tag:github"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "ip": ["*"]},
-		{
-			"src": ["tag:mesh"],
-			"dst": ["100.91.222.51", "100.85.128.116", "100.69.220.112", "100.111.231.85"],
-			"ip":  ["22", "41641"]
-		},
-		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4097"]},
-		// k3s 跨云 agent（#373 终局）：mesh 系节点（含边缘 agent）调 k3s server 6443（agent 主动建连方向；回包 stateful 放行）。
-		// 直连 UDP 41641 提速（DERP 兜底，不断连）。IP 写死已死（41/.69 重建换 IP 即失联），改走 tag:prod。
-		{"src": ["tag:mesh"], "dst": ["tag:prod"], "ip": ["6443", "41641"]},
-		// 人（tag:mesh）直连生产机 hw21（tag:prod）排障：Tailscale SSH(:22) + OpenSSH 破窗(:2244)。
-		// hw21 重建后 IP 变为 100.100.246.95，上方 IP 名单里的旧 100.91.222.51 已失效，故改走 tag:prod。
-		{"src": ["tag:mesh"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
-		// 远端 edge（广州）经 subnet-router 回内网：k3s server 名单＋flannel vxlan 都是 192.168.1.x，tailnet 直达不了，必须路由过去。
-		{"src": ["tag:mesh"], "dst": ["192.168.1.0/24"], "ip": ["6443", "8472"]},
-		// 东京出海中转（#423）：k3s 网关 pod 经宿主机 SNAT（tag:prod 身份）打 vm-proxy:14443；
-		// 22/10250 是 edge 白盒排障通道（exec/log），逐 IP 开（vm-proxy＋ali-gz），用完可关。
-		{"src": ["tag:prod"], "dst": ["100.73.221.121", "100.85.128.116"], "ip": ["14443", "22", "10250"]},
-		// B 计划（Traefik 落 ali-gz）：边缘 Traefik 经宿主机 SNAT（tag:mesh 身份）打东京中继取 opencode.ai；
-		// 中继侧 SNI allowlist 只放 opencode.ai，14443 无横向风险。HW 网关走 tag:prod 那条，不动。
-		{"src": ["tag:mesh"], "dst": ["100.73.221.121"], "ip": ["14443"]},
-		// yingxin：ali-gz Caddy（tag:mesh）反代 hw41:4097（opencode-prod-ali-gz 落点）。
-		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["4097"]},
-		{"src": ["tag:mesh"], "dst": ["100.111.231.85"], "ip": ["2222"]},
-		// demo：ali-gz Caddy（tag:mesh）直打 demo 容器身份 :8788（cloudflare-os 试用，转正即删）。
-		{"src": ["tag:mesh"], "dst": ["tag:opencode"], "ip": ["8788"]},
-		{"src": ["tag:mesh"], "dst": ["tag:connector"], "ip": ["*"]},
-		{"src": ["autogroup:member"], "dst": ["tag:connector"], "ip": ["*"]},
-		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4000"]},
-		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4000"]},
-		{
-			"src": ["autogroup:member"],
-			"dst": ["tag:mesh", "tag:connector", "100.69.220.112/32", "100.78.144.89/32"],
-			"ip":  ["*"]
-		},
-		{"src": ["autogroup:admin"], "dst": ["*"], "ip": ["*"]},
-		{
-			"src": ["tag:mesh"],
-			"dst": ["autogroup:internet"],
-			"via": ["tag:connector"],
-			"ip":  ["*"]
-		},
-		{"src": ["tag:mesh"], "dst": ["100.91.222.51"], "ip": ["4098"]},
-		{"src": ["autogroup:member"], "dst": ["100.91.222.51"], "ip": ["4098"]},
-		// 过渡期 2244 保留：旧 key 通路还在，切完 TS SSH 并验证后删掉 2244。
-		// S1 三权拆分（#202）：guest 全网可达（服务/网关/拉包/探端口），不可登录；user 点名生产机。
-		{"src": ["tag:guest"], "dst": ["100.91.222.51", "100.85.128.116", "100.111.231.85", "100.103.182.112", "100.69.220.112", "100.78.144.89"], "ip": ["*"]},
-		// 跳板摘除（HW21 重建）：CI 以 guest 身份直达（plain key SSH，走 grants，不管 ssh accept）。
-		// 新 HW21 用 tag（重建换 IP 不失联）；.69 暂按 IP（tag 待定，以后收敛）。
-		{"src": ["tag:guest"], "dst": ["tag:opencode-hw21"], "ip": ["22", "2244"]},
-		{"src": ["tag:guest"], "dst": ["tag:opencode-hw41"], "ip": ["22", "2244"]},
-		{"src": ["tag:guest"], "dst": ["100.93.119.21"], "ip": ["22", "2244"]},
-		{"src": ["tag:guest"], "dst": ["tag:guest"], "ip": ["*"]},
-		{"src": ["tag:guest"], "dst": ["tag:opencode"], "ip": ["22"]},
-		{"src": ["tag:guest"], "dst": ["100.91.222.51"], "ip": ["4000"]},
-		{"src": ["tag:user"], "dst": ["tag:prod"], "ip": ["22", "2244"]},
-		{"src": ["tag:user"], "dst": ["tag:opencode-hw21", "tag:opencode-hw41"], "ip": ["22", "2244"]},
-		{"src": ["tag:user"], "dst": ["100.91.222.51"], "ip": ["4000"]},
-		{"src": ["tag:user"], "dst": ["tag:user"], "ip": ["22", "2244"]},
-		{"src": ["tag:user"], "dst": ["tag:guest"], "ip": ["22", "2244"]},
-		{"src": ["tag:user"], "dst": ["tag:opencode"], "ip": ["22"]},
-		// k3s-apply ingress 探针（Caddy 视角）：配送 runner 直连 pod :4097（HTTP，无 ssh）。
-		// 只给网络可见性+4097；canary 探针同款（74 行注释）。
-		{"src": ["tag:user"], "dst": ["tag:opencode"], "ip": ["4097"]},
-		{"src": ["tag:user"], "dst": ["100.111.231.85"], "ip": ["22", "2244"]},
-		// 非 HW（ali-gz/oci）只放 admin：deliver-caddy 以 admin 身份上机（手动 dispatch＋全程盯）。
-		{"src": ["tag:admin"], "dst": ["100.85.128.116"], "ip": ["22"]},
-		// 网关独立入网（#181/#202）：网关 :4000 全网放行（公共基础设施，认证由网关自己管）。
-		{"src": ["tag:mesh", "tag:opencode", "tag:user", "tag:guest", "autogroup:member"], "dst": ["tag:gateway"], "ip": ["4000"]},
-		// opencode-prod 容器只登 .21/.41 两个等价节点；人（tag:mesh）可登容器排障。
-		{"src": ["tag:opencode"], "dst": ["100.91.222.51", "100.111.231.85"], "ip": ["22"]},
-		{"src": ["tag:mesh"],     "dst": ["tag:opencode"], "ip": ["22"]},
-		// 入口 Caddy（mesh）到 opencode 系容器 4097；现有 mesh→opencode:22 不动。
-		{"src": ["tag:mesh"], "dst": ["tag:opencode"], "ip": ["4097"]},
-		// operator 代理（4097 team-agent；8080 erpnext 经 Caddy 公网入口，代理日志 no rules matched 实锤缺口）。
-		{"src": ["tag:mesh"], "dst": ["tag:k8s"], "ip": ["4097", "8080"]},
-		// CI 看 canary：trial 靶机/runner 按各自身份（guest/user），netmap 按 ACL 过滤，
-		// 无此条则探针在宿主设备表永远看不到 canary（40616506188/40617554410 实锤）。
-		// 只给网络可见性，不给 ssh 规则（探针用 docker exec），CI 不能 SSH 进 canary。
-		// deliver-stack 一次性节点（guest/user）上 hw41 部署，2244 上机 + 22 备用。
+		// 管理员安全网（人类 admin 任何时候可达全部，防锁死）。
+		{"src": ["autogroup:admin"], "dst": ["*"], "ip": ["*"]}
 	],
-	"nodeAttrs": [{"target": ["*"], "app": {"tailscale.com/app-connectors": [{
-		"name":       "opencode-ai",
-		"connectors": ["tag:connector"],
-		"domains":    ["opencode.ai", "*.opencode.ai"]
-	}, {"name": "huggingface", "connectors": ["tag:connector"], "domains": [
-		"huggingface.co",
-		"*.huggingface.co",
-		"hf.co",
-		"*.hf.co",
-		"hf.space",
-		"*.hf.space",
-		"huggingface.com",
-		"*.huggingface.com",
-		"huggingface.cn",
-		"*.huggingface.cn"
-	]}, {"name": "dev-tools", "connectors": ["tag:connector"], "domains": [
-		"github.com",
-		"*.githubusercontent.com",
-		"github-cloud.s3.amazonaws.com",
-		"pypi.org",
-		"*.pypi.org",
-		"pypi.python.org",
-		"pythonhosted.org",
-		"*.pythonhosted.org",
-		"npmjs.org",
-		"*.npmjs.org",
-		"npmjs.com",
-		"*.npmjs.com",
-		"yarnpkg.com",
-		"*.yarnpkg.com",
-		"docker.io",
-		"*.docker.io",
-		"docker.com",
-		"*.docker.com",
-		"ghcr.io",
-		"quay.io",
-		"registry.k8s.io"
-	]}, {"name": "google", "connectors": ["tag:connector"], "domains": [
-		"google.com",
-		"*.google.com",
-		"googleapis.com",
-		"*.googleapis.com",
-		"gstatic.com",
-		"*.gstatic.com",
-		"google.com.hk",
-		"*.google.com.hk"
-	]}]}}],
-	"ssh": [{
-		"action": "check",
-		"src":    ["autogroup:member"],
-		"dst":    ["autogroup:self"],
-		"users":  ["autogroup:nonroot", "root"]
-	}, {
-		// S1 三权拆分（#202）：guest 只互登，user 可登 guest 临时靶机＋点名生产机，admin 全网。
-		"action": "accept",
-		"src":    ["tag:guest"],
-		"dst":    ["tag:guest"],
-		"users":  ["root"]
-	}, {
-		"action": "accept",
-		"src":    ["tag:user"],
-		"dst":    ["tag:prod"],
-		"users":  ["root"]
-	}, {
-		"action": "accept",
-		"src":    ["tag:user"],
-		"dst":    ["tag:user"],
-		"users":  ["root"]
-	}, {
-		// user 可登 guest 临时测试靶机＋点名生产机。
-		"action": "accept",
-		"src":    ["tag:user"],
-		"dst":    ["tag:guest"],
-		"users":  ["root"]
-	}, {
-		// user 登 mesh（HW 点名机经 grants 交集收窄；ali-gz/oci 无 user grants，到不了）。
-		"action": "accept",
-		"src":    ["tag:user"],
-		"dst":    ["tag:mesh"],
-		"users":  ["root"]
-	}, {
-		"action": "accept",
-		"src":    ["tag:admin"],
-		"dst":    ["tag:mesh"],
-		"users":  ["root"]
-	}, {
-		"action": "accept",
-		"dst":    ["tag:prod"],
-		"users":  ["root"]
-	}, {
-		// opencode-prod 容器：SSH dst 不能用 IP，用 tag:mesh；上面的网络 grant
-		// 只放行 .21/.41:22，二者交集才是真正可达的两台等价节点。
-		"action": "accept",
-		"src":    ["tag:opencode"],
-		"dst":    ["tag:mesh"],
-		"users":  ["root"]
-	}, {
-		"action": "accept",
-		"src":    ["tag:mesh"],
-		"dst":    ["tag:opencode"],
-		"users":  ["root"]
-	}, {
-		// 已删 autogroup:member → tag:mesh / tag:connector：
-		// 那是"任何未打 tag 的成员设备都能 root 进所有机器"，包括随便起的 CI 节点。
-		// 人的设备都是 tag:mesh，走下面这条，能力不受影响。
-		"action": "accept",
-		"src":    ["tag:mesh"],
-		"dst":    ["tag:mesh"],
-		"users":  ["root"]
-	}, {
-		"action": "accept",
-		"src":    ["tag:mesh"],
-		"dst":    ["tag:mesh"],
-		"users":  ["opencode-gate"]
-	}, {
-		"action": "accept",
-		"src":    ["tag:mesh"],
-		"dst":    ["tag:connector"],
-		"users":  ["root"]
-	}, {
-		// v2：个人电脑 root 进主机（tagged 只能用 accept，不能用 check）
-		"action": "accept",
-		"src":    ["tag:pc"],
-		"dst":    ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"],
-		"users":  ["root"]
-	}, {
-		// [normalize-step1b] deploy runner(tag:github) root 登自有节点（节点开 Tailscale SSH, 需 ssh accept）
-		"action": "accept",
-		"src":    ["tag:github"],
-		"dst":    ["tag:hw", "tag:ali", "tag:oci"],
-		"users":  ["root"]
-	}],
-
+	"ssh": [
+		// 个人电脑 root 登集群（tagged 只能用 accept，不能用 check）。
+		{"action": "accept", "src": ["tag:pc"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "users": ["root"]},
+		// CI deploy runner root 登节点（节点开 Tailscale SSH）。
+		{"action": "accept", "src": ["tag:github"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "users": ["root"]},
+		// 管理员安全网。
+		{"action": "accept", "src": ["autogroup:admin"], "dst": ["*"], "users": ["root"]},
+		// 成员自己的设备互登（check）。
+		{"action": "check", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"]}
+	],
 	"tests": [
-		{"src": "tag:mesh", "allow": ["100.85.128.116:22"]},
-		{"src": "tag:mesh", "allow": ["100.69.220.112:22"]},
-		{"src": "tag:mesh", "allow": ["100.91.222.51:22"]},
-		{"src": "tag:mesh", "allow": ["100.100.246.95:22"]},
-		{"src": "tag:mesh", "allow": ["100.111.231.85:22"]},
-		{"src": "tag:mesh", "allow": ["100.103.182.112:22"]},
-		{
-			"src":   "xieyucheng123@github",
-			"allow": ["100.85.128.116:22", "100.91.222.51:22"]
-		},
-		{"src": "tag:mesh", "allow": ["20.27.177.113:443"]},
-		// hw41 已定为生产后端，CI 上机需要；原 deny 意图见 git 历史。
-		// 非 HW 只放 admin：deliver-caddy 身份（手动 dispatch＋全程盯）。
-		{"src": "tag:admin", "allow": ["100.85.128.116:22"]},
-		{"src": "tag:opencode", "allow": ["100.91.222.51:22", "100.111.231.85:22"]},
-		{"src": "tag:opencode", "deny": ["100.85.128.116:22", "100.69.220.112:22"]}
+		{"src": "tag:hw", "allow": ["100.73.182.4:8472", "100.93.119.21:6443", "100.85.128.116:6443"]},
+		{"src": "tag:hw", "allow": ["100.73.221.121:14443"]},
+		{"src": "tag:pc", "allow": ["100.100.246.95:22", "100.73.182.4:22", "100.93.119.21:22"]},
+		{"src": "tag:github", "allow": ["100.100.246.95:22", "100.73.182.4:6443"]}
 	]
 }
