@@ -20,10 +20,25 @@
 		"tag:k8s-operator": ["autogroup:admin"],
 		"tag:k8s": ["tag:k8s-operator", "autogroup:admin"],
 		// litellm-gateway 容器（userspace tailscaled，不开 --ssh），独立 tailnet 节点（#181）。
-		"tag:gateway":   ["autogroup:admin"]
+		"tag:gateway":   ["autogroup:admin"],
+		// ===== v2：TS 只按来源分 tag（迁移期与旧 tag 并存）=====
+		"tag:hw":        ["autogroup:admin"],
+		"tag:ali":       ["autogroup:admin"],
+		"tag:oci":       ["autogroup:admin"],
+		"tag:github":    ["autogroup:admin"],
+		"tag:pc":        ["autogroup:admin"]
 	},
 	"autoApprovers": {"routes": {"0.0.0.0/0": ["tag:connector"], "::/0": ["tag:connector"]}},
 	"grants": [
+		// ===== v2 迁移 expand：新 5-tag 规则（旧规则保留，切完再收）=====
+		// k8s underlay：所有 k8s 主机互通 flannel vxlan（新+旧 tag 并存）
+		{"src": ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"], "ip": ["8472"]},
+		// edge agent → server 的 apiserver
+		{"src": ["tag:ali", "tag:oci"], "dst": ["tag:hw", "tag:prod"], "ip": ["6443"]},
+		// 个人电脑（最高权限）
+		{"src": ["tag:pc"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"], "ip": ["*"]},
+		// CI deploy runner
+		{"src": ["tag:github"], "dst": ["tag:hw", "tag:prod"], "ip": ["6443"]},
 		{
 			"src": ["tag:mesh"],
 			"dst": ["100.91.222.51", "100.85.128.116", "100.69.220.112", "100.111.231.85"],
@@ -222,6 +237,12 @@
 		"action": "accept",
 		"src":    ["tag:mesh"],
 		"dst":    ["tag:connector"],
+		"users":  ["root"]
+	}, {
+		// v2：个人电脑 root 进主机（tagged 只能用 accept，不能用 check）
+		"action": "accept",
+		"src":    ["tag:pc"],
+		"dst":    ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"],
 		"users":  ["root"]
 	}],
 
