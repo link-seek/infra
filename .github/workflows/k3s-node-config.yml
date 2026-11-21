@@ -40,6 +40,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: join tailnet (tag:user)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint key"; exit 1; }
+          echo "::add-mask::$MINTED"
+          sudo tailscale up --authkey="$MINTED" --hostname="ci-nodecfg-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --self | head -2 || true
+
       - name: reconcile
         run: |
           set -uo pipefail
@@ -48,6 +63,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/ci_key"
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || pip3 install --quiet pyyaml || true
           python3 - <<'PY' > /tmp/hosts.tsv
           import yaml
           for h in yaml.safe_load(open('k3s/node-config.yaml'))['hosts']:
@@ -71,7 +87,7 @@ jobs:
           echo "runtime: $rt mtu=$mtu"
           [ "$rt" = "local $EIP dev $IFACE" ] || { echo "DRIFT-FLANNEL [$rt]"; drift=1; }
           [ "$mtu" = "$MTU" ] || { echo "DRIFT-MTU $mtu"; drift=1; }
-          pub=$(KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get node "$(hostname)" -o jsonpath='{.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip}' 2>/dev/null || true)
+          pub=$(KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl get node "$(hostname)" -o jsonpath='{.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip}' 2>/dev/null || true)
           echo "public-ip=$pub"; [ "$pub" = "$EIP" ] || { echo "DRIFT-PUB [$pub]"; drift=1; }
           if [ "${MODE:-verify}" = apply ] && [ "$drift" = 1 ]; then
             cp -a "$CFG" "$CFG.bak-$(date +%s)"
