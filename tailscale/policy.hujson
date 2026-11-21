@@ -246,6 +246,12 @@
 		"src":    ["tag:pc"],
 		"dst":    ["tag:hw", "tag:ali", "tag:oci", "tag:mesh", "tag:prod"],
 		"users":  ["root"]
+	}, {
+		// [normalize-step1b] deploy runner(tag:github) root 登自有节点（节点开 Tailscale SSH, 需 ssh accept）
+		"action": "accept",
+		"src":    ["tag:github"],
+		"dst":    ["tag:hw", "tag:ali", "tag:oci"],
+		"users":  ["root"]
 	}],
 
 	"tests": [
