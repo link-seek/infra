@@ -19,12 +19,19 @@
 
 备份：k3s每6h打etcd快照直传OBS华北9桶（CronJob + 临时密钥刷S3配置）；每天01:00只verify（30h内有新鲜快照 + Secret 12h刷过），不动集群。恢复点在桶里，跟机器死活解耦。
 
+## k3s 网络（2026-11-21：flannel 走 TS underlay）
+
+- **datapath**：所有 k3s 节点 `flannel-iface=tailscale0`，VXLAN over tailnet，`flannel.1 MTU=1230`（tailscale 1280 − 50）。
+- **server 寻址**：HW 三台 `node-ip=<LAN 192.168.1.x>`（etcd/API 确定性）+ `node-external-ip=<该机 tailnet IP>`（令 flannel `public-ip = VTEP`，跨云可通）；edge（ali/oci）node-ip 即 tailnet IP。
+- **声明式**：`k3s/node-config.yaml` 为节点配置真相；`.github/workflows/k3s-node-config.yml`（verify 每日巡检 / apply 写入）。
+- **验证（2026-11-21）**：5 节点 flannel.1 均 `local=<tailnet> dev tailscale0 mtu1230`、public-ip=tailnet；跨节点 pod 3×3 全 200；业务域名 200。存量 pod MTU 1450 待滚动重建收敛到 1230。
+
 ## 域名（Cloudflare 托管，zone：`xieyucheng.top`）
 
 | 域名 | 类型 | 内容 | 状态 |
 |---|---|---|---|
 | `hw21-opencode.xieyucheng.top` | A | 120.77.76.20 | 在用：经 120 Caddy → tailnet → hw21:4097 |
-| `opencode.xieyucheng.top` | CNAME | `*.w.kunlunaq.com`（华为 WAF）→ 116.117.158.55 | **死的**（2026-09-21 建后未动，后端无响应）：待改 A → 120 并上 Caddy |
+| `opencode.xieyucheng.top` | A | 120.77.76.20 | 在用：经 120 Caddy → Traefik(k3s) → opencode pod（2026-11-20 起） |
 
 ## 域名（Cloudflare 托管，zone：`yingxin.net.cn`）
 

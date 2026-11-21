@@ -1,0 +1,94 @@
+name: k3s-node-config
+
+# 声明式节点配置（k3s over TS underlay）：k3s/node-config.yaml 为真相。
+#   verify（默认）：只读核对 config.yaml 关键项 + flannel.1 运行时（dev/local/mtu）+ public-ip，有漂移即 fail。
+#   apply：写入缺失/不符的 config 行（备份），restart=yes 才重启 k3s（重启后请再跑 verify）。
+# 定时 verify 作为漂移巡检。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "verify | apply"
+        type: choice
+        options: [verify, apply]
+        default: verify
+        required: true
+      restart:
+        description: "apply 后是否重启 k3s（配置有变化时）"
+        type: choice
+        options: [no, yes]
+        default: no
+        required: true
+  schedule:
+    - cron: "17 1 * * *"   # 每天 01:17 UTC 巡检
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3s-node-config
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      MODE: ${{ inputs.mode }}
+      RESTART: ${{ inputs.restart }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: reconcile
+        run: |
+          set -uo pipefail
+          MODE="${MODE:-verify}"; RESTART="${RESTART:-no}"
+          echo "MODE=$MODE RESTART=$RESTART"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/ci_key"
+          python3 - <<'PY' > /tmp/hosts.tsv
+          import yaml
+          for h in yaml.safe_load(open('k3s/node-config.yaml'))['hosts']:
+              print('\t'.join([h['name'], h['ssh'], h['node_ip'], h['node_external_ip'], h['flannel_iface'], str(h['expect_flannel_mtu'])]))
+          PY
+          FAIL=0
+          while IFS=$'\t' read -r NAME SSH NIP EIP IFACE MTU; do
+            [ -n "$NAME" ] || continue
+            echo "===== $NAME ($SSH) ====="
+            OUT=$(ssh $SOPT root@$SSH "MODE=$MODE RESTART=$RESTART NIP=$NIP EIP=$EIP IFACE=$IFACE MTU=$MTU bash -s" <<'REMOTE' || true
+          set -uo pipefail
+          CFG=/etc/rancher/k3s/config.yaml
+          drift=0
+          have=$(grep -E '^(node-ip|node-external-ip|flannel-iface):' "$CFG" 2>/dev/null || true)
+          echo "--- config have ---"; echo "$have"
+          for kv in "node-ip: $NIP" "node-external-ip: $EIP" "flannel-iface: $IFACE"; do
+            echo "$have" | grep -qxF "$kv" || { echo "DRIFT-MISSING $kv"; drift=1; }
+          done
+          rt=$(ip -d link show flannel.1 2>/dev/null | grep -o "local [0-9.]* dev [a-z0-9.]*" || true)
+          mtu=$(cat /sys/class/net/flannel.1/mtu 2>/dev/null || echo '?')
+          echo "runtime: $rt mtu=$mtu"
+          [ "$rt" = "local $EIP dev $IFACE" ] || { echo "DRIFT-FLANNEL [$rt]"; drift=1; }
+          [ "$mtu" = "$MTU" ] || { echo "DRIFT-MTU $mtu"; drift=1; }
+          pub=$(KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get node "$(hostname)" -o jsonpath='{.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip}' 2>/dev/null || true)
+          echo "public-ip=$pub"; [ "$pub" = "$EIP" ] || { echo "DRIFT-PUB [$pub]"; drift=1; }
+          if [ "${MODE:-verify}" = apply ] && [ "$drift" = 1 ]; then
+            cp -a "$CFG" "$CFG.bak-$(date +%s)"
+            for kv in "node-ip: $NIP" "node-external-ip: $EIP" "flannel-iface: $IFACE"; do
+              k=${kv%%:*}
+              if grep -q "^$k:" "$CFG"; then sed -i "s#^$k:.*#$kv#" "$CFG"; else echo "$kv" >> "$CFG"; fi
+            done
+            echo APPLIED; cat "$CFG"
+            if [ "${RESTART:-no}" = yes ]; then systemctl restart k3s && echo RESTARTED; fi
+          fi
+          [ "$drift" = 0 ] && echo NODE-OK || echo NODE-DRIFT
+          REMOTE
+            )
+            echo "$OUT"
+            echo "$OUT" | grep -q NODE-OK || FAIL=1
+          done < /tmp/hosts.tsv
+          shred -u ~/.ssh/ci_key 2>/dev/null || true
+          if [ "$MODE" = apply ]; then echo "APPLY 完成（restart=$RESTART；请再跑一次 verify）"; else
+            if [ "$FAIL" = 0 ]; then echo "RESULT: 全节点无漂移"; else echo "RESULT: 存在漂移"; exit 1; fi
+          fi
