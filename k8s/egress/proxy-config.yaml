@@ -22,9 +22,9 @@ data:
     http_access deny all
 
     cache deny all
-    access_log stdio:/dev/stdout
-    cache_log /dev/stderr
+    cache_mem 8 MB
+    # squid 以 proxy 用户运行，日志落 /tmp（可写），便于 exec 查看 CONNECT 记录。
+    access_log /tmp/squid-access.log
+    cache_log /tmp/squid-cache.log
     pid_filename /tmp/squid.pid
     coredump_dir /var/spool/squid
-    via off
-    forwarded_for delete
