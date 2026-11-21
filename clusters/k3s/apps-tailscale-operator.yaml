@@ -11,6 +11,6 @@ spec:
   path: ./k8s/tailscale-operator
   prune: true
   sourceRef:
-    kind: GitRepository
+    kind: OCIRepository
     name: flux-system
   wait: false

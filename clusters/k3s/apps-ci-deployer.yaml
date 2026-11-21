@@ -12,6 +12,6 @@ spec:
   path: ./k8s/ci-deployer
   prune: true
   sourceRef:
-    kind: GitRepository
+    kind: OCIRepository
     name: flux-system
   wait: true

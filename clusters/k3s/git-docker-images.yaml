@@ -1,15 +1,11 @@
-# Flux source：应用仓 docker-images（#461：manifest 跟镜像走）。
-# 复用 flux-system 的 secret（同 org PAT）；先只建 source 不接线，Ready 后再切 apps。
+# Flux source（Gitless）：从 SWR 拉 docker-images OCI 制品（应用清单跟镜像走）。
 apiVersion: source.toolkit.fluxcd.io/v1
-kind: GitRepository
+kind: OCIRepository
 metadata:
   name: docker-images
   namespace: flux-system
 spec:
   interval: 5m0s
-  timeout: 300s
+  url: oci://swr.cn-north-9.myhuaweicloud.com/link-seek/docker-images-manifests
   ref:
-    branch: main
-  secretRef:
-    name: flux-system
-  url: https://github.com/link-seek/docker-images.git
+    tag: latest

@@ -17,6 +17,6 @@ spec:
     secretRef:
       name: sops-age
   sourceRef:
-    kind: GitRepository
+    kind: OCIRepository
     name: docker-images
   wait: false
