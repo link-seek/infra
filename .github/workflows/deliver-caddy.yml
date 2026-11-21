@@ -60,7 +60,7 @@ jobs:
           [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
           echo "::add-mask::$TSKEY"
           MINTED=""
-          MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:admin"]}}},"expirySeconds":21600}'
+          MINT_BODY='{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":21600}'
           MINT_RESP="$(mktemp)"
           MINT_CODE="$(curl -sS -m 30 -o "$MINT_RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' -d "$MINT_BODY" https://api.tailscale.com/api/v2/tailnet/-/keys 2>/tmp/mint.err || true)"
           if [ "$MINT_CODE" = "200" ] || [ "$MINT_CODE" = "201" ]; then
