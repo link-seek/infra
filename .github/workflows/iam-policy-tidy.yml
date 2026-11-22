@@ -1,0 +1,56 @@
+name: iam-policy-tidy
+
+# 临时：把委托 k3s-etcd-obs 的自定义策略 k3s-etcd-obs-bucket 清理为只含 linkseek 桶。
+# 做法：create 新版本 v3（仅 linkseek，set default）→ 删旧版本 v1/v2。
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AK: ${{ secrets.PROD_HCLOUD_AK }}
+      SK: ${{ secrets.PROD_HCLOUD_SK }}
+    steps:
+      - name: install hcloud (KooCLI)
+        run: |
+          set -e
+          ok=0
+          for u in \
+            https://cn-north-4-hdn-koocli.obs.cn-north-4.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz \
+            https://obs.cn-north-4.myhuaweicloud.com/koocli/cli/latest/huaweicloud-cli-linux-amd64.tar.gz ; do
+            curl -fsSL --retry 4 --retry-delay 3 "$u" -o /tmp/hcloud.tgz && { ok=1; break; } || true
+          done
+          [ "$ok" = 1 ] || { echo "FAIL: KooCLI 下载失败"; exit 1; }
+          mkdir -p /tmp/hc && tar xzf /tmp/hcloud.tgz -C /tmp/hc
+          install -m755 "$(find /tmp/hc -type f -name hcloud | head -1)" /usr/local/bin/hcloud
+          hcloud version
+
+      - name: tidy policy to linkseek-only
+        run: |
+          set +e
+          hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-4 --cli-mode=AKSK
+          hcloud configure set --cli-agree-privacy-statement=true >/dev/null 2>&1
+          DID=$(hcloud iam KeystoneListAuthDomains --cli-region=cn-north-4 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin);ds=d.get('domains') or [];print(ds[0]['id'] if ds else '')")
+          echo "DID=$DID"; [ -n "$DID" ] && hcloud configure set --cli-domain-id="$DID" >/dev/null 2>&1
+          hcloud iam ListAgenciesV5 --cli-region=cn-north-4 > /tmp/ag.json 2>/dev/null
+          AID=$(python3 -c "import json;d=json.load(open('/tmp/ag.json'));a=d.get('agencies') or [];print(next((x['agency_id'] for x in a if x.get('agency_name')=='k3s-etcd-obs'),''))")
+          echo "AID=$AID"
+          hcloud iam ListAttachedAgencyPoliciesV5 --agency_id="$AID" --cli-region=cn-north-4 > /tmp/at.json 2>/dev/null
+          PID=$(python3 -c "import json;d=json.load(open('/tmp/at.json'));a=d.get('attached_policies') or [];print(next((x['policy_id'] for x in a if x.get('policy_name')=='k3s-etcd-obs-bucket'),''))")
+          echo "PID=$PID"
+          [ -n "$AID" ] && [ -n "$PID" ] || { echo "FAIL: 解析 agency/policy 失败"; exit 1; }
+          DOC='{"Version":"5.0","Statement":[{"Effect":"Allow","Action":["obs:bucket:ListBucket","obs:bucket:HeadBucket","obs:bucket:GetBucketLocation","obs:object:GetObject","obs:object:PutObject","obs:object:DeleteObject","obs:object:AbortMultipartUpload"],"Resource":["obs:*:*:bucket:linkseek","obs:*:*:object:linkseek/*"]}]}'
+          echo "=== CreatePolicyVersionV5 (仅 linkseek, set default) ==="
+          hcloud iam CreatePolicyVersionV5 --policy_id="$PID" --policy_document="$DOC" --set_as_default=true --cli-region=cn-north-4 2>&1 | head -c 1500; echo
+          echo "=== versions ==="
+          hcloud iam ListPolicyVersionsV5 --policy_id="$PID" --cli-region=cn-north-4 > /tmp/v.json 2>&1; head -c 3000 /tmp/v.json; echo
+          echo -n "default doc: "; python3 -c "import json;d=json.load(open('/tmp/v.json'));vs=d.get('versions') or [];print(next((v.get('document') for v in vs if v.get('is_default')),'(none)'))"
+          echo "=== delete old versions v1 v2 ==="
+          for V in v1 v2; do echo "delete $V:"; hcloud iam DeletePolicyVersionV5 --policy_id="$PID" --version_id=$V --cli-region=cn-north-4 2>&1 | head -c 400; echo; done
+          echo "=== versions final ==="
+          hcloud iam ListPolicyVersionsV5 --policy_id="$PID" --cli-region=cn-north-4 2>&1 | head -c 3000; echo
