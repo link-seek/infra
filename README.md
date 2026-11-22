@@ -1,50 +1,75 @@
 # link-seek/infra — 组织基础设施唯一源
 
-本仓是 link-seek 所有基础设施配置的唯一入口：**线上长什么样、怎么变，全在这里**。
-规则三条：
+本仓是 link-seek 基础设施（k3s 底座 + 入口 + DNS + 网络 + 出口）的唯一声明源：**线上长什么样、怎么变，全在这里**。**文档只此一份 README**（旧的分散文档已删除）；真值以仓内声明式配置为准。
 
-1. 按系统/节点分目录存放，每次变更只动自己的目录。
-2. 真值（IP、主机名、端口、DNS 内容）直接进 git，commit diff 即审计底账；
-   真钥匙（Tailscale/SSH/Cloudflare）一律进 org secrets，永不进仓。
-3. 生产部署永远手动点火：改仓（合 PR、改配置、改流水线）不触发任何部署；
-   发货 = 人手动 dispatch 对应 `deliver-*`（digest/tag 可选，默认 stable）。
-   回滚 = revert 对应目录 + 手动再发一次。
+## 原则
+
+1. **真值进 git**：节点参数、路由、DNS、ACL、镜像白名单等以仓内声明文件为准，commit diff 即审计底账。
+2. **密钥不进仓**：Tailscale / SSH / Cloudflare / 云 AK 等走 org secrets 或 SOPS（age `sops-age`）；极少数运行时 Secret（如 `litellm-env`、opencode 的 `opencode-*-env`）在集群内直接建、不入库。
+3. **GitOps**：合 PR → CI 打包 OCI 制品 → 集群 Flux 自动对账（见下）。改仓即部署。
+
+## 部署模型（Gitless GitOps）
+
+- `flux-artifact.yml`：main 每次 push 把本仓打成 Flux OCI 制品，推到 `swr.cn-north-9.myhuaweicloud.com/link-seek/infra-manifests`（避免 Flux 直连 github.com 被污染/超时）。
+- 集群内 `flux-system` 的 `OCIRepository` 拉该制品；`clusters/k3s/apps-*.yaml` 每个是一个 Flux `Kustomization`：
+  - **底座**（`sourceRef: flux-system`，清单在本仓 `k8s/`）：`egress`、`traefik-edge`、`ci-deployer`、`reloader`。
+  - **应用层**（`sourceRef: docker-images`，清单在 `link-seek/docker-images` 仓 `k8s/<app>`）：`litellm`、`opencode-xieyucheng`、`opencode-yingxin`、`opencode-team`、`erpnext`、`cognee-trial`。
+- 合并即生效（Flux 5m 轮询；可手动 `flux reconcile`/annotation 加速）。**回滚 = revert + 再合**。
+- 加速对账：`kubectl -n flux-system annotate ocirepository flux-system reconcile.fluxcd.io/requestedAt="$(date -u +%FT%TZ)" --overwrite`
+
+## 集群（k3s）
+
+5 节点：3 台华为云 control-plane+etcd（hw21/41/69），2 台 edge（ali-gz 公网入口、vm-proxy 东京出口）。全节点 flannel 走 **Tailscale underlay**（`flannel-iface=tailscale0`，`flannel.1 MTU=1230`）。
+
+| 节点 | 内网 / tailnet | 角色 |
+|---|---|---|
+| mesh-hw-21 (hw21) | 192.168.1.21 / 100.100.246.95 | control-plane + etcd |
+| mesh-hw-41 | 192.168.1.41 / 100.73.182.4 | control-plane + etcd |
+| mesh-hw-69 | 192.168.1.69 / 100.93.119.21 | control-plane + etcd |
+| mesh-ali-gz | 120.77.76.20 / 100.85.128.116 | edge：公网入口（Traefik 接管 80/443，宿主 Caddy 已退役） |
+| vm-proxy | — / 100.73.221.121 | edge：东京出口（egress squid） |
+
+- 节点级参数（`node-ip` / `node-external-ip` / `flannel-iface` / MTU）真相：**`k3s/node-config.yaml`**（workflow `k3s-node-config.yml` 做 verify/apply 漂移检查）。
+- etcd 每 6h 打快照直传 OBS 华北9 桶（CronJob，`k3s-etcd-obs.yml`）；恢复演练 `k3s-restore-drill.yml`。
+
+## 入口 / DNS
+
+- **入口**：Traefik 在 `mesh-ali-gz` 以 hostNetwork 直接接管 80/443，用 `IngressRoute` 按 Host 分发到各 Service；TLS 用 IngressRoute 自带的 TLS secret。配置见 `k8s/traefik-edge`。
+- **域名**（Cloudflare 托管，声明源 `dns/records*.json`，由 `dns-apply.yml` 对账）：
+  - `opencode.xieyucheng.top` → Traefik → `opencode-xieyucheng`
+  - `opencode.yingxin.net.cn` → Traefik → `opencode-yingxin`
+  - `erp.xieyucheng.top` → `erpnext`
+  - `litellm.linkseek.net.cn` → `litellm` 网关
+
+## 网络 / ACL
+
+- ACL/tag 真相：**`tailscale/policy.hujson`**（workflow `ts-acl-apply.yml` 下发）。
+- 节点入网/加节点：`k3s-join-*.yml`、`k3s-join-edge.yml`。
+
+## 出口（egress）
+
+`k8s/egress`：Squid L7 CONNECT 出口代理，钉 `vm-proxy`（hostNetwork），供 litellm 出海（`HTTPS_PROXY`）。细节见 `k8s/egress/README.md`。
 
 ## 目录
 
 ```
-docs/topology.md          # 组织总图：机器/网络/域名/证书一览（保持最新）
-docs/<system>.md          # 每个系统一张分图
-docs/repo-inventory.md    # 组织仓库清单与规整计划（专项，见 Discussions）
-edge/caddy/<node>/        # 入口机 Caddyfile，按节点分目录
-dns/records.yaml          # 全组织 DNS 声明（权威）；cloudflare.md 为说明
-tailscale/acl.md          # 节点表 + tag/ACL 意图（真规则在 Tailscale 管理面）
-stacks/<system>/          # 各系统 topology 级引用，不搬业务仓代码
-.github/workflows/       # 一个栈一个 workflow，paths filter 隔离
+clusters/k3s/            # Flux：flux-system + 各应用 Kustomization（apps-*.yaml）+ docker-images 源（git-docker-images.yaml）
+k8s/                     # 底座清单：egress / traefik-edge / ci-deployer / reloader / etcd-backup / tailscale-operator / restore
+k3s/node-config.yaml     # 节点参数真相（k3s-node-config.yml）
+dns/records*.json        # Cloudflare DNS 声明（dns-apply.yml）——唯一 DNS 源
+tailscale/policy.hujson  # tailnet ACL 真相（ts-acl-apply.yml）
+edge/registries/         # 镜像仓映射 + 境外镜像 allowlist（image-policy.yml）
+edge/cloudflared/        # cloudflared 隧道 ingress 声明（deliver-cloudflared.yml）
+scripts/                 # apply/verify/迁移脚本
+.github/workflows/       # 打包 / 对账 / 校验 / 节点运维
 ```
 
-## 分工：商家 vs 快递（2026-10-18，与 docker-images 仓 README 同源）
+## 应用层归属
 
-- **商家（`link-seek/docker-images` 的 `bake-*`）对产品负责**：业务逻辑（guard、passthrough、auth、重试、默认配置、插件 bake）全部进镜像，digest 即行为版本号。
-- **快递（本仓 `deliver-*`）只对运输负责**：compose pin digest + env 引用 → `up` 即部署，无业务逻辑，不碰内容。**回滚 = 换 digest 发 PR**，git 历史即备份。
-- **门（`secret-hygiene` / `schema-stacks`）只验货**：核密钥卫生与运单形状，不碰值。已删 `render-check`（2026-10-24：只核名字对齐，执行层断裂时照样全绿，虚假安全感； wiring 问题由发货时 fail-closed + 试送门兜底）。
-- 命名：`bake-*` = 烘焙镜像，`deliver-*` = 送达目标机，`deliver-promote-*` = 只办 tag 晋升手续（retag 不 rebuild；共用 `promote-stack.yml`）。`img-preflight.yml` 文件名冻结为跨仓契约（bake 线按文件名调用），显示名是 `deliver-preflight`。
+业务 pod（litellm / opencode* / erpnext / cognee 等）的 Deployment/Service/IngressRoute 与镜像，都在 `link-seek/docker-images` 仓的 `k8s/<app>`；本仓 `clusters/k3s/apps-*.yaml` 只声明 Flux 对账关系。本仓**只留底座**，不碰业务 pod 内容。
 
-## 部署（快递线：全部手动 dispatch，改仓不自动发）
+## 运维 / 变更
 
-| workflow | 手动点火 | 动作 |
-|---|---|---|
-| `deliver-litellm-gateway.yml` | Actions → deliver-litellm-gateway → Run（digest 默认 stable） | 蓝绿：canary 探针绿才切流 |
-| `deliver-opencode-prod-hw21.yml` | Actions → deliver-opencode-prod-hw21 → Run（digest 默认 stable，只发 hw-21） | 蓝绿 + 失败自动回滚（旧镜像留本地） |
-| `deliver-opencode-prod-hw41.yml` | Actions → deliver-opencode-prod-hw41 → Run（digest 默认 stable，只发 hw-41，网站后端） | 蓝绿 + 失败自动回滚（旧镜像留本地） |
-| `deliver-opendesign.yml` | 同上，输入 `CUTOVER` 才执行 | 切流 OD |
-| `deliver-caddy.yml` | 同上 | ephemeral runner → tailnet → 目标节点 reload + 验证 |
-| `deliver-cloudflared.yml` | 同上（挑空闲时间，有十几秒闪断） | 备份 → 只换 ingress 段 → restart → 验证，失败回滚 |
-| `dns-apply.yml` | 同上（默认 dry-run 只打印） | 按 `records.yaml` 对账 Cloudflare（二期启用） |
-| `deliver-promote-*.yml` | 同上（输已测 digest + 覆盖原因 reason，stable 可覆盖） | 只打 tag（审计进 run 日志），不发货；手动点上面对应项 |
-
-## 规整专项
-
-组织仓库偏多、边界靠人脑记的问题，跟踪见
-[Discussions：组织仓库规整](https://github.com/link-seek/infra/discussions)，
-清单模板见 `docs/repo-inventory.md`。
+- 看状态：`kubectl -n flux-system get kustomizations`、`kubectl get pods -A`
+- 节点漂移巡检：手动 dispatch `k3s-node-config.yml`（verify）；DNS 对账：`dns-apply.yml`（默认 dry-run）；ACL：`ts-acl-apply.yml`
+- 校验门：`schema-stacks.yml`（清单形状）、`secret-hygiene.yml`（密钥卫生）、`image-policy.yml`（境外镜像 digest 白名单）

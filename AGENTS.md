@@ -6,4 +6,4 @@
 
 # 本仓定位
 
-infra 只留底座：flux-system、egress、etcd、Caddy/DNS、tailnet、namespace/配额/网络策略。pod 层一律是应用仓的事，本仓不伸手（与 infra#461 同源）。
+infra 只留底座：flux-system、egress、etcd、Traefik(入口)/DNS、tailnet、namespace/配额/网络策略。pod 层一律是应用仓的事，本仓不伸手（与 infra#461 同源）。
