@@ -1,6 +1,6 @@
 name: k3s-node-config
 
-# 声明式节点配置（k3s over TS underlay）：k3s/node-config.yaml 为真相。
+# 声明式节点配置（k3s over TS underlay）：node/node-config.yaml 为真相。
 #   verify（默认）：只读核对 config.yaml 关键项 + flannel.1 运行时（dev/local/mtu）+ public-ip，有漂移即 fail。
 #   apply：写入缺失/不符的 config 行（备份），restart=yes 才重启 k3s（重启后请再跑 verify）。
 # 定时 verify 作为漂移巡检。
@@ -66,7 +66,7 @@ jobs:
           python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || pip3 install --quiet pyyaml || true
           python3 - <<'PY' > /tmp/hosts.tsv
           import yaml
-          for h in yaml.safe_load(open('k3s/node-config.yaml'))['hosts']:
+          for h in yaml.safe_load(open('node/node-config.yaml'))['hosts']:
               print('\t'.join([h['name'], h['ssh'], h['node_ip'], h['node_external_ip'], h['flannel_iface'], str(h['expect_flannel_mtu'])]))
           PY
           FAIL=0

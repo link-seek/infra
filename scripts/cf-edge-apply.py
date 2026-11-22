@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # scripts/cf-edge-apply.py — linkseek.net.cn 边缘配置声明式对账。
-# 用法：STATE_FILE=cf/linkseek-edge.json DRY_RUN=1|0 CF_TOKEN=xxx python3 scripts/cf-edge-apply.py
+# 用法：STATE_FILE=edge/cloudflare/linkseek-edge.json DRY_RUN=1|0 CF_TOKEN=xxx python3 scripts/cf-edge-apply.py
 # 规矩：只动本文件声明的条目（rate limiting 按 description managed: 前缀认领；WAF 只翻已部署托管包的动作位）。
 # fail-closed：任何一步不符预期即非零退出；dry-run 只打计划。
 # API 形状严格抄 docs（Rulesets API）：拌 entrypoint 用 POST /rulesets/{id}/rules 单条增删改，
@@ -53,7 +53,7 @@ def fail(msg, resp=None):
 
 
 def main():
-    state_path = os.environ.get("STATE_FILE", "cf/linkseek-edge.json")
+    state_path = os.environ.get("STATE_FILE", "edge/cloudflare/linkseek-edge.json")
     dry = os.environ.get("DRY_RUN", "1").lower() in ("1", "true", "yes", "on")
     want = json.load(open(state_path))
     zone_name = os.environ.get("ZONE_OVERRIDE") or want["zone"]

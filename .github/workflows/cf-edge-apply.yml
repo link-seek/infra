@@ -1,6 +1,6 @@
 name: cf-edge-apply（边缘配置对账）
 
-# cf/*-edge.json 是唯一真相：WAF 托管包动作、速率限制、Bot 开关。
+# edge/cloudflare/*-edge.json 是唯一真相：WAF 托管包动作、速率限制、Bot 开关。
 # 只手动 dispatch（admin 事项：必须活人点火＋全程盯，禁自动触发）。
 # dry_run=true（默认）：只打计划；=false：真下发。
 
@@ -22,7 +22,7 @@ on:
       state_file:
         description: 状态声明文件
         required: false
-        default: cf/linkseek-edge.json
+        default: edge/cloudflare/linkseek-edge.json
 
 concurrency:
   group: cf-edge
@@ -38,7 +38,7 @@ jobs:
     env:
       CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
-      STATE_FILE: ${{ inputs.state_file || 'cf/linkseek-edge.json' }}
+      STATE_FILE: ${{ inputs.state_file || 'edge/cloudflare/linkseek-edge.json' }}
       DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
       - uses: actions/checkout@v4
