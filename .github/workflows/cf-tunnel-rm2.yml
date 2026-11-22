@@ -1,0 +1,77 @@
+name: cf-tunnel-rm2
+# 临时：删除死隧道 opencode-relay(3525b0b2)。护栏：name==opencode-relay & status==down & connections==0。
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  rm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+    steps:
+      - name: mint + verify + delete
+        run: |
+          set -euo pipefail
+          PARENT="$(printf '%s' "${CF_PARENT_TOKEN:-}" | tr -d '\r\n ')"
+          [ -n "$PARENT" ] || { echo "FAIL: empty"; exit 1; }
+          echo "::add-mask::$PARENT"
+          CF_PARENT_TOKEN_SANITIZED="$PARENT" python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request, urllib.error
+          from datetime import datetime, timedelta, timezone
+          BASE="https://api.cloudflare.com/client/v4"
+          TOKEN=os.environ["CF_PARENT_TOKEN_SANITIZED"]; print("::add-mask::%s"%TOKEN)
+          ACCOUNT="47ce24ced58f17c9fb15351adcbe67d4"
+          TUNNEL="3525b0b2-08b0-43f1-bd63-c745f152d5d1"
+          def call(method,path,body=None,tok=TOKEN):
+              h={"Authorization":"Bearer "+tok}; data=None
+              if body is not None: h["Content-Type"]="application/json"; data=json.dumps(body).encode()
+              req=urllib.request.Request(BASE+path,data=data,headers=h,method=method)
+              try:
+                  with urllib.request.urlopen(req,timeout=30) as r: return r.status,json.loads(r.read() or b"{}")
+              except urllib.error.HTTPError as e:
+                  try: return e.code,json.loads(e.read() or b"{}")
+                  except Exception: return e.code,{}
+              except Exception as e:
+                  return 0,{"success":False,"errors":[{"message":str(e)[:200]}]}
+          st,r=call("GET","/zones?name="+urllib.parse.quote("xieyucheng.top"))
+          if isinstance(r,dict) and r.get("success") and r.get("result"):
+              ACCOUNT=(r["result"][0].get("account") or {}).get("id") or ACCOUNT
+          print("account:",ACCOUNT)
+          st,r=call("GET","/accounts/%s/tokens/permission_groups?per_page=100"%ACCOUNT)
+          groups=r.get("result") if isinstance(r.get("result"),list) else []
+          by={str(g.get("name","")).lower():g for g in groups}
+          def alias(w): return [w,w.replace("cloudflare tunnel","argo tunnel"),w.replace("argo tunnel","cloudflare tunnel")]
+          want=["zone read","cloudflare tunnel read","cloudflare tunnel write"]
+          zone_ids=[];acct_ids=[]
+          for w in want:
+              g=next((by[c] for c in alias(w) if c in by),None)
+              if not g: print("FAIL 缺权限组:",w); raise SystemExit(1)
+              sc=g.get("scopes") or []
+              if any("account.zone" in str(s) for s in sc): zone_ids.append(str(g["id"]))
+              elif any(str(s)=="com.cloudflare.api.account" for s in sc): acct_ids.append(str(g["id"]))
+              else: zone_ids.append(str(g["id"]))
+          pol=[]
+          if zone_ids: pol.append({"effect":"allow","resources":{"com.cloudflare.api.account.%s"%ACCOUNT:{"com.cloudflare.api.account.zone.*":"*"}},"permission_groups":[{"id":i} for i in zone_ids]})
+          if acct_ids: pol.append({"effect":"allow","resources":{"com.cloudflare.api.account.%s"%ACCOUNT:"*"},"permission_groups":[{"id":i} for i in acct_ids]})
+          exp=(datetime.now(timezone.utc)+timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+          st,r=call("POST","/accounts/%s/tokens"%ACCOUNT,{"name":"cf-tunnel-rm","policies":pol,"expires_on":exp})
+          if not (isinstance(r,dict) and r.get("success")): print("FAIL mint",st,r.get("errors")); raise SystemExit(1)
+          CHILD=str((r.get("result") or {}).get("value") or ""); print("::add-mask::%s"%CHILD)
+          st,r=call("GET","/accounts/%s/cfd_tunnel/%s"%(ACCOUNT,TUNNEL),tok=CHILD)
+          t=r.get("result") if isinstance(r,dict) else None
+          if not t: print("FAIL GET tunnel",st,r.get("errors")); raise SystemExit(1)
+          print("tunnel:",t.get("name"),"status:",t.get("status"))
+          st,c=call("GET","/accounts/%s/cfd_tunnel/%s/connections"%(ACCOUNT,TUNNEL),tok=CHILD)
+          conns=c.get("result") if isinstance(c,dict) else None
+          n=len(conns) if isinstance(conns,list) else -1
+          print("connections:",n)
+          if t.get("name")!="opencode-relay": print("ABORT name"); raise SystemExit(2)
+          if t.get("status")!="down": print("ABORT status",t.get("status")); raise SystemExit(2)
+          if n!=0: print("ABORT connections",n); raise SystemExit(2)
+          st,r=call("DELETE","/accounts/%s/cfd_tunnel/%s"%(ACCOUNT,TUNNEL),tok=CHILD)
+          print("DELETE status:",st,"success:",r.get("success") if isinstance(r,dict) else r)
+          if not (isinstance(r,dict) and r.get("success")): print("FAIL delete",r.get("errors")); raise SystemExit(1)
+          print("TUNNEL DELETED: opencode-relay")
+          PY
