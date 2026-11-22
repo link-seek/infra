@@ -4,5 +4,5 @@
   image: docker.io/ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
   reason: 东京 vm-proxy 拉不到 SWR（121.37.64.12:443 i/o timeout 实测），L7 CONNECT 出口代理直拉 docker.io。
 - path: k8s/egress/xray.yaml
-  image: ghcr.io/xtls/xray-core@sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab
-  reason: xray 从 vm-proxy host systemd 迁入 k3s（vm-proxy 可直拉 ghcr），用官方 xtls 镜像 digest。
+  image: ghcr.io/xtls/xray-core@sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7
+  reason: xray 从 vm-proxy host systemd 迁入 k3s（vm-proxy 可直拉 ghcr）。锁定 26.3.27 = 主机现网原版，避免版本不一致导致 REALITY 握手失败。
