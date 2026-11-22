@@ -30,14 +30,14 @@ spec:
         kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
       initContainers:
         - name: fix-perm
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/redis:7-alpine
           command: ["sh", "-c", "mkdir -p /data && chown -R 999:999 /data"]
           securityContext: {runAsUser: 0}
           volumeMounts:
             - {name: redisdata, mountPath: /data}
       containers:
         - name: redis
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/redis:7-alpine
           args: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
           ports:
             - {containerPort: 6379}

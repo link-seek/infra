@@ -30,7 +30,7 @@ spec:
         kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
       containers:
         - name: infisical
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/infisical@sha256:ef645c5c17c61f928a75a18c1192cb0b24a5140fb7de6bfa24e717714c8fa8dd
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/infisical:latest
           envFrom:
             - secretRef: {name: infisical-env}
           env:
