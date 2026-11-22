@@ -7,4 +7,3 @@ resources:
   - namespace.yaml
   - proxy-config.yaml
   - proxy.yaml
-  - xray.yaml
