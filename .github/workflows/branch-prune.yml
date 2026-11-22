@@ -1,0 +1,34 @@
+name: branch-prune
+
+# 安全清理"已合并 PR"对应的远端分支（squash 友好）。作为历史残留的兜底；
+# 新分支主要靠仓库设置 delete_branch_on_merge 在合并时自动删除。
+on:
+  schedule:
+    - cron: "0 3 * * 1" # 每周一 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "只打印不删除"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: branch-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: prune merged branches (safe)
+        env:
+          REPO: ${{ github.repository }}
+          APPLY: ${{ (github.event_name == 'schedule' || inputs.dry_run == false) && '1' || '0' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/prune-merged-branches.py
