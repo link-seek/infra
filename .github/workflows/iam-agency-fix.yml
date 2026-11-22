@@ -52,6 +52,7 @@ jobs:
         run: |
           set +e
           hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-4 --cli-mode=AKSK
+          hcloud configure set --cli-agree-privacy-statement=true >/dev/null 2>&1
           echo "=== KeystoneListAuthDomains ==="
           hcloud iam KeystoneListAuthDomains --cli-region=cn-north-4 > /tmp/domains.json 2>/tmp/domains.err; cat /tmp/domains.json | head -c 2000; echo; echo "err:"; cat /tmp/domains.err
           DID=$(python3 -c "import json;d=json.load(open('/tmp/domains.json'));ds=d.get('domains') or [];print(ds[0].get('id','') if ds else '')" 2>/dev/null)
