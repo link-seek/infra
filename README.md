@@ -29,7 +29,7 @@
 | mesh-ali-gz | 120.77.76.20 / 100.85.128.116 | edge：公网入口（Traefik 接管 80/443，宿主 Caddy 已退役） |
 | vm-proxy | — / 100.73.221.121 | edge：东京出口（egress squid） |
 
-- 节点级参数（`node-ip` / `node-external-ip` / `flannel-iface` / MTU）真相：**`k3s/node-config.yaml`**（workflow `k3s-node-config.yml` 做 verify/apply 漂移检查）。
+- 节点级参数（`node-ip` / `node-external-ip` / `flannel-iface` / MTU）真相：**`node/node-config.yaml`**（workflow `k3s-node-config.yml` 做 verify/apply 漂移检查）。
 - etcd 每 6h 打快照直传 OBS 华北9 桶（CronJob，`k3s-etcd-obs.yml`）；恢复演练 `k3s-restore-drill.yml`。
 
 ## 入口 / DNS
@@ -43,7 +43,7 @@
 
 ## 网络 / ACL
 
-- ACL/tag 真相：**`tailscale/policy.hujson`**（workflow `ts-acl-apply.yml` 下发）。
+- ACL/tag 真相：**`acl/policy.hujson`**（workflow `ts-acl-apply.yml` 下发）。
 - 节点入网/加节点：`k3s-join-*.yml`、`k3s-join-edge.yml`。
 
 ## 出口（egress）
@@ -55,11 +55,12 @@
 ```
 clusters/k3s/            # Flux：flux-system + 各应用 Kustomization（apps-*.yaml）+ docker-images 源（git-docker-images.yaml）
 k8s/                     # 底座清单：egress / traefik-edge / ci-deployer / reloader / etcd-backup / tailscale-operator / restore
-k3s/node-config.yaml     # 节点参数真相（k3s-node-config.yml）
+node/node-config.yaml     # 节点参数真相（k3s-node-config.yml）
 dns/records*.json        # Cloudflare DNS 声明（dns-apply.yml）——唯一 DNS 源
-tailscale/policy.hujson  # tailnet ACL 真相（ts-acl-apply.yml）
+acl/policy.hujson  # tailnet ACL 真相（ts-acl-apply.yml）
 edge/registries/         # 镜像仓映射 + 境外镜像 allowlist（image-policy.yml）
 edge/cloudflared/        # cloudflared 隧道 ingress 声明（deliver-cloudflared.yml）
+edge/cloudflare/         # Cloudflare edge 规则声明（cf-edge-apply.yml）
 scripts/                 # apply/verify/迁移脚本
 .github/workflows/       # 打包 / 对账 / 校验 / 节点运维
 ```

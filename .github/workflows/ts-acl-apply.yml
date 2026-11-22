@@ -3,13 +3,13 @@ name: ts-acl-apply
 # Tailscale 策略下发/核对（唯一入口）。
 #
 # 规矩：
-#   - 正本是 tailscale/policy.hujson；本 workflow 只推仓里的文件，不接受自由输入。
+#   - 正本是 acl/policy.hujson；本 workflow 只推仓里的文件，不接受自由输入。
 #   - mode=verify     只读核对：控制台 ACL 与仓里是否一致，顺便列设备 tag。
 #   - mode=apply      覆盖控制台 ACL（必须 confirm=yes）；推完立刻读回逐字段比对。
 #   - mode=tag-device 改单台设备的 tag 集合（必须 confirm=yes；覆盖式，要写全）。
 #   - mode=delete-device 按 tailnet IP 删离线旧条目（必须 confirm=yes；只删离线且唯一匹配）。
 #   - mode=approve-routes 给设备批准 subnet 路由（必须 confirm=yes；device=广播机器，routes 默认 192.168.1.0/24）：读回核对。
-# 手动触发，不挂任何自动事件。逻辑都在 tailscale/ts-acl.py（可在本地直接跑）。
+# 手动触发，不挂任何自动事件。逻辑都在 acl/ts-acl.py（可在本地直接跑）。
 
 on:
   workflow_dispatch:
@@ -67,8 +67,8 @@ jobs:
               CODE="$(api_out "$API/tailnet/-/acl")"
               [ "$CODE" = 200 ] || { echo "GET ACL HTTP $CODE: $(head -c 200 /tmp/out.json)"; exit 1; }
               cp /tmp/out.json /tmp/remote.json
-              python3 tailscale/ts-acl.py norm tailscale/policy.hujson > /tmp/local.norm
-              python3 tailscale/ts-acl.py norm /tmp/remote.json > /tmp/remote.norm
+              python3 acl/ts-acl.py norm acl/policy.hujson > /tmp/local.norm
+              python3 acl/ts-acl.py norm /tmp/remote.json > /tmp/remote.norm
               if diff -q /tmp/local.norm /tmp/remote.norm >/dev/null; then
                 echo "RESULT: 仓里的 policy.hujson 与控制台一致（in sync）"
               else
@@ -76,24 +76,24 @@ jobs:
                 diff -u /tmp/local.norm /tmp/remote.norm | head -60 || true
               fi
               echo "--- 设备 tag 现状 ---"
-              api "$API/tailnet/-/devices" | python3 tailscale/ts-acl.py devices-table
+              api "$API/tailnet/-/devices" | python3 acl/ts-acl.py devices-table
               ;;
 
             apply)
               [ "$CONFIRM" = yes ] || { echo "拒绝：apply 需要 confirm=yes"; exit 1; }
-              python3 tailscale/ts-acl.py norm tailscale/policy.hujson > /tmp/policy.norm
+              python3 acl/ts-acl.py norm acl/policy.hujson > /tmp/policy.norm
               cp /tmp/policy.norm /tmp/policy.json
               CODE="$(api_out "$API/tailnet/-/acl")"
               [ "$CODE" = 200 ] || { echo "读现状 HTTP $CODE"; exit 1; }
               cp /tmp/out.json /tmp/acl-before.json
               echo "--- 变更规模 ---"
-              python3 tailscale/ts-acl.py change-summary /tmp/acl-before.json /tmp/policy.json
+              python3 acl/ts-acl.py change-summary /tmp/acl-before.json /tmp/policy.json
               CODE="$(api_out -X POST --data-binary @/tmp/policy.json "$API/tailnet/-/acl")"
               echo "POST ACL HTTP: $CODE"
               [ "$CODE" = 200 ] || { echo "失败：$(head -c 500 /tmp/out.json)"; exit 1; }
               CODE="$(api_out "$API/tailnet/-/acl")"
               [ "$CODE" = 200 ] || { echo "读回失败 HTTP $CODE"; exit 1; }
-              python3 tailscale/ts-acl.py norm /tmp/out.json > /tmp/remote.norm
+              python3 acl/ts-acl.py norm /tmp/out.json > /tmp/remote.norm
               diff -u /tmp/policy.norm /tmp/remote.norm && echo "RESULT: 已生效，控制台 = 仓（逐字段一致）"
               ;;
 
@@ -102,8 +102,8 @@ jobs:
               [ -n "$DEVICE" ] && [ -n "$TAGS" ] || { echo "拒绝：tag-device 需要 device 与 tags"; exit 1; }
               CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev.json
               echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
-              DID="$(python3 tailscale/ts-acl.py device-id "$DEVICE" < /tmp/dev.json)"
-              BODY="$(python3 tailscale/ts-acl.py tags-json "$TAGS")"
+              DID="$(python3 acl/ts-acl.py device-id "$DEVICE" < /tmp/dev.json)"
+              BODY="$(python3 acl/ts-acl.py tags-json "$TAGS")"
               echo "设置 $DEVICE ($DID) tags = $BODY"
               CODE="$(api_out -X POST -d "$BODY" "$API/device/$DID/tags")"
               echo "POST tags HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
@@ -119,7 +119,7 @@ jobs:
               [ -n "${DEVICE:-}" ] || { echo "拒绝：approve-routes 需要 device（广播路由的机器 hostname）"; exit 1; }
               CODE="$(api_out "$API/tailnet/-/devices")"; mv /tmp/out.json /tmp/dev.json
               echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
-              DID="$(python3 tailscale/ts-acl.py device-id "$DEVICE" < /tmp/dev.json)"
+              DID="$(python3 acl/ts-acl.py device-id "$DEVICE" < /tmp/dev.json)"
               echo "设备 $DEVICE -> $DID"
               CODE="$(api_out "$API/device/$DID/routes")"
               echo "GET routes HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
@@ -141,7 +141,7 @@ jobs:
               echo "GET devices HTTP: $CODE"; [ "$CODE" = 200 ] || exit 1
               echo "--- 删除前（下行 gate 精确匹配离线唯一；此行仅回显精确命中，永不挂，不做判定） ---"
               DEVICE="$DEVICE" python3 -c "import json,os; [print(d.get('hostname') if isinstance(d, dict) else d, d.get('addresses') if isinstance(d, dict) else '') for d in (json.load(open('/tmp/dev.json')).get('devices') or []) if isinstance(d, dict) and os.environ['DEVICE'] in (d.get('addresses') or [])]" || true
-              DID="$(python3 tailscale/ts-acl.py device-id-by-ip "$DEVICE" < /tmp/dev.json)" || exit 1
+              DID="$(python3 acl/ts-acl.py device-id-by-ip "$DEVICE" < /tmp/dev.json)" || exit 1
               echo "删除设备 id=$DID（ip=$DEVICE）..."
               CODE="$(curl -sS -m 30 -o /tmp/out.json -w '%{http_code}' -H 'Accept: application/json' -u "$TSKEY:" -X DELETE "$API/device/$DID")"
               echo "DELETE HTTP: $CODE  body: $(head -c 300 /tmp/out.json)"
