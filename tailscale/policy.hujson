@@ -15,6 +15,8 @@
 		{"src": ["tag:pc"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:pc"], "ip": ["*"]},
 		// CI deploy runner（tag:github，仅它进网）：自有节点全端口（部署/校验/etcd obs 等）。
 		{"src": ["tag:github"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "ip": ["*"]},
+		// home-oc：阿里入口 Traefik(tag:ali) 反代到个人 PC(tag:pc) 的 opencode :4096（仅放该端口）。
+		{"src": ["tag:ali"], "dst": ["tag:pc"], "ip": ["4096"]},
 		// 管理员安全网（人类 admin 任何时候可达全部，防锁死）。
 		{"src": ["autogroup:admin"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:github", "tag:pc"], "ip": ["*"]}
 	],
@@ -32,6 +34,7 @@
 		{"src": "tag:hw", "allow": ["100.73.182.4:8472", "100.93.119.21:6443", "100.85.128.116:6443"]},
 		{"src": "tag:hw", "allow": ["100.73.221.121:14443"]},
 		{"src": "tag:pc", "allow": ["100.100.246.95:22", "100.73.182.4:22", "100.93.119.21:22"]},
-		{"src": "tag:github", "allow": ["100.100.246.95:22", "100.73.182.4:6443"]}
+		{"src": "tag:github", "allow": ["100.100.246.95:22", "100.73.182.4:6443"]},
+		{"src": "tag:ali", "allow": ["100.69.220.112:4096"]}
 	]
 }
