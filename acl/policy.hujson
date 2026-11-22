@@ -17,6 +17,8 @@
 		{"src": ["tag:github"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "ip": ["*"]},
 		// home-oc：云节点(hw/ali/oci) 反向访问个人 PC(tag:pc) 的 opencode :4096（仅该端口）。
 		{"src": ["tag:hw", "tag:ali", "tag:oci"], "dst": ["tag:pc"], "ip": ["4096"]},
+		// 手机等 member 设备（无 tag 用户设备）访问个人 PC opencode :4096。
+		{"src": ["autogroup:member"], "dst": ["tag:pc"], "ip": ["4096"]},
 		// 管理员安全网（人类 admin 任何时候可达全部，防锁死）。
 		{"src": ["autogroup:admin"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:github", "tag:pc"], "ip": ["*"]}
 	],
