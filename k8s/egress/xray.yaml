@@ -1,0 +1,54 @@
+# xray：从 vm-proxy 主机 systemd 迁入 k3s（hostNetwork+privileged，钉 vm-proxy）。
+# 配置含 UUID/私钥：不入 git，用集群内 egress/xray-config Secret（同 litellm-env 模式，从主机配置直接建）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xray
+  namespace: egress
+  labels:
+    app: xray
+spec:
+  replicas: 1
+  # hostNetwork 绑节点 443 等端口：必须 Recreate，避免滚动时端口冲突卡 Pending。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: xray
+  template:
+    metadata:
+      labels:
+        app: xray
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: vm-proxy
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: edge
+          effect: NoSchedule
+      containers:
+        - name: xray
+          image: ghcr.io/xtls/xray-core@sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab
+          # 显式指定配置文件，避免叠加镜像内置默认配置。
+          args: ["run", "-c", "/config/config.json"]
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          volumeMounts:
+            - name: cfg
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          readinessProbe:
+            tcpSocket: {port: 443}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: cfg
+          secret:
+            secretName: xray-config
