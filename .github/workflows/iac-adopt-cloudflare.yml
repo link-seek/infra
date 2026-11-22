@@ -59,8 +59,8 @@ jobs:
               | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['result'][0]['id'] if d.get('result') else '')")
             if [ -z "$ZID" ]; then echo "skip $Z (no zone id / token perms)"; continue; fi
             echo "== generating $Z ($ZID) =="
+            # provider v5 下必须用 env CLOUDFLARE_API_TOKEN 认证，不能 --token 传参（cf-terraforming #790）
             cf-terraforming generate \
-              --token "$CF_API_TOKEN" \
               --resource-type "${{ inputs.resource_type }}" \
               --zone "$ZID" \
               --terraform-install-path "$TFPLUGIN" \
