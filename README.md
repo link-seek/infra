@@ -34,7 +34,7 @@
 
 ## 入口 / DNS
 
-- **入口**：Traefik 在 `mesh-ali-gz` 以 hostNetwork 直接接管 80/443，用 `IngressRoute` 按 Host 分发到各 Service；TLS 用 IngressRoute 自带的 TLS secret。配置见 `k8s/traefik-edge`。
+- **入口**：Traefik 在 `mesh-ali-gz` 以 hostNetwork 直接接管 80/443，用 `IngressRoute` 按 Host 分发到各 Service；TLS 用 IngressRoute 自带的 TLS secret。配置见 `k8s/traefik-edge`（HelmChartConfig **仅由 Flux 下发，禁止再 scp 进节点 manifests 目录**；节点残留用 `k3s-server-component` mode=purge 清理）。
 - **域名**（Cloudflare 托管，声明源 `iac/terraform/cloudflare/dns.tf`，由 Terraform 对账；`iac-cloudflare.yml` 跑 plan、人工确认再 apply）：
   - `opencode.xieyucheng.top` → Traefik → `opencode-xieyucheng`
   - `opencode.yingxin.net.cn` → Traefik → `opencode-yingxin`
