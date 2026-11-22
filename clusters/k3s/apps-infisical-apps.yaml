@@ -1,0 +1,9 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata: {name: infisical-apps, namespace: flux-system}
+spec:
+  interval: 10m0s
+  path: ./k8s/infisical-apps
+  prune: true
+  sourceRef: {kind: OCIRepository, name: flux-system}
+  wait: false

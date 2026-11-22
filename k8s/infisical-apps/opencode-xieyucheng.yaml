@@ -1,0 +1,11 @@
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata: {name: opencode-xieyucheng-secrets, namespace: opencode-xieyucheng}
+spec:
+  hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+  syncConfig: {resyncInterval: 30s, instantUpdates: false}
+  authentication:
+    universalAuth:
+      credentialsRef: {secretName: opencode-xieyucheng-ua, secretNamespace: opencode-xieyucheng}
+      secretsScope: {projectSlug: opencode-xieyucheng, envSlug: prod, secretsPath: /, recursive: false}
+  managedSecretReference: {secretName: opencode-xieyucheng-env, secretNamespace: opencode-xieyucheng, creationPolicy: Orphan}

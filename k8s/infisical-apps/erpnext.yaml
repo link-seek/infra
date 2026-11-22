@@ -1,0 +1,11 @@
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata: {name: erpnext-secrets, namespace: erpnext}
+spec:
+  hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+  syncConfig: {resyncInterval: 30s, instantUpdates: false}
+  authentication:
+    universalAuth:
+      credentialsRef: {secretName: erpnext-ua, secretNamespace: erpnext}
+      secretsScope: {projectSlug: erpnext, envSlug: prod, secretsPath: /, recursive: false}
+  managedSecretReference: {secretName: erpnext, secretNamespace: erpnext, creationPolicy: Orphan}
