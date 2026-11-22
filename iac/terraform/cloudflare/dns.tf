@@ -6,7 +6,7 @@
 #   0 to add, 0 to change, 0 to destroy`（即配置=现网，无差异）。
 #
 # ⚠️ 接管后本文件是这些 DNS 记录的唯一真相源：
-#   - 不要再改 dns/records*.json 用 dns-apply 去改同一批记录（会造成双源头冲突）。
+#   - DNS 唯一源即本文件（旧 dns/records.json 与 dns-apply 脚本已删除）。
 #   - DNS 变更流程：改本文件 → CI 跑 `terraform plan`（只读、人工确认）→ apply。
 #
 # 首次接管（把现有记录 import 进 state）：见 iac/README.md 的 "接管" 一节，

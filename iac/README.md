@@ -29,7 +29,7 @@ iac/ansible/
   4. 核对 `Plan: N to import, 0 to add, 0 to change, 0 to destroy`。
   5. 提交配置（`dns.tf`）→ `iac-cloudflare.yml` mode=adopt 执行 import（apply 只写 state，不改线上）。
 - 接管后 `terraform plan` 无差异＝已收敛；之后有差异＝漂移。
-- **DNS 变更唯一流程**：改 `dns.tf` → `iac-cloudflare.yml` mode=plan（只读、人工看）→ mode=apply。**不再用 `dns/records*.json` + `dns-apply` 改这批记录**（避免双源头）。
+- **DNS 变更唯一流程**：改 `dns.tf` → `iac-cloudflare.yml` mode=plan（只读、人工看）→ mode=apply。旧 `dns/records.json` / `dns-apply` 已删除，只认本流程。
 
 ## 密钥
 - `cloudflare_api_token` 由 CI 用 `CF_PARENT_TOKEN` 注入（`TF_VAR_cloudflare_api_token`，勿入仓）。
