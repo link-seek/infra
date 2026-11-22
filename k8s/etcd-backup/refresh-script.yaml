@@ -39,7 +39,7 @@ data:
         strdata = {
             "etcd-s3-endpoint": "obs.cn-north-9.myhuaweicloud.com",
             "etcd-s3-region": "cn-north-9",
-            "etcd-s3-bucket": "linkseek-k3s-etcd",
+            "etcd-s3-bucket": "linkseek",
             "etcd-s3-folder": "etcd-auto",
             "etcd-s3-access-key": c["access"],
             "etcd-s3-secret-key": c["secret"],
