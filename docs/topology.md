@@ -32,6 +32,7 @@
 |---|---|---|---|
 | `hw21-opencode.xieyucheng.top` | A | 120.77.76.20 | 在用：经 120 Caddy → tailnet → hw21:4097 |
 | `opencode.xieyucheng.top` | A | 120.77.76.20 | 在用：经 120 Caddy → Traefik(k3s) → opencode pod（2026-11-20 起） |
+| `home-oc.xieyucheng.top` | A | 120.77.76.20 | 新增：120 Traefik(TLS) → tailnet 100.69.220.112:4096（个人 PC opencode） |
 
 ## 域名（Cloudflare 托管，zone：`yingxin.net.cn`）
 
