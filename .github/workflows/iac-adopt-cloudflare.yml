@@ -1,0 +1,45 @@
+name: iac-adopt-cloudflare
+
+# 用官方 cf-terraforming 把现有 Cloudflare DNS 记录生成 Terraform 配置（只读生成，不改线上）。
+# 产物作为 artifact 供审核后入 iac/terraform/cloudflare 并 terraform import。
+# 需要 org secret CF_PARENT_TOKEN（具备 zone/dns 读权限）。
+on:
+  workflow_dispatch:
+    inputs:
+      resource_type:
+        description: "cf-terraforming 资源类型"
+        required: false
+        default: "cloudflare_dns_record"
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install cf-terraforming
+        run: |
+          set -euo pipefail
+          V=v0.20.0
+          curl -fsSL "https://github.com/cloudflare/cf-terraforming/releases/download/${V}/cf-terraforming_${V}_linux_amd64.tar.gz" -o /tmp/cft.tgz
+          mkdir -p /tmp/cft && tar xzf /tmp/cft.tgz -C /tmp/cft
+          install -m755 /tmp/cft/cf-terraforming /usr/local/bin/cf-terraforming
+          cf-terraforming version
+      - name: generate per zone
+        run: |
+          set -euo pipefail
+          mkdir -p adopt
+          for Z in xieyucheng.top linkseek.net.cn yingxin.net.cn; do
+            ZID=$(curl -s -H "Authorization: Bearer $CF_API_TOKEN" "https://api.cloudflare.com/client/v4/zones?name=$Z" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['result'][0]['id'] if d.get('result') else '')")
+            [ -n "$ZID" ] || { echo "skip $Z (no zone id / token perms)"; continue; }
+            echo "== generating $Z ($ZID) =="
+            cf-terraforming generate --token "$CF_API_TOKEN" --type "${{ inputs.resource_type }}" --zone "$ZID" > "adopt/${Z}.tf" || echo "GEN-FAIL $Z"
+            echo "lines=$(wc -l < adopt/${Z}.tf)"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-adopt-tf
+          path: adopt/
