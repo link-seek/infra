@@ -71,5 +71,6 @@ scripts/                 # apply/verify/迁移脚本
 ## 运维 / 变更
 
 - 看状态：`kubectl -n flux-system get kustomizations`、`kubectl get pods -A`
+- k3s 升级：走 `k8s/system-upgrade`（system-upgrade-controller + Plan），流程见该目录 README；版本真相是 `node/k3s-version`。
 - 节点漂移巡检：手动 dispatch `k3s-node-config.yml`（verify）；DNS 对账：`iac-cloudflare.yml` mode=plan（只读）；ACL：`ts-acl-apply.yml`
 - 校验门：`schema-stacks.yml`（清单形状）、`secret-hygiene.yml`（密钥卫生）、`image-policy.yml`（境外镜像 digest 白名单）
