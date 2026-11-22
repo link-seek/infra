@@ -1,0 +1,58 @@
+name: infisical-provision
+
+# 声明式 provisioning：按 iac/infisical/apps.json 幂等确保
+# Infisical 项目 / 机器身份(<slug>-operator) / 项目授权 / k8s <ns>-ua secret 存在。
+# 只补缺，不动已存在的 ua secret。默认 dry-run；apply=true 才变更。
+# 新应用接入：apps.json 加一行 → 跑本工作流(dry-run 看计划) → apply。
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "true=实际变更；false=dry-run（默认）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infisical-provision
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 进 tailnet（现场 mint 临时 key）
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:guest"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: 临时 key mint 失败"; exit 1; }
+          echo "::add-mask::$MINTED"
+          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-infprov-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+
+      - name: ssh 控制节点并运行 provisioner
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          NODE="100.73.182.4"
+          ssh-keyscan -H "$NODE" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@"$NODE" 'mkdir -p /tmp/infprov'
+          scp -o BatchMode=yes -i ~/.ssh/ci_key iac/infisical/apps.json iac/infisical/provision.py root@"$NODE":/tmp/infprov/
+          FLAG=""
+          [ "${{ inputs.apply }}" = "true" ] && FLAG="--apply"
+          ssh -o BatchMode=yes -i ~/.ssh/ci_key root@"$NODE" "cd /tmp/infprov && python3 provision.py $FLAG"
