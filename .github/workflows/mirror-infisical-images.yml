@@ -42,6 +42,7 @@ jobs:
             echo "::endgroup::"
           }
           mirror "infisical/infisical:${INFISICAL_TAG}" "infisical:${INFISICAL_TAG}"
+          mirror "infisical/kubernetes-operator:v0.11.18" "kubernetes-operator:v0.11.18"
           mirror "postgres:14-alpine" "postgres:14-alpine"
           mirror "redis:7-alpine" "redis:7-alpine"
       - name: summary
