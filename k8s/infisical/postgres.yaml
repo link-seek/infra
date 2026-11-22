@@ -31,14 +31,14 @@ spec:
         kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
       initContainers:
         - name: fix-perm
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/postgres@sha256:e7d9e6aac7fe3232f7661da103aebc0ce38b04105b46af5e9edd5ef6bc343f20
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/postgres:14-alpine
           command: ["sh", "-c", "mkdir -p /pg && chown -R 999:999 /pg && chmod 700 /pg"]
           securityContext: {runAsUser: 0}
           volumeMounts:
             - {name: pgdata, mountPath: /pg}
       containers:
         - name: postgres
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/postgres@sha256:e7d9e6aac7fe3232f7661da103aebc0ce38b04105b46af5e9edd5ef6bc343f20
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/postgres:14-alpine
           envFrom:
             - secretRef: {name: infisical-env}
           env:
