@@ -456,27 +456,6 @@ resource "cloudflare_dns_record" "linkseek_net_cn_17" {
   zone_id = "4cdd8779bc924de8f682abf0a765f51c"
 }
 
-# __generated__ by Terraform from "f46e66f694af4a9e8f8830d0673822b9/618699beadf82ab6104fb56f41764629"
-resource "cloudflare_dns_record" "xieyucheng_top_13" {
-  comment                 = null
-  content                 = "b759dba6-b698-4a4f-a019-0d6b2d08cf99.cfargotunnel.com"
-  data                    = null
-  include_shadow_metadata = false
-  name                    = "opendesign.xieyucheng.top"
-  priority                = null
-  private_routing         = null
-  proxied                 = true
-  settings = {
-    flatten_cname = false
-    ipv4_only     = false
-    ipv6_only     = false
-  }
-  tags    = []
-  ttl     = 1
-  type    = "CNAME"
-  zone_id = "f46e66f694af4a9e8f8830d0673822b9"
-}
-
 # __generated__ by Terraform from "02cdd0bade03819592958c6ecb67cdd2/da4e565545e75babe2f128f98c5c9f92"
 resource "cloudflare_dns_record" "yingxin_net_cn_2" {
   comment                 = null
