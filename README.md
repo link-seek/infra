@@ -57,10 +57,8 @@ clusters/k3s/            # Flux：flux-system + 各应用 Kustomization（apps-*
 k8s/                     # 底座清单：egress / traefik-edge / ci-deployer / reloader / etcd-backup / tailscale-operator / restore
 node/node-config.yaml     # 节点参数真相（k3s-node-config.yml）
 iac/terraform/cloudflare/ # Cloudflare DNS/zone 声明（Terraform）——唯一 DNS 源（iac-cloudflare.yml）
-dns/records.json         # 仅保留隧道锚点参考（deliver-cloudflared），非 DNS 源
 acl/policy.hujson  # tailnet ACL 真相（ts-acl-apply.yml）
 edge/registries/         # 镜像仓映射 + 境外镜像 allowlist（image-policy.yml）
-edge/cloudflared/        # cloudflared 隧道 ingress 声明（deliver-cloudflared.yml）
 edge/cloudflare/         # Cloudflare edge 规则声明（cf-edge-apply.yml）
 scripts/                 # apply/verify/迁移脚本
 .github/workflows/       # 打包 / 对账 / 校验 / 节点运维
