@@ -23,10 +23,9 @@
 
     - name: k3s systemd 单元状态（server 或 agent）
       ansible.builtin.shell: |
-        set -o pipefail
         for u in k3s k3s-agent; do
-          if systemctl list-unit-files 2>/dev/null | grep -q "^${u}.service"; then
-            echo "${u}: enabled=$(systemctl is-enabled $u 2>/dev/null) active=$(systemctl is-active $u 2>/dev/null)"
+          if systemctl cat "$u" >/dev/null 2>&1; then
+            echo "$u enabled=$(systemctl is-enabled "$u" 2>/dev/null) active=$(systemctl is-active "$u" 2>/dev/null)"
           fi
         done
       register: k3s_unit
@@ -51,22 +50,35 @@
       check_mode: false
 
     - name: 磁盘占用（根与 /data）
-      ansible.builtin.command: df -h / /data
-      register: df_out
+      ansible.builtin.command: df -h /
+      register: df_root
       changed_when: false
       failed_when: false
       check_mode: false
+
+    - name: /data 磁盘占用（有才采）
+      ansible.builtin.command: df -h /data
+      register: df_data
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: 报告配置文件存在性
+      ansible.builtin.debug:
+        msg: "{{ item.item }} exists={{ item.stat.exists | default(false) }}"
+      loop: "{{ cfg_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
 
     - name: 报告
       ansible.builtin.debug:
         msg:
           host: "{{ inventory_hostname }}"
-          ansible_host: "{{ ansible_host | default('') }}"
-          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
-          kernel: "{{ ansible_kernel }}"
-          data_mount: "{{ data_mnt.stdout | default('NONE') | trim }}"
+          os: "{{ ansible_distribution | default('?') }} {{ ansible_distribution_version | default('') }}"
+          kernel: "{{ ansible_kernel | default('?') }}"
+          data_mount: "{{ data_mnt.stdout | default('') | trim }}"
           k3s_version: "{{ (k3s_ver.stdout_lines | default([]) | first) | default('NONE') }}"
-          k3s_unit: "{{ k3s_unit.stdout | default('NONE') | trim }}"
-          configs: "{{ cfg_stat.results | map(attribute='stat.path') | zip(cfg_stat.results | map(attribute='stat.exists')) | list }}"
-          tailscale: "{{ (ts_status.stdout | default('NONE') | trim) if ts_status.rc | default(1) == 0 else 'N/A (unreachable or not installed)' }}"
-          disk: "{{ df_out.stdout_lines | default([]) }}"
+          k3s_unit: "{{ k3s_unit.stdout | default('') | trim }}"
+          tailscale_ok: "{{ (ts_status.rc | default(1)) == 0 }}"
+          root_disk: "{{ df_root.stdout_lines | default([]) }}"
+          data_disk: "{{ df_data.stdout_lines | default([]) }}"
