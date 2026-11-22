@@ -1,0 +1,11 @@
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata: {name: browserless-secrets, namespace: opencode-team}
+spec:
+  hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+  syncConfig: {resyncInterval: 30s, instantUpdates: false}
+  authentication:
+    universalAuth:
+      credentialsRef: {secretName: browserless-ua, secretNamespace: opencode-team}
+      secretsScope: {projectSlug: browserless, envSlug: prod, secretsPath: /, recursive: false}
+  managedSecretReference: {secretName: browserless-env, secretNamespace: opencode-team, creationPolicy: Orphan}

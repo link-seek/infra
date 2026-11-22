@@ -12,10 +12,6 @@ spec:
   interval: 5m0s
   path: ./k8s/opencode-yingxin
   prune: true
-  decryption:
-    provider: sops
-    secretRef:
-      name: sops-age
   sourceRef:
     kind: OCIRepository
     name: docker-images
