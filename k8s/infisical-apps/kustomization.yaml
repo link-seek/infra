@@ -7,3 +7,4 @@ resources:
   - opencode-team.yaml
   - erpnext.yaml
   - browserless.yaml
+  - traefik-edge.yaml

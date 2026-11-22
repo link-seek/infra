@@ -1,6 +1,6 @@
-# reloader Deployment（SOPS 终局自动 rollout）。
+# reloader Deployment（Secret 变更自动 rollout）。
 # 镜像 digest pin 即版本（bake-reloader run 44236180947 转正，tag 1.4.24）。
-# resources limits 必填（HW41 事故教训）；swr-pull 由 sops-age bootstrap workflow 同建。
+# resources limits 必填（HW41 事故教训）；swr-pull 随集群 bootstrap 建。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
