@@ -52,7 +52,7 @@ jobs:
         working-directory: iac/terraform/cloudflare
         run: terraform init -input=false
 
-      - name: 枚举 DNS 记录 → import 块（仅 adopt）
+      - name: 按 dns.tf 资源精确配对 → import 块（仅 adopt）
         if: inputs.mode == 'adopt'
         run: |
           set -euo pipefail
@@ -65,23 +65,45 @@ jobs:
                                            headers={"Authorization": "Bearer " + token})
               with urllib.request.urlopen(req, timeout=30) as r:
                   return json.load(r)
-          def slug(s): return re.sub(r'[^a-zA-Z0-9_]+', '_', s).strip('_')
-          blocks = []
+          # 1) 解析 dns.tf：把 (zone_id, name, type) 映射到资源本地名 + 声明的 content（用于漂移校验）
+          hcl = open("iac/terraform/cloudflare/dns.tf").read()
+          blocks = re.findall(r'resource\s+"cloudflare_dns_record"\s+"([^"]+)"\s*\{(.*?)\n\}', hcl, re.S)
+          def field(body, k):
+              m = re.search(rf'^\s*{k}\s*=\s*"([^"]*)"', body, re.M)
+              return m.group(1) if m else None
+          idx = {}
+          for rname, body in blocks:
+              key = (field(body, "zone_id"), field(body, "name"), field(body, "type"))
+              if key in idx:
+                  print("FATAL: dns.tf 内 (zone,name,type) 重复:", key); raise SystemExit(1)
+              idx[key] = (rname, field(body, "content"))
+          print("dns.tf 资源块:", len(blocks))
+          # 2) 枚举实况，按属性精确配对（配不上 / content 漂移 → 中止，绝不盲导/改错 DNS）
+          lines, used = [], set()
           for z in zones:
               zr = api(f"/zones?name={z}")
               if not zr.get("result"): print("no zone", z); continue
               zid = zr["result"][0]["id"]
-              page, recs = 1, []
+              page = 1
               while True:
                   d = api(f"/zones/{zid}/dns_records?per_page=100&page={page}")
-                  recs += d.get("result") or []
+                  for r in d.get("result") or []:
+                      key = (zid, r["name"], r["type"])
+                      if key not in idx:
+                          print("FATAL: 实况记录在 dns.tf 中无对应:", key); raise SystemExit(1)
+                      rname, tf_content = idx[key]
+                      if rname in used:
+                          print("FATAL: dns.tf 资源被多条实况命中:", rname); raise SystemExit(1)
+                      if (tf_content or "") != (r.get("content") or ""):
+                          print(f"FATAL: content 漂移 {rname}: tf=[{tf_content}] live=[{r.get('content')}]"); raise SystemExit(1)
+                      used.add(rname)
+                      lines.append(f'import {{\n  to = cloudflare_dns_record.{rname}\n  id = "{zid}/{r["id"]}"\n}}\n')
                   if page >= ((d.get("result_info") or {}).get("total_pages") or 1): break
                   page += 1
-              # 按 name+type+content 排序，保证与 dns.tf 生成时命名稳定一致较优（尽力）
-              for i, r in enumerate(recs):
-                  blocks.append(f'import {{\n  to = cloudflare_dns_record.{slug(z)}_{i}\n  id = "{zid}/{r["id"]}"\n}}\n')
-          open("iac/terraform/cloudflare/imports.auto.tf", "w").write("\n".join(blocks))
-          print("import blocks:", len(blocks))
+          if len(used) != len(blocks):
+              print(f"FATAL: 仅配对 {len(used)}/{len(blocks)} 个 dns.tf 资源"); raise SystemExit(1)
+          open("iac/terraform/cloudflare/imports.auto.tf", "w").write("\n".join(lines))
+          print("import blocks:", len(lines), "（全部精确配对）")
           PY
 
       - name: plan
