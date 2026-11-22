@@ -79,15 +79,15 @@ jobs:
           for it in items:
               pid=it.get('policy_id') or it.get('id'); pname=it.get('policy_name') or it.get('name')
               print('--- policy',pid,pname,it.get('policy_type'),'---')
-              g=subprocess.run(['hcloud','iam','GetPolicyV5','--policy_id',pid,'--cli-region','cn-north-4'],capture_output=True,text=True)
+              g=subprocess.run(['hcloud','iam','GetPolicyV5',f'--policy_id={pid}','--cli-region=cn-north-4'],capture_output=True,text=True)
               print(g.stdout[:1500])
-              v=subprocess.run(['hcloud','iam','ListPolicyVersionsV5','--policy_id',pid,'--cli-region','cn-north-4'],capture_output=True,text=True)
+              v=subprocess.run(['hcloud','iam','ListPolicyVersionsV5',f'--policy_id={pid}','--cli-region=cn-north-4'],capture_output=True,text=True)
               print('versions:',v.stdout[:800])
               try:
                   vd=json.loads(v.stdout); vers=vd.get('versions') or []
                   if vers:
                       vid=sorted(vers,key=lambda x:x.get('created_at',''),reverse=True)[0].get('version_id')
-                      gv=subprocess.run(['hcloud','iam','GetPolicyVersionV5','--policy_id',pid,'--version_id',vid,'--cli-region','cn-north-4'],capture_output=True,text=True)
+                      gv=subprocess.run(['hcloud','iam','GetPolicyVersionV5',f'--policy_id={pid}',f'--version_id={vid}','--cli-region=cn-north-4'],capture_output=True,text=True)
                       print('doc:',gv.stdout[:3000])
               except Exception as e: print('ver parse err',e)
           PY
@@ -95,6 +95,7 @@ jobs:
           echo
           echo "=== 系统策略候选（OBS）==="
           hcloud iam ListPoliciesV5 --policy_type=system --cli-region=cn-north-4 > /tmp/syspol.json 2>&1
+          echo "syspol raw:"; head -c 1500 /tmp/syspol.json; echo
           python3 -c "import json;d=json.load(open('/tmp/syspol.json'));ps=d.get('policies') or [];[print(p.get('policy_id'),p.get('policy_name')) for p in ps if 'obs' in (p.get('policy_name') or '').lower()]" 2>/dev/null | head -40
           echo
           if [ "${{ inputs.mode }}" = "fix" ]; then
