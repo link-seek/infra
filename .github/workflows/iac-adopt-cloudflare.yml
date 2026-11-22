@@ -1,15 +1,12 @@
 name: iac-adopt-cloudflare
 
-# 用官方 cf-terraforming 把现有 Cloudflare DNS 记录生成 Terraform 配置（只读生成，不改线上）。
-# 产物作为 artifact 供审核后入 iac/terraform/cloudflare 并 terraform import。
-# 需要 org secret CF_PARENT_TOKEN（具备 zone/dns 读权限）。
+# 把现有 Cloudflare DNS 记录纳入 Terraform 管理（只读生成，不改线上）。
+# 原理：用 Cloudflare API 只读枚举各 zone 的 DNS 记录 → 生成 import 块 →
+#       `terraform plan -generate-config-out=generated.tf` 产出对应 HCL。
+# 产物（generated.tf + manifest）作为 artifact 供审核后入 iac/terraform/cloudflare。
+# 需要 org secret CF_PARENT_TOKEN（zone/dns 读权限）。
 on:
-  workflow_dispatch:
-    inputs:
-      resource_type:
-        description: "cf-terraforming 资源类型（v5 provider）"
-        required: false
-        default: "cloudflare_dns_record"
+  workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
@@ -27,49 +24,67 @@ jobs:
           terraform_version: 1.9.5
           terraform_wrapper: false
 
-      - name: install cf-terraforming
-        run: |
-          set -euo pipefail
-          V=0.31.0
-          curl -fsSL --retry 5 --retry-delay 3 \
-            "https://github.com/cloudflare/cf-terraforming/releases/download/v${V}/cf-terraforming_${V}_linux_amd64.tar.gz" \
-            -o /tmp/cft.tgz
-          mkdir -p /tmp/cft && tar xzf /tmp/cft.tgz -C /tmp/cft
-          install -m755 /tmp/cft/cf-terraforming /usr/local/bin/cf-terraforming
-          cf-terraforming version
-
-      - name: terraform init (for provider schema)
+      - name: terraform init (provider schema)
         working-directory: iac/terraform/cloudflare
         run: terraform init -backend=false -input=false
 
-      - name: list zones (token diagnostics)
+      - name: enumerate DNS records -> import blocks
         run: |
           set -euo pipefail
-          curl -s -H "Authorization: Bearer $CF_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/zones?per_page=50" \
-            | python3 -c "import sys,json;d=json.load(sys.stdin);print('success=',d.get('success'));print('errors=',d.get('errors'));print('zones=',[ (z['name'],z['id']) for z in d.get('result') or [] ])"
+          python3 - <<'PY'
+          import os, json, re, urllib.request
+          token = os.environ["CF_API_TOKEN"]
+          zones = ["xieyucheng.top", "linkseek.net.cn", "yingxin.net.cn"]
+          def api(path):
+              req = urllib.request.Request("https://api.cloudflare.com/client/v4" + path,
+                                           headers={"Authorization": "Bearer " + token})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.load(r)
+          def slug(s):
+              return re.sub(r'[^a-zA-Z0-9_]+', '_', s).strip('_')
+          blocks, manifest = [], []
+          for z in zones:
+              zr = api(f"/zones?name={z}")
+              if not zr.get("result"):
+                  print("no zone / no perm:", z); continue
+              zid = zr["result"][0]["id"]
+              page, recs = 1, []
+              while True:
+                  d = api(f"/zones/{zid}/dns_records?per_page=100&page={page}")
+                  recs += d.get("result") or []
+                  tp = (d.get("result_info") or {}).get("total_pages") or 1
+                  if page >= tp: break
+                  page += 1
+              print(f"{z}: {len(recs)} records (zone {zid})")
+              for i, r in enumerate(recs):
+                  addr = f"cloudflare_dns_record.{slug(z)}_{i}"
+                  blocks.append(f'import {{\n  to = {addr}\n  id = "{zid}/{r["id"]}"\n}}\n')
+                  manifest.append({"zone": z, "zone_id": zid, "name": r.get("name"),
+                                   "type": r.get("type"), "content": r.get("content"),
+                                   "proxied": r.get("proxied"), "ttl": r.get("ttl"), "addr": addr})
+          open("iac/terraform/cloudflare/imports.auto.tf", "w").write("\n".join(blocks))
+          json.dump(manifest, open("adopt-manifest.json", "w"), indent=2, ensure_ascii=False)
+          print("TOTAL import blocks:", len(blocks))
+          PY
 
-      - name: generate per zone
+      - name: terraform plan -generate-config-out (read-only)
+        working-directory: iac/terraform/cloudflare
+        env:
+          TF_VAR_cloudflare_api_token: ${{ secrets.CF_PARENT_TOKEN }}
         run: |
-          set -euo pipefail
-          mkdir -p adopt
-          TFPLUGIN="${{ github.workspace }}/iac/terraform/cloudflare"
-          for Z in xieyucheng.top linkseek.net.cn yingxin.net.cn; do
-            ZID=$(curl -s -H "Authorization: Bearer $CF_API_TOKEN" "https://api.cloudflare.com/client/v4/zones?name=$Z" \
-              | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['result'][0]['id'] if d.get('result') else '')")
-            if [ -z "$ZID" ]; then echo "skip $Z (no zone id / token perms)"; continue; fi
-            echo "== generating $Z ($ZID) =="
-            # provider v5 下必须用 env CLOUDFLARE_API_TOKEN 认证，不能 --token 传参（cf-terraforming #790）
-            cf-terraforming generate \
-              --resource-type "${{ inputs.resource_type }}" \
-              --zone "$ZID" \
-              --terraform-install-path "$TFPLUGIN" \
-              --terraform-binary-path "$(command -v terraform)" \
-              > "adopt/${Z}.tf" || echo "GEN-FAIL $Z"
-            echo "lines=$(wc -l < adopt/${Z}.tf)"
-          done
+          set +e
+          terraform plan -generate-config-out=generated.tf -input=false -lock-timeout=60s
+          rc=$?
+          echo "PLAN_EXIT=$rc"
+          echo "=== generated.tf: $(wc -l < generated.tf 2>/dev/null || echo 0) lines ==="
+          # 删掉运行时 import 块，避免误入仓（真正的接管由后续提交 generated.tf + apply 完成）
+          rm -f imports.auto.tf
+          exit 0
 
       - uses: actions/upload-artifact@v4
         with:
           name: cloudflare-adopt-tf
-          path: adopt/
+          path: |
+            iac/terraform/cloudflare/generated.tf
+            adopt-manifest.json
+          if-no-files-found: warn
