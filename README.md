@@ -35,7 +35,7 @@
 ## 入口 / DNS
 
 - **入口**：Traefik 在 `mesh-ali-gz` 以 hostNetwork 直接接管 80/443，用 `IngressRoute` 按 Host 分发到各 Service；TLS 用 IngressRoute 自带的 TLS secret。配置见 `k8s/traefik-edge`。
-- **域名**（Cloudflare 托管，声明源 `dns/records*.json`，由 `dns-apply.yml` 对账）：
+- **域名**（Cloudflare 托管，声明源 `iac/terraform/cloudflare/dns.tf`，由 Terraform 对账；`iac-cloudflare.yml` 跑 plan、人工确认再 apply）：
   - `opencode.xieyucheng.top` → Traefik → `opencode-xieyucheng`
   - `opencode.yingxin.net.cn` → Traefik → `opencode-yingxin`
   - `erp.xieyucheng.top` → `erpnext`
@@ -56,7 +56,8 @@
 clusters/k3s/            # Flux：flux-system + 各应用 Kustomization（apps-*.yaml）+ docker-images 源（git-docker-images.yaml）
 k8s/                     # 底座清单：egress / traefik-edge / ci-deployer / reloader / etcd-backup / tailscale-operator / restore
 node/node-config.yaml     # 节点参数真相（k3s-node-config.yml）
-dns/records*.json        # Cloudflare DNS 声明（dns-apply.yml）——唯一 DNS 源
+iac/terraform/cloudflare/ # Cloudflare DNS/zone 声明（Terraform）——唯一 DNS 源（iac-cloudflare.yml）
+dns/records.json         # 仅保留隧道锚点参考（deliver-cloudflared），非 DNS 源
 acl/policy.hujson  # tailnet ACL 真相（ts-acl-apply.yml）
 edge/registries/         # 镜像仓映射 + 境外镜像 allowlist（image-policy.yml）
 edge/cloudflared/        # cloudflared 隧道 ingress 声明（deliver-cloudflared.yml）
@@ -72,5 +73,5 @@ scripts/                 # apply/verify/迁移脚本
 ## 运维 / 变更
 
 - 看状态：`kubectl -n flux-system get kustomizations`、`kubectl get pods -A`
-- 节点漂移巡检：手动 dispatch `k3s-node-config.yml`（verify）；DNS 对账：`dns-apply.yml`（默认 dry-run）；ACL：`ts-acl-apply.yml`
+- 节点漂移巡检：手动 dispatch `k3s-node-config.yml`（verify）；DNS 对账：`iac-cloudflare.yml` mode=plan（只读）；ACL：`ts-acl-apply.yml`
 - 校验门：`schema-stacks.yml`（清单形状）、`secret-hygiene.yml`（密钥卫生）、`image-policy.yml`（境外镜像 digest 白名单）
