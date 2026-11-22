@@ -72,8 +72,7 @@ jobs:
           echo STAGE-verify-image
           WANT="\$(grep -oE 'opencode-tools@sha256:[0-9a-f]+' k8s/etcd-backup/cronjob.yaml | head -1 | cut -d: -f2 | cut -c1-12)"
           [ -n "\$WANT" ] || { echo "FAIL: 取不到 cronjob digest"; exit 1; }
-          crictl images --digests 2>/dev/null | grep -q "\$WANT" || { echo "FAIL: digest \$WANT 未在 .69 缓存（先 crictl pull 或换节点）"; exit 1; }
-          echo "image cached: \$WANT"
+          if crictl images --digests 2>/dev/null | grep -q "\$WANT"; then echo "image cached: \$WANT"; else echo "WARN: digest \$WANT 未在 .69 缓存（Job 将用 imagePullSecrets 现拉，不阻断；真门禁是后续 REFRESH-OK）"; fi
           echo STAGE-apply
           kubectl create secret docker-registry swr-pull -n kube-system \
             --docker-server=swr.cn-north-9.myhuaweicloud.com \
