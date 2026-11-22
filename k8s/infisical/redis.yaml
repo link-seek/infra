@@ -1,0 +1,53 @@
+# Infisical 的 Redis（钉 hw21；AOF 持久化 + noeviction，Infisical 硬要求）
+apiVersion: v1
+kind: Service
+metadata:
+  name: infisical-redis
+  namespace: infisical
+spec:
+  selector: {app: infisical-redis}
+  ports:
+    - {port: 6379, targetPort: 6379}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infisical-redis
+  namespace: infisical
+  labels: {app: infisical-redis}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: infisical-redis}
+  template:
+    metadata:
+      labels: {app: infisical-redis}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
+      initContainers:
+        - name: fix-perm
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+          command: ["sh", "-c", "mkdir -p /data && chown -R 999:999 /data"]
+          securityContext: {runAsUser: 0}
+          volumeMounts:
+            - {name: redisdata, mountPath: /data}
+      containers:
+        - name: redis
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+          args: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+          ports:
+            - {containerPort: 6379}
+          volumeMounts:
+            - {name: redisdata, mountPath: /data}
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+      volumes:
+        - name: redisdata
+          hostPath: {path: /data/infisical/redis, type: DirectoryOrCreate}
