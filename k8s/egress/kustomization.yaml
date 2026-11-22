@@ -1,9 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # egress 统一由 Flux 管（apps-egress.yaml → ./k8s/egress）。
-# 注意：旧的 SNI relay daemonset*.yaml / nginx-conf.yaml 尚未纳入此处（Stage C 退役时一并删除），
-# 所以这里只列 L7 代理相关资源，避免 Flux 误接管待退役对象。
+# 旧的 SNI relay daemonset*.yaml / nginx-conf.yaml 已删除（2026-11-22 退役）。
+# xray-config Secret 不进 git（含密钥），由集群内直接建（同 litellm-env 模式）。
 resources:
   - namespace.yaml
   - proxy-config.yaml
   - proxy.yaml
+  - xray.yaml
