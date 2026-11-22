@@ -1,0 +1,56 @@
+# home-oc.xieyucheng.top 入口路由（底座层：Traefik 动态路由，非 pod 层）
+# 链路：Internet -> mesh-ali-gz(120.77.76.20) Traefik(hostNetwork, TLS 终止, ACME le-prod)
+#       -> tailnet 100.69.220.112:4096（个人 PC mesh-xyc-pc 上的 opencode serve）
+# 依赖：tailnet ACL 需放行 tag:ali -> tag:pc:4096（见 tailscale/policy.hujson）。
+# DNS：home-oc.xieyucheng.top 为 A 120.77.76.20、proxied=false（灰云直连，避免 CF 海外边缘导致高延迟）。
+# 回滚：删除本文件（Flux prune 自动回收）＋删 DNS 记录＋回退 ACL。
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-oc-backend
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: traefik-edge
+spec:
+  # headless + 手工 Endpoints：把集群内服务名解析到 tailnet 外部地址
+  clusterIP: None
+  ports:
+    - name: http
+      port: 4096
+      targetPort: 4096
+      protocol: TCP
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: home-oc-backend
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: traefik-edge
+subsets:
+  - addresses:
+      - ip: 100.69.220.112
+    ports:
+      - name: http
+        port: 4096
+        protocol: TCP
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: home-oc
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: traefik-edge
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`home-oc.xieyucheng.top`)
+      kind: Rule
+      services:
+        - name: home-oc-backend
+          port: 4096
+  tls:
+    certResolver: le-prod
