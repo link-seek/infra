@@ -99,8 +99,14 @@ jobs:
           python3 -c "import json;d=json.load(open('/tmp/syspol.json'));ps=d.get('policies') or [];[print(p.get('policy_id'),p.get('policy_name')) for p in ps if 'obs' in (p.get('policy_name') or '').lower()]" 2>/dev/null | head -40
           echo
           if [ "${{ inputs.mode }}" = "fix" ]; then
-            echo "=== FIX: AttachAgencyPolicyV5 policy=${{ inputs.policy_id }} to agency=$AID ==="
-            [ -n "$AID" ] && [ -n "${{ inputs.policy_id }}" ] || { echo "FAIL: 缺 agency_id 或 policy_id"; exit 1; }
-            hcloud iam AttachAgencyPolicyV5 --agency_id="$AID" --policy_id="${{ inputs.policy_id }}" --cli-region=cn-north-4 2>&1 | head -c 2000; echo
-            echo "=== 复核 attached ==="; hcloud iam ListAttachedAgencyPoliciesV5 --agency_id="$AID" --cli-region=cn-north-4 2>&1 | head -c 4000; echo
+            PID="${{ inputs.policy_id }}"
+            if [ -z "$PID" ]; then
+              PID=$(python3 -c "import json;d=json.load(open('/tmp/attached.json'));a=d.get('attached_policies') or [];print(next((x.get('policy_id') for x in a if x.get('policy_name')=='k3s-etcd-obs-bucket'),''))" 2>/dev/null)
+            fi
+            echo "PID=$PID"
+            [ -n "$PID" ] || { echo "FAIL: 未找到 k3s-etcd-obs-bucket 策略"; exit 1; }
+            DOC='{"Version":"5.0","Statement":[{"Effect":"Allow","Action":["obs:bucket:ListBucket","obs:bucket:HeadBucket","obs:bucket:GetBucketLocation","obs:object:GetObject","obs:object:PutObject","obs:object:DeleteObject","obs:object:AbortMultipartUpload"],"Resource":["obs:*:*:bucket:linkseek-k3s-etcd","obs:*:*:object:linkseek-k3s-etcd/*","obs:*:*:bucket:linkseek","obs:*:*:object:linkseek/*"]}]}'
+            echo "=== CreatePolicyVersionV5（加 linkseek 桶，set default）==="
+            hcloud iam CreatePolicyVersionV5 --policy_id="$PID" --policy_document="$DOC" --set_as_default=true --cli-region=cn-north-4 2>&1 | head -c 2000; echo
+            echo "=== versions after ==="; hcloud iam ListPolicyVersionsV5 --policy_id="$PID" --cli-region=cn-north-4 2>&1 | head -c 4000; echo
           fi
