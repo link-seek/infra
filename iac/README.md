@@ -6,7 +6,7 @@
 ```
 iac/terraform/cloudflare/
   provider.tf        # 官方 cloudflare/cloudflare provider（v5）
-  backend.tf         # state 存 OBS（S3 兼容，唯一桶 linkseek-k3s-etcd 的 iac/cloudflare/ 前缀）
+  backend.tf         # state 存 OBS（S3 兼容，唯一桶 linkseek 的 iac/cloudflare/ 前缀）
   dns.tf             # 41 条 DNS 记录（由生产实况生成，接管后的唯一声明源）
   main.tf            # 预留（zone/Workers/Pages 后续）
   variables.tf
@@ -33,7 +33,7 @@ iac/ansible/
 
 ## 密钥
 - `cloudflare_api_token` 由 CI 用 `CF_PARENT_TOKEN` 注入（`TF_VAR_cloudflare_api_token`，勿入仓）。
-- Terraform state 存项目唯一 OBS 桶 `linkseek-k3s-etcd` 的 `iac/cloudflare/` 前缀（etcd 快照同桶 etcd-auto/；OBS 桶不可改名 + ECS 委托权限限定此桶）（凭据用 `PROD_HCLOUD_AK/SK`）。
+- Terraform state 存项目唯一 OBS 桶 `linkseek` 的 `iac/cloudflare/` 前缀（etcd 快照同桶 etcd-auto/）（凭据用 `PROD_HCLOUD_AK/SK`）。
 - 主机侧敏感值走 Infisical（已建），不落仓。
 
 ## 阶段
