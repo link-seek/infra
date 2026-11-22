@@ -1,0 +1,2889 @@
+---
+# Source: secrets-operator/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: infisical-opera-controller-manager
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    {}
+---
+# Source: secrets-operator/templates/clustergenerator-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clustergenerators.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: ClusterGenerator
+    listKind: ClusterGeneratorList
+    plural: clustergenerators
+    singular: clustergenerator
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ClusterGenerator represents a cluster-wide generator
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              generator:
+                description: Generator the spec for this generator, must match the kind.
+                properties:
+                  passwordSpec:
+                    description: PasswordSpec controls the behavior of the password
+                      generator.
+                    properties:
+                      allowRepeat:
+                        default: false
+                        description: set allowRepeat to true to allow repeating characters.
+                        type: boolean
+                      digits:
+                        description: |-
+                          digits specifies the number of digits in the generated
+                          password. If omitted it defaults to 25% of the length of the password
+                        type: integer
+                      length:
+                        default: 24
+                        description: |-
+                          Length of the password to be generated.
+                          Defaults to 24
+                        type: integer
+                      noUpper:
+                        default: false
+                        description: Set noUpper to disable uppercase characters
+                        type: boolean
+                      symbolCharacters:
+                        description: |-
+                          symbolCharacters specifies the special characters that should be used
+                          in the generated password.
+                        type: string
+                      symbols:
+                        description: |-
+                          symbols specifies the number of symbol characters in the generated
+                          password. If omitted it defaults to 25% of the length of the password
+                        type: integer
+                    type: object
+                  uuidSpec:
+                    description: UUIDSpec controls the behavior of the uuid generator.
+                    type: object
+                type: object
+              kind:
+                description: Kind the kind of this generator.
+                enum:
+                - Password
+                - UUID
+                type: string
+            required:
+            - kind
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/infisicalauth-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infisicalauths.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: InfisicalAuth
+    listKind: InfisicalAuthList
+    plural: infisicalauths
+    singular: infisicalauth
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.infisicalConnectionRef.name
+      name: Connection
+      type: string
+    - jsonPath: .spec.method
+      name: Method
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.conditions[?(@.type=="secrets.infisical.com/IsReady")].status
+      name: Ready
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: InfisicalAuth is the Schema for the InfisicalAuth API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              awsIam:
+                properties:
+                  identityIdRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                required:
+                - identityIdRef
+                type: object
+              azure:
+                properties:
+                  identityIdRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  resource:
+                    type: string
+                required:
+                - identityIdRef
+                type: object
+              gcpIam:
+                properties:
+                  identityIdRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  serviceAccountKeyFilePath:
+                    type: string
+                required:
+                - identityIdRef
+                - serviceAccountKeyFilePath
+                type: object
+              gcpIdToken:
+                properties:
+                  identityIdRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                required:
+                - identityIdRef
+                type: object
+              infisicalConnectionRef:
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              kubernetes:
+                properties:
+                  identityIdRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  serviceAccountRef:
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - name
+                    - namespace
+                    type: object
+                  serviceAccountTokenAudiences:
+                    description: The audiences to use for the service account token.
+                      This is only relevant if `autoCreateServiceAccountToken` is true.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - identityIdRef
+                - serviceAccountRef
+                type: object
+              ldap:
+                properties:
+                  identityIdRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  passwordRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  usernameRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                required:
+                - identityIdRef
+                - passwordRef
+                - usernameRef
+                type: object
+              method:
+                enum:
+                - universal
+                - kubernetes
+                - aws-iam
+                - azure
+                - gcp-id-token
+                - gcp-iam
+                - ldap
+                type: string
+              universal:
+                properties:
+                  clientIdRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                  clientSecretRef:
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                required:
+                - clientIdRef
+                - clientSecretRef
+                type: object
+            required:
+            - method
+            type: object
+          status:
+            description: InfisicalAuthStatus defines the observed state of InfisicalAuth
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            required:
+            - conditions
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/infisicalconnection-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infisicalconnections.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: InfisicalConnection
+    listKind: InfisicalConnectionList
+    plural: infisicalconnections
+    singular: infisicalconnection
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .spec.address
+      name: Address
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="secrets.infisical.com/IsReady")].status
+      name: Ready
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: InfisicalConnection is the Schema for the infisicalconnection API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: InfisicalConnectionSpec defines how the operator connects to
+              a Infisical instance
+            properties:
+              address:
+                type: string
+              tls:
+                properties:
+                  caCertificate:
+                    description: Reference to secret containing CA cert
+                    properties:
+                      key:
+                        description: The name of the secret property with the value
+                        type: string
+                      name:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      namespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - name
+                    - namespace
+                    type: object
+                type: object
+            type: object
+          status:
+            description: InfisicalConnectionStatus defines the observed state of InfisicalConnection
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            required:
+            - conditions
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/infisicaldynamicsecret-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infisicaldynamicsecrets.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: InfisicalDynamicSecret
+    listKind: InfisicalDynamicSecretList
+    plural: infisicaldynamicsecrets
+    singular: infisicaldynamicsecret
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: InfisicalDynamicSecret is the Schema for the infisicaldynamicsecrets
+          API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: InfisicalDynamicSecretSpec defines the desired state of InfisicalDynamicSecret.
+            properties:
+              authentication:
+                properties:
+                  awsIamAuth:
+                    properties:
+                      identityId:
+                        type: string
+                    required:
+                    - identityId
+                    type: object
+                  azureAuth:
+                    properties:
+                      identityId:
+                        type: string
+                      resource:
+                        type: string
+                    required:
+                    - identityId
+                    type: object
+                  gcpIamAuth:
+                    properties:
+                      identityId:
+                        type: string
+                      serviceAccountKeyFilePath:
+                        type: string
+                    required:
+                    - identityId
+                    - serviceAccountKeyFilePath
+                    type: object
+                  gcpIdTokenAuth:
+                    properties:
+                      identityId:
+                        type: string
+                    required:
+                    - identityId
+                    type: object
+                  kubernetesAuth:
+                    properties:
+                      autoCreateServiceAccountToken:
+                        description: |-
+                          Optionally automatically create a service account token for the configured service account.
+                          If this is set to `true`, the operator will automatically create a service account token for the configured service account. This field is recommended in most cases.
+                        type: boolean
+                      identityId:
+                        type: string
+                      serviceAccountRef:
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      serviceAccountTokenAudiences:
+                        description: The audiences to use for the service account token.
+                          This is only relevant if `autoCreateServiceAccountToken` is
+                          true.
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - identityId
+                    - serviceAccountRef
+                    type: object
+                  ldapAuth:
+                    properties:
+                      credentialsRef:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                      identityId:
+                        type: string
+                    required:
+                    - credentialsRef
+                    - identityId
+                    type: object
+                  universalAuth:
+                    properties:
+                      credentialsRef:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                    required:
+                    - credentialsRef
+                    type: object
+                type: object
+              dynamicSecret:
+                properties:
+                  environmentSlug:
+                    type: string
+                  projectId:
+                    type: string
+                  projectSlug:
+                    type: string
+                  secretName:
+                    type: string
+                  secretsPath:
+                    type: string
+                required:
+                - environmentSlug
+                - secretName
+                - secretsPath
+                type: object
+              hostAPI:
+                type: string
+              leaseRevocationPolicy:
+                type: string
+              leaseTTL:
+                type: string
+              managedSecretReference:
+                properties:
+                  creationPolicy:
+                    default: Orphan
+                    description: |-
+                      The Kubernetes Secret creation policy.
+                      Enum with values: 'Owner', 'Orphan'.
+                      Owner creates the secret and sets .metadata.ownerReferences of the InfisicalSecret CRD that created it.
+                      Orphan will not set the secret owner. This will result in the secret being orphaned and not deleted when the resource is deleted.
+                    type: string
+                  secretName:
+                    description: The name of the Kubernetes Secret
+                    type: string
+                  secretNamespace:
+                    description: The name space where the Kubernetes Secret is located
+                    type: string
+                  secretType:
+                    default: Opaque
+                    description: 'The Kubernetes Secret type (experimental feature).
+                      More info: https://kubernetes.io/docs/concepts/configuration/secret/#secret-types'
+                    type: string
+                  template:
+                    description: The template to transform the secret data
+                    properties:
+                      data:
+                        additionalProperties:
+                          type: string
+                        description: The template key values
+                        type: object
+                      includeAllSecrets:
+                        description: |-
+                          This injects all retrieved secrets into the top level of your template.
+                          Secrets defined in the template will take precedence over the injected ones.
+                        type: boolean
+                      metadata:
+                        description: |-
+                          Custom metadata (labels/annotations) for the managed secret.
+                          When specified, these values are used instead of copying metadata from the InfisicalSecret CR.
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            description: Custom annotations to apply to the managed
+                              secret
+                            type: object
+                          labels:
+                            additionalProperties:
+                              type: string
+                            description: Custom labels to apply to the managed secret
+                            type: object
+                        type: object
+                    type: object
+                required:
+                - secretName
+                - secretNamespace
+                type: object
+              tls:
+                properties:
+                  caRef:
+                    description: Reference to secret containing CA cert
+                    properties:
+                      key:
+                        description: The name of the secret property with the CA certificate
+                          value
+                        type: string
+                      secretName:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      secretNamespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - secretName
+                    - secretNamespace
+                    type: object
+                type: object
+            required:
+            - authentication
+            - dynamicSecret
+            - leaseRevocationPolicy
+            - leaseTTL
+            - managedSecretReference
+            type: object
+          status:
+            description: InfisicalDynamicSecretStatus defines the observed state of
+              InfisicalDynamicSecret.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              dynamicSecretId:
+                type: string
+              lease:
+                properties:
+                  creationTimestamp:
+                    format: date-time
+                    type: string
+                  expiresAt:
+                    format: date-time
+                    type: string
+                  id:
+                    type: string
+                  version:
+                    format: int64
+                    type: integer
+                required:
+                - creationTimestamp
+                - expiresAt
+                - id
+                - version
+                type: object
+              maxTTL:
+                description: The MaxTTL can be null, if it's null, there's no max TTL
+                  and we should never have to renew.
+                type: string
+            required:
+            - conditions
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/infisicalpushsecret-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infisicalpushsecrets.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: InfisicalPushSecret
+    listKind: InfisicalPushSecretList
+    plural: infisicalpushsecrets
+    singular: infisicalpushsecret
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: InfisicalPushSecret is the Schema for the infisicalpushsecrets
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: InfisicalPushSecretSpec defines the desired state of InfisicalPushSecret
+            properties:
+              authentication:
+                properties:
+                  awsIamAuth:
+                    properties:
+                      identityId:
+                        type: string
+                    required:
+                    - identityId
+                    type: object
+                  azureAuth:
+                    properties:
+                      identityId:
+                        type: string
+                      resource:
+                        type: string
+                    required:
+                    - identityId
+                    type: object
+                  gcpIamAuth:
+                    properties:
+                      identityId:
+                        type: string
+                      serviceAccountKeyFilePath:
+                        type: string
+                    required:
+                    - identityId
+                    - serviceAccountKeyFilePath
+                    type: object
+                  gcpIdTokenAuth:
+                    properties:
+                      identityId:
+                        type: string
+                    required:
+                    - identityId
+                    type: object
+                  kubernetesAuth:
+                    properties:
+                      autoCreateServiceAccountToken:
+                        description: |-
+                          Optionally automatically create a service account token for the configured service account.
+                          If this is set to `true`, the operator will automatically create a service account token for the configured service account. This field is recommended in most cases.
+                        type: boolean
+                      identityId:
+                        type: string
+                      serviceAccountRef:
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      serviceAccountTokenAudiences:
+                        description: The audiences to use for the service account token.
+                          This is only relevant if `autoCreateServiceAccountToken` is
+                          true.
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - identityId
+                    - serviceAccountRef
+                    type: object
+                  ldapAuth:
+                    properties:
+                      credentialsRef:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                      identityId:
+                        type: string
+                    required:
+                    - credentialsRef
+                    - identityId
+                    type: object
+                  universalAuth:
+                    properties:
+                      credentialsRef:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                    required:
+                    - credentialsRef
+                    type: object
+                type: object
+              deletionPolicy:
+                type: string
+              destination:
+                properties:
+                  environmentSlug:
+                    type: string
+                  projectId:
+                    type: string
+                  projectSlug:
+                    type: string
+                  secretsPath:
+                    type: string
+                required:
+                - environmentSlug
+                - secretsPath
+                type: object
+              hostAPI:
+                description: Infisical host to pull secrets from
+                type: string
+              push:
+                properties:
+                  generators:
+                    items:
+                      properties:
+                        destinationSecretName:
+                          type: string
+                        generatorRef:
+                          properties:
+                            kind:
+                              allOf:
+                              - enum:
+                                - Password
+                                - UUID
+                              - enum:
+                                - Password
+                                - UUID
+                              description: Specify the Kind of the generator resource
+                              type: string
+                            name:
+                              type: string
+                          required:
+                          - kind
+                          - name
+                          type: object
+                      required:
+                      - destinationSecretName
+                      - generatorRef
+                      type: object
+                    type: array
+                  secret:
+                    properties:
+                      secretName:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      secretNamespace:
+                        description: The name space where the Kubernetes Secret is located
+                        type: string
+                      template:
+                        properties:
+                          data:
+                            additionalProperties:
+                              type: string
+                            description: The template key values
+                            type: object
+                          includeAllSecrets:
+                            description: |-
+                              This injects all retrieved secrets into the top level of your template.
+                              Secrets defined in the template will take precedence over the injected ones.
+                            type: boolean
+                          metadata:
+                            description: |-
+                              Custom metadata (labels/annotations) for the managed secret.
+                              When specified, these values are used instead of copying metadata from the InfisicalSecret CR.
+                            properties:
+                              annotations:
+                                additionalProperties:
+                                  type: string
+                                description: Custom annotations to apply to the managed
+                                  secret
+                                type: object
+                              labels:
+                                additionalProperties:
+                                  type: string
+                                description: Custom labels to apply to the managed secret
+                                type: object
+                            type: object
+                        type: object
+                    required:
+                    - secretName
+                    - secretNamespace
+                    type: object
+                type: object
+              resyncInterval:
+                type: string
+              tls:
+                properties:
+                  caRef:
+                    description: Reference to secret containing CA cert
+                    properties:
+                      key:
+                        description: The name of the secret property with the CA certificate
+                          value
+                        type: string
+                      secretName:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      secretNamespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - secretName
+                    - secretNamespace
+                    type: object
+                type: object
+              updatePolicy:
+                type: string
+            required:
+            - destination
+            - push
+            type: object
+          status:
+            description: InfisicalPushSecretStatus defines the observed state of InfisicalPushSecret
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              managedSecrets:
+                additionalProperties:
+                  type: string
+                description: managed secrets is a map where the key is the ID, and the
+                  value is the secret key (string[id], string[key] )
+                type: object
+            required:
+            - conditions
+            - managedSecrets
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/infisicalsecret-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infisicalsecrets.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: InfisicalSecret
+    listKind: InfisicalSecretList
+    plural: infisicalsecrets
+    singular: infisicalsecret
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: InfisicalSecret is the Schema for the infisicalsecrets API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: InfisicalSecretSpec defines the desired state of InfisicalSecret
+            properties:
+              authentication:
+                properties:
+                  awsIamAuth:
+                    properties:
+                      identityId:
+                        type: string
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          projectId:
+                            type: string
+                          projectSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretName:
+                            type: string
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                    required:
+                    - identityId
+                    - secretsScope
+                    type: object
+                  azureAuth:
+                    properties:
+                      azureManagedIdentityClientId:
+                        type: string
+                      identityId:
+                        type: string
+                      resource:
+                        type: string
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          projectId:
+                            type: string
+                          projectSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretName:
+                            type: string
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                    required:
+                    - identityId
+                    - secretsScope
+                    type: object
+                  gcpIamAuth:
+                    properties:
+                      identityId:
+                        type: string
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          projectId:
+                            type: string
+                          projectSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretName:
+                            type: string
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                      serviceAccountKeyFilePath:
+                        type: string
+                    required:
+                    - identityId
+                    - secretsScope
+                    - serviceAccountKeyFilePath
+                    type: object
+                  gcpIdTokenAuth:
+                    properties:
+                      identityId:
+                        type: string
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          projectId:
+                            type: string
+                          projectSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretName:
+                            type: string
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                    required:
+                    - identityId
+                    - secretsScope
+                    type: object
+                  kubernetesAuth:
+                    properties:
+                      autoCreateServiceAccountToken:
+                        description: |-
+                          Optionally automatically create a service account token for the configured service account.
+                          If this is set to `true`, the operator will automatically create a service account token for the configured service account.
+                        type: boolean
+                      identityId:
+                        type: string
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          projectId:
+                            type: string
+                          projectSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretName:
+                            type: string
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                      serviceAccountRef:
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      serviceAccountTokenAudiences:
+                        description: The audiences to use for the service account token.
+                          This is only relevant if `autoCreateServiceAccountToken` is
+                          true.
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - identityId
+                    - secretsScope
+                    - serviceAccountRef
+                    type: object
+                  ldapAuth:
+                    properties:
+                      credentialsRef:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                      identityId:
+                        type: string
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          projectId:
+                            type: string
+                          projectSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretName:
+                            type: string
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                    required:
+                    - credentialsRef
+                    - identityId
+                    - secretsScope
+                    type: object
+                  serviceAccount:
+                    properties:
+                      environmentName:
+                        type: string
+                      projectId:
+                        type: string
+                      serviceAccountSecretReference:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                    required:
+                    - environmentName
+                    - projectId
+                    - serviceAccountSecretReference
+                    type: object
+                  serviceToken:
+                    properties:
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                      serviceTokenSecretReference:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                    required:
+                    - secretsScope
+                    - serviceTokenSecretReference
+                    type: object
+                  universalAuth:
+                    properties:
+                      credentialsRef:
+                        properties:
+                          secretName:
+                            description: The name of the Kubernetes Secret
+                            type: string
+                          secretNamespace:
+                            description: The name space where the Kubernetes Secret
+                              is located
+                            type: string
+                        required:
+                        - secretName
+                        - secretNamespace
+                        type: object
+                      secretsScope:
+                        properties:
+                          envSlug:
+                            type: string
+                          projectId:
+                            type: string
+                          projectSlug:
+                            type: string
+                          recursive:
+                            type: boolean
+                          secretName:
+                            type: string
+                          secretsPath:
+                            type: string
+                        required:
+                        - envSlug
+                        - secretsPath
+                        type: object
+                    required:
+                    - credentialsRef
+                    - secretsScope
+                    type: object
+                type: object
+              hostAPI:
+                description: Infisical host to pull secrets from
+                type: string
+              instantUpdates:
+                type: boolean
+              managedKubeConfigMapReferences:
+                items:
+                  properties:
+                    configMapName:
+                      description: The name of the Kubernetes ConfigMap
+                      type: string
+                    configMapNamespace:
+                      description: The namespace where the Kubernetes ConfigMap is located
+                      type: string
+                    creationPolicy:
+                      default: Orphan
+                      description: |-
+                        The Kubernetes ConfigMap creation policy.
+                        Enum with values: 'Owner', 'Orphan'.
+                        Owner creates the config map and sets .metadata.ownerReferences of the InfisicalSecret CRD that created it.
+                        Orphan will not set the config map owner. This will result in the config map being orphaned and not deleted when the resource is deleted.
+                      type: string
+                    template:
+                      description: The template to transform the secret data
+                      properties:
+                        data:
+                          additionalProperties:
+                            type: string
+                          description: The template key values
+                          type: object
+                        includeAllSecrets:
+                          description: |-
+                            This injects all retrieved secrets into the top level of your template.
+                            Secrets defined in the template will take precedence over the injected ones.
+                          type: boolean
+                        metadata:
+                          description: |-
+                            Custom metadata (labels/annotations) for the managed secret.
+                            When specified, these values are used instead of copying metadata from the InfisicalSecret CR.
+                          properties:
+                            annotations:
+                              additionalProperties:
+                                type: string
+                              description: Custom annotations to apply to the managed
+                                secret
+                              type: object
+                            labels:
+                              additionalProperties:
+                                type: string
+                              description: Custom labels to apply to the managed secret
+                              type: object
+                          type: object
+                      type: object
+                  required:
+                  - configMapName
+                  - configMapNamespace
+                  type: object
+                type: array
+              managedKubeSecretReferences:
+                items:
+                  properties:
+                    creationPolicy:
+                      default: Orphan
+                      description: |-
+                        The Kubernetes Secret creation policy.
+                        Enum with values: 'Owner', 'Orphan'.
+                        Owner creates the secret and sets .metadata.ownerReferences of the InfisicalSecret CRD that created it.
+                        Orphan will not set the secret owner. This will result in the secret being orphaned and not deleted when the resource is deleted.
+                      type: string
+                    secretName:
+                      description: The name of the Kubernetes Secret
+                      type: string
+                    secretNamespace:
+                      description: The name space where the Kubernetes Secret is located
+                      type: string
+                    secretType:
+                      default: Opaque
+                      description: 'The Kubernetes Secret type (experimental feature).
+                        More info: https://kubernetes.io/docs/concepts/configuration/secret/#secret-types'
+                      type: string
+                    template:
+                      description: The template to transform the secret data
+                      properties:
+                        data:
+                          additionalProperties:
+                            type: string
+                          description: The template key values
+                          type: object
+                        includeAllSecrets:
+                          description: |-
+                            This injects all retrieved secrets into the top level of your template.
+                            Secrets defined in the template will take precedence over the injected ones.
+                          type: boolean
+                        metadata:
+                          description: |-
+                            Custom metadata (labels/annotations) for the managed secret.
+                            When specified, these values are used instead of copying metadata from the InfisicalSecret CR.
+                          properties:
+                            annotations:
+                              additionalProperties:
+                                type: string
+                              description: Custom annotations to apply to the managed
+                                secret
+                              type: object
+                            labels:
+                              additionalProperties:
+                                type: string
+                              description: Custom labels to apply to the managed secret
+                              type: object
+                          type: object
+                      type: object
+                  required:
+                  - secretName
+                  - secretNamespace
+                  type: object
+                type: array
+              managedSecretReference:
+                properties:
+                  creationPolicy:
+                    default: Orphan
+                    description: |-
+                      The Kubernetes Secret creation policy.
+                      Enum with values: 'Owner', 'Orphan'.
+                      Owner creates the secret and sets .metadata.ownerReferences of the InfisicalSecret CRD that created it.
+                      Orphan will not set the secret owner. This will result in the secret being orphaned and not deleted when the resource is deleted.
+                    type: string
+                  secretName:
+                    description: The name of the Kubernetes Secret
+                    type: string
+                  secretNamespace:
+                    description: The name space where the Kubernetes Secret is located
+                    type: string
+                  secretType:
+                    default: Opaque
+                    description: 'The Kubernetes Secret type (experimental feature).
+                      More info: https://kubernetes.io/docs/concepts/configuration/secret/#secret-types'
+                    type: string
+                  template:
+                    description: The template to transform the secret data
+                    properties:
+                      data:
+                        additionalProperties:
+                          type: string
+                        description: The template key values
+                        type: object
+                      includeAllSecrets:
+                        description: |-
+                          This injects all retrieved secrets into the top level of your template.
+                          Secrets defined in the template will take precedence over the injected ones.
+                        type: boolean
+                      metadata:
+                        description: |-
+                          Custom metadata (labels/annotations) for the managed secret.
+                          When specified, these values are used instead of copying metadata from the InfisicalSecret CR.
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            description: Custom annotations to apply to the managed
+                              secret
+                            type: object
+                          labels:
+                            additionalProperties:
+                              type: string
+                            description: Custom labels to apply to the managed secret
+                            type: object
+                        type: object
+                    type: object
+                required:
+                - secretName
+                - secretNamespace
+                type: object
+              resyncInterval:
+                type: integer
+              syncConfig:
+                properties:
+                  instantUpdates:
+                    type: boolean
+                  resyncInterval:
+                    type: string
+                type: object
+              tls:
+                properties:
+                  caRef:
+                    description: Reference to secret containing CA cert
+                    properties:
+                      key:
+                        description: The name of the secret property with the CA certificate
+                          value
+                        type: string
+                      secretName:
+                        description: The name of the Kubernetes Secret
+                        type: string
+                      secretNamespace:
+                        description: The namespace where the Kubernetes Secret is located
+                        type: string
+                    required:
+                    - key
+                    - secretName
+                    - secretNamespace
+                    type: object
+                type: object
+              tokenSecretReference:
+                properties:
+                  secretName:
+                    description: The name of the Kubernetes Secret
+                    type: string
+                  secretNamespace:
+                    description: The name space where the Kubernetes Secret is located
+                    type: string
+                required:
+                - secretName
+                - secretNamespace
+                type: object
+            type: object
+          status:
+            description: InfisicalSecretStatus defines the observed state of InfisicalSecret
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            required:
+            - conditions
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/infisicalstaticsecret-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infisicalstaticsecrets.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: InfisicalStaticSecret
+    listKind: InfisicalStaticSecretList
+    plural: infisicalstaticsecrets
+    singular: infisicalstaticsecret
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.conditions[?(@.type=="secrets.infisical.com/LastReconcileAuthMethod")].message
+      name: Auth Method
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="secrets.infisical.com/LastReconcileStatus")].status
+      name: Synced
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="secrets.infisical.com/LastReconcileAffectedDeployments")].message
+      name: Affected Deployments
+      type: string
+    - jsonPath: .status.error
+      name: Error
+      type: boolean
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: InfisicalStaticSecret is the Schema for the InfisicalStaticSecret
+          API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              infisicalAuthRef:
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              sources:
+                items:
+                  properties:
+                    environmentSlug:
+                      type: string
+                    projectId:
+                      type: string
+                    projectSlug:
+                      type: string
+                    recursive:
+                      type: boolean
+                    secretPath:
+                      type: string
+                    tagSlugs:
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - environmentSlug
+                  - secretPath
+                  type: object
+                type: array
+              syncOptions:
+                properties:
+                  instantUpdates:
+                    type: boolean
+                  refreshInterval:
+                    type: string
+                required:
+                - refreshInterval
+                type: object
+              targets:
+                items:
+                  properties:
+                    creationPolicy:
+                      enum:
+                      - Owner
+                      - Orphan
+                      type: string
+                    kind:
+                      enum:
+                      - Secret
+                      - ConfigMap
+                      type: string
+                    metadata:
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        labels:
+                          additionalProperties:
+                            type: string
+                          type: object
+                      required:
+                      - annotations
+                      - labels
+                      type: object
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    secretType:
+                      type: string
+                    template:
+                      properties:
+                        data:
+                          description: |-
+                            Data defines the templated output. It accepts either a map of per-key
+                            Go templates (each entry becomes one key in the resulting Secret /
+                            ConfigMap) or a single Go template string whose rendered output is
+                            YAML-decoded into a map of key/value pairs.
+                          x-kubernetes-preserve-unknown-fields: true
+                        engineVersion:
+                          enum:
+                          - v1
+                          type: string
+                      required:
+                      - data
+                      - engineVersion
+                      type: object
+                  required:
+                  - creationPolicy
+                  - kind
+                  - name
+                  - namespace
+                  type: object
+                type: array
+            required:
+            - sources
+            - syncOptions
+            - targets
+            type: object
+          status:
+            description: InfisicalStaticSecretStatus defines the observed state of InfisicalStaticSecret
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              error:
+                description: |-
+                  Error is the single source of truth for the health of the resource: true when the last
+                  reconciliation failed, false when secrets are synced. The failure details are in the
+                  secrets.infisical.com/LastReconcileStatus condition. Only trust this value once
+                  observedGeneration matches metadata.generation.
+                type: boolean
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent metadata.generation the operator has reconciled.
+                  When it is lower than metadata.generation, the status does not yet reflect the current spec.
+                format: int64
+                type: integer
+            required:
+            - conditions
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/infisicalstaticsecretpush-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infisicalstaticsecretpushes.secrets.infisical.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: secrets.infisical.com
+  names:
+    kind: InfisicalStaticSecretPush
+    listKind: InfisicalStaticSecretPushList
+    plural: infisicalstaticsecretpushes
+    singular: infisicalstaticsecretpush
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.conditions[?(@.type=="secrets.infisical.com/LastReconcileAuthMethod")].message
+      name: Auth Method
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="secrets.infisical.com/LastReconcileStatus")].status
+      name: Synced
+      type: string
+    - jsonPath: .status.error
+      name: Error
+      type: boolean
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: InfisicalStaticSecretPush pushes Kubernetes Secrets to one or more
+          paths in Infisical.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              infisicalAuthRef:
+                description: The InfisicalAuth used to push. Defaults to the "default"
+                  InfisicalAuth in the operator namespace.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              sources:
+                description: |-
+                  The Kubernetes Secrets to push. Every key of every source is pushed to every target,
+                  except to a target with a template, which pushes what its template renders instead.
+                properties:
+                  secrets:
+                    description: |-
+                      Kubernetes Secrets to push. When several Secrets contain the same key, the
+                      Secret listed first wins.
+                    items:
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - secrets
+                type: object
+              syncOptions:
+                default: {}
+                properties:
+                  createMissingFolders:
+                    default: true
+                    description: Creates the target folder, and any missing parent folders,
+                      when it doesn't exist.
+                    type: boolean
+                  deletionPolicy:
+                    default: Delete
+                    description: |-
+                      Delete removes pushed secrets from Infisical when their key is removed from the
+                      sources, when their target is removed, or when this resource is deleted.
+                      None never deletes secrets from Infisical.
+                    enum:
+                    - Delete
+                    - None
+                    type: string
+                  refreshInterval:
+                    description: |-
+                      How often to push again, e.g. 60s, 5m, 1h. The minimum is 5s. When omitted, the
+                      operator pushes only when a source Secret or this resource changes.
+                    type: string
+                  updatePolicy:
+                    default: Replace
+                    description: |-
+                      Whether keys that already exist in Infisical are updated. Replace keeps them in
+                      sync with the sources and takes over keys created outside this resource. None only
+                      creates missing keys and never changes an existing one, including the keys this
+                      resource created, so later changes to the sources don't reach Infisical. A key
+                      another InfisicalStaticSecretPush pushed is never changed.
+                    enum:
+                    - Replace
+                    - None
+                    type: string
+                type: object
+              targets:
+                description: The Infisical paths to push to.
+                items:
+                  properties:
+                    environmentSlug:
+                      type: string
+                    projectId:
+                      description: The Infisical project ID. Set either projectId or
+                        projectSlug.
+                      type: string
+                    projectSlug:
+                      description: The Infisical project slug. Set either projectId
+                        or projectSlug.
+                      type: string
+                    secretPath:
+                      description: The folder to push to, e.g. /app. The root is /.
+                      type: string
+                    template:
+                      description: |-
+                        Renders the secrets pushed to this target from the source keys, which are then
+                        not pushed as they are. Each source key is available as .KEY.Value, and
+                        .KEY.SecretPath is this target's secretPath.
+                      properties:
+                        data:
+                          description: |-
+                            Data defines the templated output. It accepts either a map of per-key
+                            Go templates (each entry becomes one key in the resulting Secret /
+                            ConfigMap) or a single Go template string whose rendered output is
+                            YAML-decoded into a map of key/value pairs.
+                          x-kubernetes-preserve-unknown-fields: true
+                        engineVersion:
+                          enum:
+                          - v1
+                          type: string
+                      required:
+                      - data
+                      - engineVersion
+                      type: object
+                  required:
+                  - environmentSlug
+                  - secretPath
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - sources
+            - targets
+            type: object
+          status:
+            description: InfisicalStaticSecretPushStatus defines the observed state
+              of InfisicalStaticSecretPush
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              error:
+                description: |-
+                  Error is true when the last reconciliation failed. The failure details are in the
+                  secrets.infisical.com/LastReconcileStatus condition. Only trust this value once
+                  observedGeneration matches metadata.generation.
+                type: boolean
+              managedSecrets:
+                additionalProperties:
+                  type: string
+                description: |-
+                  ManagedSecrets maps the ID of every secret this resource pushed to Infisical to
+                  its key. Only these secrets are ever deleted by the operator.
+                type: object
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent metadata.generation the operator has reconciled.
+                  When it is lower than metadata.generation, the status does not yet reflect the current spec.
+                format: int64
+                type: integer
+            required:
+            - conditions
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+---
+# Source: secrets-operator/templates/manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: infisical-opera-manager-role
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  - deployments
+  - statefulsets
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - secrets.infisical.com
+  resources:
+  - clustergenerators
+  - infisicalauths
+  - infisicalconnections
+  - infisicaldynamicsecrets
+  - infisicalpushsecrets
+  - infisicalsecrets
+  - infisicalstaticsecretpushes
+  - infisicalstaticsecrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - secrets.infisical.com
+  resources:
+  - infisicalauths/status
+  - infisicalconnections/status
+  - infisicaldynamicsecrets/status
+  - infisicalpushsecrets/status
+  - infisicalsecrets/status
+  - infisicalstaticsecretpushes/status
+  - infisicalstaticsecrets/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - secrets.infisical.com
+  resources:
+  - infisicaldynamicsecrets/finalizers
+  - infisicalpushsecrets/finalizers
+  - infisicalsecrets/finalizers
+  - infisicalstaticsecretpushes/finalizers
+  - infisicalstaticsecrets/finalizers
+  verbs:
+  - update
+---
+# Source: secrets-operator/templates/metrics-auth-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: infisical-opera-metrics-auth-role
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+# Source: secrets-operator/templates/metrics-reader-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: infisical-opera-metrics-reader
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+# Source: secrets-operator/templates/manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: infisical-opera-manager-rolebinding
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: infisical-opera-manager-role
+subjects:
+- kind: ServiceAccount
+  name: infisical-opera-controller-manager
+  namespace: infisical
+---
+# Source: secrets-operator/templates/metrics-auth-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: infisical-opera-metrics-auth-rolebinding
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: 'infisical-opera-metrics-auth-role'
+subjects:
+- kind: ServiceAccount
+  name: 'infisical-opera-controller-manager'
+  namespace: 'infisical'
+---
+# Source: secrets-operator/templates/leader-election-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: infisical-opera-leader-election-role
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+# Source: secrets-operator/templates/leader-election-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infisical-opera-leader-election-rolebinding
+  labels:
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: 'infisical-opera-leader-election-role'
+subjects:
+- kind: ServiceAccount
+  name: 'infisical-opera-controller-manager'
+  namespace: 'infisical'
+---
+# Source: secrets-operator/templates/metrics-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: infisical-opera-controller-manager-metrics-service
+  labels:
+    control-plane: controller-manager
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  selector:
+    control-plane: controller-manager
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+---
+# Source: secrets-operator/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infisical-opera-controller-manager
+  labels:
+    control-plane: controller-manager
+    helm.sh/chart: secrets-operator-v0.11.18
+    app.kubernetes.io/name: secrets-operator
+    app.kubernetes.io/instance: infisical-operator
+    app.kubernetes.io/version: "v0.11.18"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: secrets-operator
+      app.kubernetes.io/instance: infisical-operator
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+        app.kubernetes.io/name: secrets-operator
+        app.kubernetes.io/instance: infisical-operator
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      containers:
+      - args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        command:
+        - /manager
+        env:
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: "cluster.local"
+        - name: INFISICAL_HOST_API
+          value: "https://app.infisical.com/api"
+        - name: INFISICAL_LOG_WRITER
+          value: "stderr"
+        - name: OPERATOR_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        image: swr.cn-north-9.myhuaweicloud.com/link-seek/kubernetes-operator:v0.11.18
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: infisical-opera-controller-manager
+      imagePullSecrets:
+        - name: swr-pull
+      terminationGracePeriodSeconds: 10
+      nodeSelector: 
+        {}
+      tolerations: 
+        []
