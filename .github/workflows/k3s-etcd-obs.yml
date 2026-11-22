@@ -133,7 +133,7 @@ jobs:
           echo "== 等 S3 client 就绪 =="
           for i in $(seq 1 12); do
             sleep 10
-            if $K69 "journalctl -u k3s --since '15 min ago' --no-pager 2>/dev/null | grep -q 'S3 bucket linkseek exists'"; then
+            if $K69 "journalctl -u k3s --since '15 min ago' --no-pager 2>/dev/null | grep -q 'S3 bucket linkseek-k3s-etcd exists'"; then
               echo "S3-CLIENT-OK"; break
             fi
             [ "$i" = 12 ] && { echo "FAIL: S3 client 没起来"; exit 1; }
