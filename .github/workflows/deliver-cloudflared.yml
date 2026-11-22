@@ -2,7 +2,7 @@ name: deliver-cloudflared
 # 快递线（deliver）：只管送达到目标机；镜像内容由商家（docker-images bake-*）负责，不管内容。
 
 # 隧道即代码：只手动 dispatch（备份→只换 ingress 段→restart→验证→失败回滚）。
-# 手动点火即闪断窗口（restart 时隧道内现网域名 opendesign 闪断十几秒），挑空闲时间点。
+# 手动点火即闪断窗口（restart 时隧道内现网域名短时不可达），挑空闲时间点。
 # UUID/credentials 永不进仓：线上 tunnel: 行是锚点，records.json 的 CNAME 目标必须与之一致（fail-closed）。
 # 2026-11-04：llm/llm-trial 已下线（ingress/DNS 均摘），锚点仍读 records.json 里保留的 llm-trial 记录。
 
@@ -131,8 +131,6 @@ jobs:
             echo "$TBODY" | grep -q '"data"' && { echo "WARN: llm-trial 仍透出模型列表（远端未收敛）"; sleep 15; continue; }
             echo "RETIRED OK: llm-trial 已不再路由（$TCODE）"; break
           done
-          ODCODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "https://opendesign.xieyucheng.top/" || echo 000)"
-          echo "old-domain opendesign -> $ODCODE (warn-only, 旧疾另修)" 
           if [ "$PASS" = "1" ]; then
             echo "VERIFY OK"
           else
