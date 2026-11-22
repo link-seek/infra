@@ -1,0 +1,64 @@
+name: iac-host-check
+
+# 进 tailnet 后对 5 台主机跑 Ansible 只读基线巡检（--check）。不写任何主机。
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iac-host-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 加入 tailnet（一次性 ephemeral 节点）
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          MINT="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys;print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINT" ] || { echo "FAIL: tailnet key mint 失败"; exit 1; }
+          echo "::add-mask::$MINT"
+          timeout 120 sudo tailscale up --authkey="$MINT" --hostname="ci-hostcheck-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status | head -10
+
+      - name: 安装 ansible
+        run: pip install 'ansible-core>=2.16'
+
+      - name: 准备 SSH key
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+
+      - name: ansible syntax-check
+        run: ansible-playbook --syntax-check -i iac/ansible/inventory/hosts.yml iac/ansible/playbooks/check-baseline.yml
+
+      - name: ansible --check（只读基线巡检）
+        working-directory: iac/ansible
+        run: |
+          set +e
+          ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook \
+            -i inventory/hosts.yml playbooks/check-baseline.yml \
+            --check --private-key ~/.ssh/ci_key -v
+          echo "ANSIBLE_EXIT=$?"
+
+      - name: 擦除 key
+        if: always()
+        run: shred -u ~/.ssh/ci_key 2>/dev/null || true

@@ -1,24 +1,72 @@
 ---
-# 只读基线巡检（--check 模式下不改变任何东西；用 assert/command 采集现状做 drift 报告）。
+# 只读基线巡检：采集主机现状用于漂移对账。
+# 所有 command 任务 check_mode: false（--check 下也执行，因为只读 command 不改系统），
+# changed_when: false（永不报 changed）。不写任何文件、不改服务。
 - name: host baseline (read-only)
   hosts: all
   gather_facts: true
+  ignore_unreachable: true
   tasks:
-    - name: /data 挂载存在
-      ansible.builtin.command: findmnt -no SOURCE /data
+    - name: /data 挂载（源/类型/大小）
+      ansible.builtin.command: findmnt -no SOURCE,FSTYPE,SIZE /data
       register: data_mnt
       changed_when: false
       failed_when: false
+      check_mode: false
 
-    - name: k3s 单元存在（server/agent）
-      ansible.builtin.command: systemctl cat k3s 2>/dev/null || systemctl cat k3s-agent 2>/dev/null
+    - name: k3s 版本
+      ansible.builtin.command: k3s --version
+      register: k3s_ver
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: k3s systemd 单元状态（server 或 agent）
+      ansible.builtin.shell: |
+        set -o pipefail
+        for u in k3s k3s-agent; do
+          if systemctl list-unit-files 2>/dev/null | grep -q "^${u}.service"; then
+            echo "${u}: enabled=$(systemctl is-enabled $u 2>/dev/null) active=$(systemctl is-active $u 2>/dev/null)"
+          fi
+        done
       register: k3s_unit
       changed_when: false
       failed_when: false
+      check_mode: false
+
+    - name: 关键配置文件是否存在
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/rancher/k3s/config.yaml
+        - /etc/cloudflared/config.yml
+        - /etc/resolv.conf
+      register: cfg_stat
+
+    - name: tailscale 状态（若装）
+      ansible.builtin.command: tailscale status --self=false --peers=false
+      register: ts_status
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: 磁盘占用（根与 /data）
+      ansible.builtin.command: df -h / /data
+      register: df_out
+      changed_when: false
+      failed_when: false
+      check_mode: false
 
     - name: 报告
       ansible.builtin.debug:
         msg:
           host: "{{ inventory_hostname }}"
-          data_mount: "{{ data_mnt.stdout | default('NONE') }}"
-          k3s_unit_present: "{{ k3s_unit.rc == 0 }}"
+          ansible_host: "{{ ansible_host | default('') }}"
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel: "{{ ansible_kernel }}"
+          data_mount: "{{ data_mnt.stdout | default('NONE') | trim }}"
+          k3s_version: "{{ (k3s_ver.stdout_lines | default([]) | first) | default('NONE') }}"
+          k3s_unit: "{{ k3s_unit.stdout | default('NONE') | trim }}"
+          configs: "{{ cfg_stat.results | map(attribute='stat.path') | zip(cfg_stat.results | map(attribute='stat.exists')) | list }}"
+          tailscale: "{{ (ts_status.stdout | default('NONE') | trim) if ts_status.rc | default(1) == 0 else 'N/A (unreachable or not installed)' }}"
+          disk: "{{ df_out.stdout_lines | default([]) }}"

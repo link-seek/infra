@@ -1,0 +1,120 @@
+name: iac-cloudflare
+
+# Cloudflare DNS（Terraform）：
+#   plan  = 只读差异对账（不改线上、不改 state）
+#   adopt = 首次接管：临时生成 import 块 + apply（仅把现有记录 import 进 state；plan 已证 0 变更）
+#   apply = 应用 dns.tf 的配置变更（人工 confirm 后）
+# state 存 OBS（backend.tf），凭据 PROD_HCLOUD_AK/SK；CF token 用 CF_PARENT_TOKEN。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "plan=只读；adopt=首次import；apply=应用变更"
+        required: true
+        default: plan
+        type: choice
+        options: [plan, adopt, apply]
+      confirm:
+        description: "非 plan 模式必须输入 yes 才执行"
+        required: false
+        default: "no"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iac-cloudflare
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.PROD_HCLOUD_AK }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PROD_HCLOUD_SK }}
+      TF_VAR_cloudflare_api_token: ${{ secrets.CF_PARENT_TOKEN }}
+      CF_API_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+          terraform_wrapper: false
+
+      - name: 危险模式需 confirm=yes
+        if: inputs.mode != 'plan'
+        run: |
+          [ "${{ inputs.confirm }}" = "yes" ] || { echo "拒绝：mode=${{ inputs.mode }} 需要 confirm=yes"; exit 1; }
+
+      - name: terraform init（OBS S3 backend）
+        working-directory: iac/terraform/cloudflare
+        run: terraform init -input=false
+
+      - name: 枚举 DNS 记录 → import 块（仅 adopt）
+        if: inputs.mode == 'adopt'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, json, re, urllib.request
+          token = os.environ["CF_API_TOKEN"]
+          zones = ["xieyucheng.top", "linkseek.net.cn", "yingxin.net.cn"]
+          def api(path):
+              req = urllib.request.Request("https://api.cloudflare.com/client/v4" + path,
+                                           headers={"Authorization": "Bearer " + token})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.load(r)
+          def slug(s): return re.sub(r'[^a-zA-Z0-9_]+', '_', s).strip('_')
+          blocks = []
+          for z in zones:
+              zr = api(f"/zones?name={z}")
+              if not zr.get("result"): print("no zone", z); continue
+              zid = zr["result"][0]["id"]
+              page, recs = 1, []
+              while True:
+                  d = api(f"/zones/{zid}/dns_records?per_page=100&page={page}")
+                  recs += d.get("result") or []
+                  if page >= ((d.get("result_info") or {}).get("total_pages") or 1): break
+                  page += 1
+              # 按 name+type+content 排序，保证与 dns.tf 生成时命名稳定一致较优（尽力）
+              for i, r in enumerate(recs):
+                  blocks.append(f'import {{\n  to = cloudflare_dns_record.{slug(z)}_{i}\n  id = "{zid}/{r["id"]}"\n}}\n')
+          open("iac/terraform/cloudflare/imports.auto.tf", "w").write("\n".join(blocks))
+          print("import blocks:", len(blocks))
+          PY
+
+      - name: plan
+        working-directory: iac/terraform/cloudflare
+        run: |
+          set +e
+          if [ "${{ inputs.mode }}" = "apply" ]; then
+            terraform plan -input=false -out=tfplan
+          else
+            terraform plan -input=false
+          fi
+          echo "PLAN_EXIT=$?"
+
+      - name: adopt（import 现有记录进 state）
+        if: inputs.mode == 'adopt'
+        working-directory: iac/terraform/cloudflare
+        run: |
+          set -euo pipefail
+          terraform apply -auto-approve -input=false
+          rm -f imports.auto.tf
+          echo "adopt done, import blocks removed"
+
+      - name: apply（应用配置变更）
+        if: inputs.mode == 'apply'
+        working-directory: iac/terraform/cloudflare
+        run: terraform apply -auto-approve -input=false tfplan
+
+      - name: 收尾 plan（adopt/apply 后确认无漂移）
+        if: inputs.mode != 'plan'
+        working-directory: iac/terraform/cloudflare
+        run: |
+          set +e
+          terraform plan -input=false -detailed-exitcode -no-color | tail -30
+          rc=${PIPESTATUS[0]}
+          echo "POST_PLAN_EXIT=$rc (0=无差异, 2=有差异)"
+          rm -f imports.auto.tf tfplan
