@@ -1,0 +1,45 @@
+# Infisical 主服务（钉 hw21；env 走 out-of-git Secret infisical-env）
+apiVersion: v1
+kind: Service
+metadata:
+  name: infisical
+  namespace: infisical
+spec:
+  selector: {app: infisical}
+  ports:
+    - {port: 8080, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infisical
+  namespace: infisical
+  labels: {app: infisical}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: infisical}
+  template:
+    metadata:
+      labels: {app: infisical}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
+      containers:
+        - name: infisical
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/infisical@sha256:ef645c5c17c61f928a75a18c1192cb0b24a5140fb7de6bfa24e717714c8fa8dd
+          envFrom:
+            - secretRef: {name: infisical-env}
+          env:
+            - {name: NODE_ENV, value: production}
+          ports:
+            - {containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /api/status, port: 8080}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 12
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}

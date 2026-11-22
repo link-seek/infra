@@ -1,0 +1,57 @@
+# Infisical 的 PostgreSQL（钉 hw21，数据放本地 /data；DB 不放 NFS）
+apiVersion: v1
+kind: Service
+metadata:
+  name: infisical-postgres
+  namespace: infisical
+spec:
+  selector: {app: infisical-postgres}
+  ports:
+    - {port: 5432, targetPort: 5432}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infisical-postgres
+  namespace: infisical
+  labels: {app: infisical-postgres}
+spec:
+  replicas: 1
+  # 单副本 + 本地盘：必须 Recreate
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: infisical-postgres}
+  template:
+    metadata:
+      labels: {app: infisical-postgres}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
+      initContainers:
+        - name: fix-perm
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/postgres@sha256:e7d9e6aac7fe3232f7661da103aebc0ce38b04105b46af5e9edd5ef6bc343f20
+          command: ["sh", "-c", "mkdir -p /pg && chown -R 999:999 /pg && chmod 700 /pg"]
+          securityContext: {runAsUser: 0}
+          volumeMounts:
+            - {name: pgdata, mountPath: /pg}
+      containers:
+        - name: postgres
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/postgres@sha256:e7d9e6aac7fe3232f7661da103aebc0ce38b04105b46af5e9edd5ef6bc343f20
+          envFrom:
+            - secretRef: {name: infisical-env}
+          env:
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports:
+            - {containerPort: 5432}
+          volumeMounts:
+            - {name: pgdata, mountPath: /var/lib/postgresql/data}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "infisical"]}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 1Gi}
+      volumes:
+        - name: pgdata
+          hostPath: {path: /data/infisical/pg, type: DirectoryOrCreate}
