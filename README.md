@@ -5,7 +5,7 @@
 ## 原则
 
 1. **真值进 git**：节点参数、路由、DNS、ACL、镜像白名单等以仓内声明文件为准，commit diff 即审计底账。
-2. **密钥不进仓**：Tailscale / SSH / Cloudflare / 云 AK 等走 org secrets 或 SOPS（age `sops-age`）；极少数运行时 Secret（如 `litellm-env`、opencode 的 `opencode-*-env`）在集群内直接建、不入库。
+2. **密钥不进仓**：Tailscale / SSH / Cloudflare / 云 AK 等走 GitHub org secrets；应用运行时 Secret（`litellm-env`、`opencode-*-env`、`browserless-env`、`erpnext` 等）走自建 Infisical（`k8s/infisical`），由 Infisical Operator 按 `k8s/infisical-apps/*` 的 `InfisicalSecret` 同步成 k8s Secret，仓库不留密文；Traefik ACME 证书 token 暂仍用 SOPS（age `sops-age`）。
 3. **GitOps**：合 PR → CI 打包 OCI 制品 → 集群 Flux 自动对账（见下）。改仓即部署。
 
 ## 部署模型（Gitless GitOps）
