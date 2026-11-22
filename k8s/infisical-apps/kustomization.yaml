@@ -6,3 +6,4 @@ resources:
   - opencode-yingxin.yaml
   - opencode-team.yaml
   - erpnext.yaml
+  - browserless.yaml
