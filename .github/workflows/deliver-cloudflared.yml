@@ -82,11 +82,23 @@ jobs:
           # 末条允许无 hostname（Cloudflare catch-all 规范）；其余必须 hostname+service 双全
           assert isinstance(want, list) and all("service" in r for r in want), "ingress 声明格式错"
           assert all("hostname" in r for r in want[:-1]), "ingress 声明格式错（末条外缺 hostname）"
-          cfg["ingress"] = want
-          cfg["protocol"] = "http2"
-          open(cfg_path, "w").write(yaml.safe_dump(cfg, default_flow_style=False))
-          print(f"ingress-merged: {len(want)} 条，protocol=http2")
+          old_ingress = cfg.get("ingress")
+          old_proto = cfg.get("protocol")
+          changed = (old_ingress != want) or (old_proto != "http2")
+          if changed:
+              cfg["ingress"] = want
+              cfg["protocol"] = "http2"
+              open(cfg_path, "w").write(yaml.safe_dump(cfg, default_flow_style=False))
+              print("ingress-merged: %d 条，protocol=http2 (changed)" % len(want))
+          else:
+              print("NOCHANGE: ingress 与 protocol 无变化")
+          open("/tmp/cf-nochange", "w").write("1" if not changed else "0")
           PYEOF
+          if [ "$(cat /tmp/cf-nochange 2>/dev/null || echo 0)" = "1" ]; then
+            echo "no-change: 跳过 restart（#262 diff 门）"
+            rm -f /tmp/ci-tunnel-ingress.yaml /tmp/ci-tunnel-expect.txt
+            exit 0
+          fi
           systemctl restart cloudflared && echo "restarted"
           sleep 20
           # 验证：主域/opencode 回温＋网关入口 200；已下线域名确认不再路由（warn-only，远端 PUT/边缘传播有延迟）

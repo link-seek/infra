@@ -199,14 +199,23 @@ jobs:
           else:
               want = want + [{'service': 'http_status:404'}]
           json.dump({'config': {'ingress': want}}, open('/tmp/newcfg.json', 'w'))
+          remote = (t.get('config') or {}).get('ingress') or []
+          def _norm(rs):
+              return sorted((r.get('hostname'), r.get('service'), json.dumps(r.get('path', ''), sort_keys=True)) for r in rs)
+          same = _norm(remote) == _norm(want)
+          open('/tmp/trr-nochange', 'w').write('1' if same else '0')
           hosts = [r.get('hostname', '(catch-all)') for r in want]
-          print('declared ingress:', hosts)
+          print('declared ingress:', hosts, '| remote_match:', same)
           EOF
-          curl -s -X PUT -H "Authorization: Bearer $CFTOK" \
-            -H "Content-Type: application/json" \
-            --data @/tmp/newcfg.json \
-            "https://api.cloudflare.com/client/v4/accounts/${{ steps.acct.outputs.account }}/cfd_tunnel/b759dba6-b698-4a4f-a019-0d6b2d08cf99/configurations" \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print('PUT success:', d.get('success'), json.dumps(d.get('errors'))[:300] if not d.get('success') else '')"
+          if [ "$(cat /tmp/trr-nochange 2>/dev/null || echo 0)" = "1" ]; then
+            echo "no-change: 远端路由与声明一致，跳过 PUT（#262 diff 门）"
+          else
+            curl -s -X PUT -H "Authorization: Bearer $CFTOK" \
+              -H "Content-Type: application/json" \
+              --data @/tmp/newcfg.json \
+              "https://api.cloudflare.com/client/v4/accounts/${{ steps.acct.outputs.account }}/cfd_tunnel/b759dba6-b698-4a4f-a019-0d6b2d08cf99/configurations" \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); print('PUT success:', d.get('success'), json.dumps(d.get('errors'))[:300] if not d.get('success') else '')"
+          fi
 
       - name: 验证路由（llm-trial 已摘＋litellm 存活）
         if: always()
