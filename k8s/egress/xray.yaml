@@ -1,5 +1,10 @@
-# xray：从 vm-proxy 主机 systemd 迁入 k3s（hostNetwork+privileged，钉 vm-proxy）。
-# 配置含 UUID/私钥：不入 git，用集群内 egress/xray-config Secret（同 litellm-env 模式，从主机配置直接建）。
+# xray：REALITY/VLESS 多出口代理，运行在 k3s（hostNetwork+privileged，钉 vm-proxy）。
+# 2026-11-22 从 vm-proxy host systemd 迁入。配置含 UUID/私钥：不入 git，用集群内 egress/xray-config Secret。
+#
+# ⚠️ 两个迁移血泪点（勿改）：
+# 1) 镜像版本必须锁定 26.3.27（= 主机现网原版）。曾用 latest(26.11.9) → REALITY 握手失败、手机 TLS handshake timeout。
+# 2) dnsPolicy 必须 Default（= 节点自身 resolv.conf/systemd-resolved）。用 ClusterFirstWithHostNet 会走集群 DNS，
+#    实测把部分域名（如 www.gstatic.com）解析成错误/污染 IP（北京 114.250.x），导致隧道出口 dial 死连、握手后卡超时。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +26,7 @@ spec:
         app: xray
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       nodeSelector:
         kubernetes.io/hostname: vm-proxy
       tolerations:
@@ -31,7 +36,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: xray
-          image: ghcr.io/xtls/xray-core@sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab
+          image: ghcr.io/xtls/xray-core@sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7
           # 显式指定配置文件，避免叠加镜像内置默认配置。
           args: ["run", "-c", "/config/config.json"]
           securityContext:
@@ -44,10 +49,12 @@ spec:
           resources:
             requests: {cpu: 50m, memory: 32Mi}
             limits: {cpu: 500m, memory: 256Mi}
+          # xray 启动要加载 geoip/geosite(~15s) 后才监听端口，就绪探针给足时间。
           readinessProbe:
             tcpSocket: {port: 443}
-            initialDelaySeconds: 3
-            periodSeconds: 10
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
       volumes:
         - name: cfg
           secret:
