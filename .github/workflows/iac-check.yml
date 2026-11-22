@@ -1,0 +1,39 @@
+name: iac-check
+
+# IaC 只读校验门（不写线上）：terraform fmt/validate（Cloudflare）+ ansible 语法检查。
+# 真正的 drift（terraform plan / ansible --check）在资源接管后另开定时任务。
+on:
+  pull_request:
+    paths:
+      - 'iac/**'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: iac/terraform/cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+      - name: fmt
+        run: terraform fmt -check -recursive -diff
+      - name: init (no backend)
+        run: terraform init -backend=false -input=false
+      - name: validate
+        run: terraform validate
+  ansible:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: iac/ansible
+    steps:
+      - uses: actions/checkout@v4
+      - name: install
+        run: pip install 'ansible-core>=2.16' ansible-lint
+      - name: syntax-check
+        run: ansible-playbook --syntax-check playbooks/check-baseline.yml

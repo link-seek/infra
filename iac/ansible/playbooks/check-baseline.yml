@@ -1,0 +1,24 @@
+---
+# 只读基线巡检（--check 模式下不改变任何东西；用 assert/command 采集现状做 drift 报告）。
+- name: host baseline (read-only)
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: /data 挂载存在
+      ansible.builtin.command: findmnt -no SOURCE /data
+      register: data_mnt
+      changed_when: false
+      failed_when: false
+
+    - name: k3s 单元存在（server/agent）
+      ansible.builtin.command: systemctl cat k3s 2>/dev/null || systemctl cat k3s-agent 2>/dev/null
+      register: k3s_unit
+      changed_when: false
+      failed_when: false
+
+    - name: 报告
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          data_mount: "{{ data_mnt.stdout | default('NONE') }}"
+          k3s_unit_present: "{{ k3s_unit.rc == 0 }}"
