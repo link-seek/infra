@@ -30,6 +30,7 @@
 | vm-proxy | — / 100.73.221.121 | edge：东京出口（egress squid） |
 
 - 节点级参数（`node-ip` / `node-external-ip` / `flannel-iface` / MTU）真相：**`node/node-config.yaml`**（workflow `k3s-node-config.yml` 做 verify/apply 漂移检查）。
+- 集群级参数与版本真相：**`node/k3s-cluster.yaml`** + **`node/k3s-version`**；`scripts/render-k3s-config.py` 合并两者 + node-config 渲染每台 server 的 `config.yaml`，由 workflow `k3s-config-reconcile.yml` 做 render/verify/apply（token 从目标机就地保留，不入仓）。
 - etcd 每 6h 打快照直传 OBS 华北9 桶（CronJob，`k3s-etcd-obs.yml`）；恢复演练 `k3s-restore-drill.yml`。
 
 ## 入口 / DNS
@@ -56,6 +57,9 @@
 clusters/k3s/            # Flux：flux-system + 各应用 Kustomization（apps-*.yaml）+ docker-images 源（git-docker-images.yaml）
 k8s/                     # 底座清单：egress / traefik-edge / ci-deployer / reloader / etcd-backup / tailscale-operator / restore
 node/node-config.yaml     # 节点参数真相（k3s-node-config.yml）
+node/k3s-cluster.yaml     # 集群级参数真相（k3s-config-reconcile.yml）
+node/k3s-version          # k3s 版本单一来源
+scripts/render-k3s-config.py  # 合并声明渲染每台 server config.yaml
 iac/terraform/cloudflare/ # Cloudflare DNS/zone 声明（Terraform）——唯一 DNS 源（iac-cloudflare.yml）
 acl/policy.hujson  # tailnet ACL 真相（ts-acl-apply.yml）
 edge/registries/         # 镜像仓映射 + 境外镜像 allowlist（image-policy.yml）
