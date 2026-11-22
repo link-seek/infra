@@ -1,0 +1,104 @@
+name: iam-agency-fix
+
+# 临时流水线：用 PROD_HCLOUD_AK/SK 操作 IAM（委托 k3s-etcd-obs）。
+# mode=probe：只读，打印 domain / 委托 / 已附加策略 / OBS 系统策略候选。
+# mode=fix  ：把指定 policy_id 附加到委托（agency 默认按名称 k3s-etcd-obs 查）。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe=只读；fix=附加策略"
+        required: true
+        default: probe
+        type: choice
+        options: [probe, fix]
+      policy_id:
+        description: "fix: 要附加到委托的策略ID"
+        required: false
+        default: ""
+      agency_id:
+        description: "可选：委托ID（默认按名称 k3s-etcd-obs 查）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AK: ${{ secrets.PROD_HCLOUD_AK }}
+      SK: ${{ secrets.PROD_HCLOUD_SK }}
+    steps:
+      - name: install hcloud (KooCLI)
+        run: |
+          set -e
+          ok=0
+          for u in \
+            https://cn-north-4-hdn-koocli.obs.cn-north-4.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz \
+            https://cn-north-4-koocli.obs.cn-north-4.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz \
+            https://obs.cn-north-4.myhuaweicloud.com/koocli/cli/latest/huaweicloud-cli-linux-amd64.tar.gz ; do
+            if curl -fsSL --retry 4 --retry-delay 3 "$u" -o /tmp/hcloud.tgz; then ok=1; echo "got $u"; break; fi
+          done
+          [ "$ok" = 1 ] || { echo "FAIL: KooCLI 下载失败"; exit 1; }
+          mkdir -p /tmp/hc && tar xzf /tmp/hcloud.tgz -C /tmp/hc
+          HC=$(find /tmp/hc -type f -name hcloud | head -1); echo "HC=$HC"
+          install -m755 "$HC" /usr/local/bin/hcloud
+          hcloud version
+
+      - name: probe or fix
+        run: |
+          set +e
+          hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-4 --cli-mode=AKSK
+          echo "=== KeystoneListAuthDomains ==="
+          hcloud iam KeystoneListAuthDomains --cli-region=cn-north-4 > /tmp/domains.json 2>/tmp/domains.err; cat /tmp/domains.json | head -c 2000; echo; echo "err:"; cat /tmp/domains.err
+          DID=$(python3 -c "import json;d=json.load(open('/tmp/domains.json'));ds=d.get('domains') or [];print(ds[0].get('id','') if ds else '')" 2>/dev/null)
+          echo "DID=$DID"
+          [ -n "$DID" ] && hcloud configure set --cli-domain-id="$DID" >/dev/null 2>&1
+          echo
+          echo "=== ListAgenciesV5 ==="
+          hcloud iam ListAgenciesV5 --cli-region=cn-north-4 > /tmp/agencies.json 2>/tmp/agencies.err; cat /tmp/agencies.json | head -c 4000; echo; echo "err:"; cat /tmp/agencies.err
+          AID="${{ inputs.agency_id }}"
+          if [ -z "$AID" ]; then
+            AID=$(python3 -c "import json;d=json.load(open('/tmp/agencies.json'));a=d.get('agencies') or [];print(next((x.get('agency_id') or x.get('id') for x in a if (x.get('agency_name') or x.get('name'))=='k3s-etcd-obs'),''))" 2>/dev/null)
+          fi
+          echo "AID(k3s-etcd-obs)=$AID"
+          if [ -n "$AID" ]; then
+            echo "=== GetAgencyV5 ==="; hcloud iam GetAgencyV5 --agency_id="$AID" --cli-region=cn-north-4 2>&1 | head -c 3000; echo
+            echo "=== ListAttachedAgencyPoliciesV5 ==="; hcloud iam ListAttachedAgencyPoliciesV5 --agency_id="$AID" --cli-region=cn-north-4 > /tmp/attached.json 2>&1; cat /tmp/attached.json | head -c 4000; echo
+            echo "=== 每个已附加策略的文档 ==="
+            python3 - "$AID" <<'PY'
+          import json,subprocess,sys
+          aid=sys.argv[1]
+          try: d=json.load(open('/tmp/attached.json'))
+          except Exception: d={}
+          items=d.get('attached_policies') or d.get('policies') or d.get('roles') or []
+          for it in items:
+              pid=it.get('policy_id') or it.get('id'); pname=it.get('policy_name') or it.get('name')
+              print('--- policy',pid,pname,it.get('policy_type'),'---')
+              g=subprocess.run(['hcloud','iam','GetPolicyV5','--policy_id',pid,'--cli-region','cn-north-4'],capture_output=True,text=True)
+              print(g.stdout[:1500])
+              v=subprocess.run(['hcloud','iam','ListPolicyVersionsV5','--policy_id',pid,'--cli-region','cn-north-4'],capture_output=True,text=True)
+              print('versions:',v.stdout[:800])
+              try:
+                  vd=json.loads(v.stdout); vers=vd.get('versions') or []
+                  if vers:
+                      vid=sorted(vers,key=lambda x:x.get('created_at',''),reverse=True)[0].get('version_id')
+                      gv=subprocess.run(['hcloud','iam','GetPolicyVersionV5','--policy_id',pid,'--version_id',vid,'--cli-region','cn-north-4'],capture_output=True,text=True)
+                      print('doc:',gv.stdout[:3000])
+              except Exception as e: print('ver parse err',e)
+          PY
+          fi
+          echo
+          echo "=== 系统策略候选（OBS）==="
+          hcloud iam ListPoliciesV5 --policy_type=system --cli-region=cn-north-4 > /tmp/syspol.json 2>&1
+          python3 -c "import json;d=json.load(open('/tmp/syspol.json'));ps=d.get('policies') or [];[print(p.get('policy_id'),p.get('policy_name')) for p in ps if 'obs' in (p.get('policy_name') or '').lower()]" 2>/dev/null | head -40
+          echo
+          if [ "${{ inputs.mode }}" = "fix" ]; then
+            echo "=== FIX: AttachAgencyPolicyV5 policy=${{ inputs.policy_id }} to agency=$AID ==="
+            [ -n "$AID" ] && [ -n "${{ inputs.policy_id }}" ] || { echo "FAIL: 缺 agency_id 或 policy_id"; exit 1; }
+            hcloud iam AttachAgencyPolicyV5 --agency_id="$AID" --policy_id="${{ inputs.policy_id }}" --cli-region=cn-north-4 2>&1 | head -c 2000; echo
+            echo "=== 复核 attached ==="; hcloud iam ListAttachedAgencyPoliciesV5 --agency_id="$AID" --cli-region=cn-north-4 2>&1 | head -c 4000; echo
+          fi
