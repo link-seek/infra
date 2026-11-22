@@ -25,6 +25,8 @@ spec:
     metadata:
       labels: {app: infisical-postgres}
     spec:
+      imagePullSecrets:
+        - name: swr-pull
       nodeSelector:
         kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
       initContainers:
