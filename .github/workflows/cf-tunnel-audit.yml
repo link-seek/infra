@@ -1,5 +1,4 @@
 name: cf-tunnel-audit
-# 只读：列账户下所有 CF 隧道状态/连接/ingress + DNS CNAME→tunnel 映射。用完即删。
 on:
   workflow_dispatch: {}
 permissions:
@@ -11,11 +10,11 @@ jobs:
     env:
       CF_PARENT_TOKEN: ${{ secrets.CF_PARENT_TOKEN }}
     steps:
-      - name: audit tunnels
+      - name: audit
         run: |
           set -euo pipefail
           PARENT="$(printf '%s' "${CF_PARENT_TOKEN:-}" | tr -d '\r\n ')"
-          [ -n "$PARENT" ] || { echo "FAIL: CF_PARENT_TOKEN 为空"; exit 1; }
+          [ -n "$PARENT" ] || { echo "FAIL: empty"; exit 1; }
           echo "::add-mask::$PARENT"
           CF_PARENT_TOKEN_SANITIZED="$PARENT" python3 - <<'PY'
           import json, os, urllib.parse, urllib.request, urllib.error
@@ -34,12 +33,10 @@ jobs:
                   except Exception: return e.code,{}
               except Exception as e:
                   return 0,{"success":False,"errors":[{"message":str(e)[:200]}]}
-          # account from zone
           st,r=call("GET","/zones?name="+urllib.parse.quote("xieyucheng.top"))
           if isinstance(r,dict) and r.get("success") and r.get("result"):
               ACCOUNT=(r["result"][0].get("account") or {}).get("id") or ACCOUNT
           print("account:",ACCOUNT)
-          # mint read token (tunnel read + dns read + zone read)
           st,r=call("GET","/accounts/%s/tokens/permission_groups?per_page=100"%ACCOUNT)
           groups=r.get("result") if isinstance(r.get("result"),list) else []
           by={str(g.get("name","")).lower():g for g in groups}
@@ -58,30 +55,35 @@ jobs:
           if acct_ids: pol.append({"effect":"allow","resources":{"com.cloudflare.api.account.%s"%ACCOUNT:"*"},"permission_groups":[{"id":i} for i in acct_ids]})
           exp=(datetime.now(timezone.utc)+timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
           st,r=call("POST","/accounts/%s/tokens"%ACCOUNT,{"name":"cf-tunnel-audit","policies":pol,"expires_on":exp})
-          if not (isinstance(r,dict) and r.get("success")): print("FAIL mint",st,r.get("errors")); raise SystemExit(1)
           TOK=str((r.get("result") or {}).get("value") or ""); print("::add-mask::%s"%TOK)
-          print("===== TUNNELS =====")
-          st,r=call("GET","/accounts/%s/cfd_tunnel?is_deleted=false&per_page=100"%ACCOUNT,tok=TOK)
+          print("===== ALL TUNNELS =====")
+          st,r=call("GET","/accounts/%s/cfd_tunnel?per_page=100"%ACCOUNT,tok=TOK)
           tuns=r.get("result") if isinstance(r.get("result"),list) else []
+          print("count:",len(tuns))
           for t in tuns:
-              tid=t.get("id"); nm=t.get("name"); stt=t.get("status")
+              tid=t.get("id")
               st2,c=call("GET","/accounts/%s/cfd_tunnel/%s/connections"%(ACCOUNT,tid),tok=TOK)
               conns=c.get("result") if isinstance(c,dict) and isinstance(c.get("result"),list) else []
               st3,cfg=call("GET","/accounts/%s/cfd_tunnel/%s/configurations"%(ACCOUNT,tid),tok=TOK)
-              ing=[]
-              try: ing=(cfg["result"]["config"]["ingress"]) or []
+              hosts=[]
+              try: hosts=[x.get("hostname","(catch-all)") for x in cfg["result"]["config"]["ingress"]]
               except Exception: pass
-              hosts=[x.get("hostname","(catch-all)") for x in ing]
-              print(f"TUNNEL {tid} name={nm} status={stt} conns={len(conns)} ingress({len(hosts)})={hosts}")
-          print("===== DNS CNAME->cfargotunnel =====")
+              print(f"TUNNEL {tid} name={t.get('name')} status={t.get('status')} conns={len(conns)} ingress={hosts}")
+          for probe in ["fc0b47fa-3339-4985-a2ba-d85574e34ace"]:
+              st,r=call("GET","/accounts/%s/cfd_tunnel/%s"%(ACCOUNT,probe),tok=TOK)
+              print(f"PROBE {probe} http={st} result={'found name='+str((r.get('result') or {}).get('name')) if isinstance(r,dict) and r.get('result') else 'NOT_FOUND'}")
+          print("===== ALL ZONES =====")
           st,z=call("GET","/zones?account.id=%s&per_page=50"%ACCOUNT,tok=TOK)
           zones=z.get("result") if isinstance(z.get("result"),list) else []
+          print("zones:",[x["name"] for x in zones])
+          print("===== CNAME / cfargotunnel RECORDS =====")
           for zn in zones:
               zid=zn["id"]; zname=zn["name"]
-              st,recs=call("GET","/zones/%s/dns_records?type=CNAME&per_page=200"%zid,tok=TOK)
-              for rec in (recs.get("result") or []):
-                  ct=str(rec.get("content",""))
-                  if "cfargotunnel.com" in ct:
-                      print(f"DNS {rec['name']} -> {ct.split('.')[0]}")
+              st,recs=call("GET","/zones/%s/dns_records?per_page=200"%zid,tok=TOK)
+              rows=recs.get("result") or []
+              for rec in rows:
+                  ct=str(rec.get("content","")); ty=rec.get("type")
+                  if ty=="CNAME" or "cfargotunnel.com" in ct:
+                      print(f"DNS {zname}: {rec['name']} {ty} -> {ct} proxied={rec.get('proxied')}")
           print("AUDIT DONE")
           PY
