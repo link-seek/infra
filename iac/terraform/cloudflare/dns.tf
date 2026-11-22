@@ -6,7 +6,7 @@
 #   0 to add, 0 to change, 0 to destroy`（即配置=现网，无差异）。
 #
 # ⚠️ 接管后本文件是这些 DNS 记录的唯一真相源：
-#   - DNS 唯一源即本文件（旧 dns/records.json 与 dns-apply 脚本已删除）。
+#   - 不要再改 dns/records*.json 用 dns-apply 去改同一批记录（会造成双源头冲突）。
 #   - DNS 变更流程：改本文件 → CI 跑 `terraform plan`（只读、人工确认）→ apply。
 #
 # 首次接管（把现有记录 import 进 state）：见 iac/README.md 的 "接管" 一节，
@@ -85,27 +85,6 @@ resource "cloudflare_dns_record" "linkseek_net_cn_3" {
   data                    = null
   include_shadow_metadata = false
   name                    = "3003.linkseek.net.cn"
-  priority                = null
-  private_routing         = null
-  proxied                 = true
-  settings = {
-    flatten_cname = false
-    ipv4_only     = false
-    ipv6_only     = false
-  }
-  tags    = []
-  ttl     = 1
-  type    = "CNAME"
-  zone_id = "4cdd8779bc924de8f682abf0a765f51c"
-}
-
-# __generated__ by Terraform from "4cdd8779bc924de8f682abf0a765f51c/7a54558992d2344e3fb3a14333cf4ef5"
-resource "cloudflare_dns_record" "linkseek_net_cn_12" {
-  comment                 = null
-  content                 = "3525b0b2-08b0-43f1-bd63-c745f152d5d1.cfargotunnel.com"
-  data                    = null
-  include_shadow_metadata = false
-  name                    = "opencode-zen.linkseek.net.cn"
   priority                = null
   private_routing         = null
   proxied                 = true
@@ -519,27 +498,6 @@ resource "cloudflare_dns_record" "linkseek_net_cn_6" {
   zone_id = "4cdd8779bc924de8f682abf0a765f51c"
 }
 
-# __generated__ by Terraform from "4cdd8779bc924de8f682abf0a765f51c/dc93a9167f7cae153ca108f5bc171694"
-resource "cloudflare_dns_record" "linkseek_net_cn_11" {
-  comment                 = null
-  content                 = "fc0b47fa-3339-4985-a2ba-d85574e34ace.cfargotunnel.com"
-  data                    = null
-  include_shadow_metadata = false
-  name                    = "opencode.linkseek.net.cn"
-  priority                = null
-  private_routing         = null
-  proxied                 = true
-  settings = {
-    flatten_cname = false
-    ipv4_only     = false
-    ipv6_only     = false
-  }
-  tags    = []
-  ttl     = 1
-  type    = "CNAME"
-  zone_id = "4cdd8779bc924de8f682abf0a765f51c"
-}
-
 # __generated__ by Terraform from "f46e66f694af4a9e8f8830d0673822b9/0d5e559a954f067db20deacfa5c7ebab"
 resource "cloudflare_dns_record" "xieyucheng_top_0" {
   comment                 = null
@@ -706,27 +664,6 @@ resource "cloudflare_dns_record" "xieyucheng_top_10" {
   ttl     = 1
   type    = "CNAME"
   zone_id = "f46e66f694af4a9e8f8830d0673822b9"
-}
-
-# __generated__ by Terraform from "4cdd8779bc924de8f682abf0a765f51c/efafb7f5eff3e124cda84463a85bd8d0"
-resource "cloudflare_dns_record" "linkseek_net_cn_10" {
-  comment                 = null
-  content                 = "3525b0b2-08b0-43f1-bd63-c745f152d5d1.cfargotunnel.com"
-  data                    = null
-  include_shadow_metadata = false
-  name                    = "opencode-go.linkseek.net.cn"
-  priority                = null
-  private_routing         = null
-  proxied                 = true
-  settings = {
-    flatten_cname = false
-    ipv4_only     = false
-    ipv6_only     = false
-  }
-  tags    = []
-  ttl     = 1
-  type    = "CNAME"
-  zone_id = "4cdd8779bc924de8f682abf0a765f51c"
 }
 
 # __generated__ by Terraform from "4cdd8779bc924de8f682abf0a765f51c/9194a0cce97113b662da9d15466112cb"
