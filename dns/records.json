@@ -53,6 +53,15 @@
       "proxied": false,
       "state": "present",
       "comment": "erpnext trial：120 Caddy -> tailnet k3s erpnext:8080（ha-b/.69）"
+    },
+    {
+      "name": "home-oc.xieyucheng.top",
+      "type": "A",
+      "content": "120.77.76.20",
+      "ttl": 600,
+      "proxied": false,
+      "state": "present",
+      "comment": "home-oc：120 Traefik(TLS,le-prod) -> tailnet 100.69.220.112:4096（个人 PC opencode），DNS-only 直连"
     }
   ]
 }
