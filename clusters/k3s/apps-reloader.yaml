@@ -1,5 +1,5 @@
 # Flux Kustomization: reloader（stakater/reloader，SWR 重打镜像，不造轮子）。
-# SOPS+Flux 终局的自动 rollout 执行器：Secret（SOPS 解密落地）一变即按注解重启 Deployment。
+# Secret 变更自动 rollout 执行器：Secret（Infisical 等任意来源）一变即按注解重启 Deployment。
 # 策略 annotations：只动带 reloader.stakater.com/auto=true 的 Deployment，不影响其它栈。
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
