@@ -1,0 +1,46 @@
+# Infisical PostgreSQL 每日逻辑备份（官方推荐 pg_dump）。落到 hw21 /data/infisical/backups，保留 14 天。
+# 注意：ENCRYPTION_KEY（在 Secret infisical-env）必须另行离线备份——没有它，本 dump 恢复后也解不开密钥。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: infisical-pg-backup
+  namespace: infisical
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          imagePullSecrets:
+            - name: swr-pull
+          nodeSelector:
+            kubernetes.io/hostname: ecs-ies-euleros-jmupervm-xieyucheng
+          restartPolicy: Never
+          securityContext: {runAsUser: 0}
+          containers:
+            - name: pgdump
+              image: swr.cn-north-9.myhuaweicloud.com/link-seek/postgres:14-alpine
+              env:
+                - {name: PGHOST, value: infisical-postgres.infisical.svc.cluster.local}
+                - {name: PGUSER, value: infisical}
+                - {name: PGDATABASE, value: infisical}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: infisical-env, key: POSTGRES_PASSWORD}}
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  mkdir -p /backups
+                  pg_dump -Fc -f /backups/infisical-$TS.dump
+                  echo "dump-ok /backups/infisical-$TS.dump $(du -h /backups/infisical-$TS.dump | cut -f1)"
+                  find /backups -name 'infisical-*.dump' -mtime +14 -delete || true
+              volumeMounts:
+                - {name: backups, mountPath: /backups}
+          volumes:
+            - name: backups
+              hostPath: {path: /data/infisical/backups, type: DirectoryOrCreate}
