@@ -1,5 +1,5 @@
 {
-  "_doc": "全组织 DNS 声明（Cloudflare）。dns-apply.yml 只动这里声明的记录：present=保证存在且一致，absent=保证删除（删前比对 content，不一致则中止该条）。未列出的记录一律不动。",
+  "_doc": "⚠️ 本文件已非 DNS 事实源：DNS 现由 Terraform 接管（iac/terraform/cloudflare/dns.tf）。此处仅保留 llm-trial 记录作为 deliver-cloudflared 的隧道锚点参考（校验线上 cloudflared tunnel UUID 与 CNAME 目标一致），不再用于 apply。旧手工对账脚本 dns-apply 已退役。",
   "zone": "xieyucheng.top",
   "records": [
     {

@@ -74,10 +74,8 @@ jobs:
           [ -n "\$WANT" ] || { echo "FAIL: 取不到 cronjob digest"; exit 1; }
           if crictl images --digests 2>/dev/null | grep -q "\$WANT"; then echo "image cached: \$WANT"; else echo "WARN: digest \$WANT 未在 .69 缓存（Job 将用 imagePullSecrets 现拉，不阻断；真门禁是后续 REFRESH-OK）"; fi
           echo STAGE-apply
-          kubectl create secret docker-registry swr-pull -n kube-system \
-            --docker-server=swr.cn-north-9.myhuaweicloud.com \
-            --docker-username="$SWR_LOGIN_USER" --docker-password="$SWR_LOGIN_PASS" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          # swr-pull 已在 kube-system（集群常态存在）；缺则失败。避免依赖未传到远端的 SWR 变量（旧 bug）
+          kubectl -n kube-system get secret swr-pull >/dev/null 2>&1 || { echo "FAIL: kube-system/swr-pull 不存在"; exit 1; }
           kubectl apply -f k8s/etcd-backup/rbac.yaml
           kubectl apply -f k8s/etcd-backup/refresh-script.yaml
           kubectl apply -f k8s/etcd-backup/cronjob.yaml
