@@ -1,0 +1,17 @@
+---
+# k3s 公共文件角色：确保 registry 镜像映射与仓库声明一致。
+# 只写 registries.yaml，不碰 config.yaml（那由 k3s-config-reconcile 渲染）也不重启服务。
+- name: 确保 /etc/rancher/k3s 目录
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: 下发 registries.yaml（与仓内 edge/registries/registries.yaml 同步）
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../edge/registries/registries.yaml"
+    dest: /etc/rancher/k3s/registries.yaml
+    owner: root
+    group: root
+    mode: "0600"
+    backup: true
