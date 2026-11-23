@@ -1,0 +1,11 @@
+---
+baseline_packages:
+  - curl
+  - jq
+  - rsync
+  - tar
+  - ca-certificates
+
+# 部分节点（.69、vm-proxy）yum/apt 源不可达，装包会失败且重试很慢；默认**不做**包管理。
+# 需要装包时显式 -e baseline_manage_packages=true（best-effort，失败只告警不阻断）。
+baseline_manage_packages: false

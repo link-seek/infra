@@ -1,0 +1,40 @@
+# Tailscale 设备期望状态（真相源，一期：CI 模板 + 静态设备声明）
+#
+# tag 口径以 #752 总纲 v2 为准：只剩 hw/ali/oci/github/pc 五个（按来源），
+# user/mesh/guest/admin 等已退役；CI 只有需 kubectl 的 deploy runner 进网，一律 tag:github。
+# 规矩：
+#   - authKey 永不进仓：apply 时由 ts-mint 现签现填（见 ts/README.md）。
+#   - 只用 alpha0 最小稳定子集（version/authKey/hostname/locked/enabled/acceptDNS/acceptRoutes），
+#     serve/relay/VIP 等字段一律不用，等官方转正再议。
+#   - static 条目 verified:false 表示 tags 待首轮 ts-acl-apply verify 回填确认；
+#     reconcile 工作流对 verified:false 的条目只告警不强改（fail-closed）。
+#   - CI 临时机 hostname 动态（ci-*/k3s-drill-*），tags 在各 workflow 的 mint 体里定，
+#     此处只声明允许集合；模板见 ts/daemon.ci.json.tmpl，渲染用 ts/render.py。
+
+ci_conventions:
+  template: ts/daemon.ci.json.tmpl
+  allowed_tags: ["tag:github"]
+  routes: []                # 临时机不广播路由
+  hostname_prefixes: ["ci-", "k3s-drill-", "k3s-oauth-boot-"]
+
+static:
+  - hostname: mesh-hw-21
+    tailnet_ip: 100.100.246.95
+    tags: ["tag:hw"]
+    routes: []
+    verified: false
+  - hostname: mesh-hw-41
+    tailnet_ip: 100.73.182.4
+    tags: ["tag:hw"]
+    routes: []
+    verified: false
+  - hostname: mesh-hw-69
+    tailnet_ip: 100.93.119.21
+    tags: ["tag:hw"]
+    routes: []
+    verified: false
+  - hostname: mesh-ali-gz
+    tailnet_ip: 100.85.128.116
+    tags: ["tag:ali"]
+    routes: []
+    verified: false

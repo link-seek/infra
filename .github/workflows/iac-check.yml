@@ -36,4 +36,6 @@ jobs:
       - name: install
         run: pip install 'ansible-core>=2.16' ansible-lint
       - name: syntax-check
-        run: ansible-playbook --syntax-check playbooks/check-baseline.yml
+        run: |
+          ansible-playbook --syntax-check playbooks/check-baseline.yml
+          ansible-playbook --syntax-check site.yml
