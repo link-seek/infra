@@ -1,0 +1,24 @@
+name: odk-build-test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: clone + build mcp-server
+        run: |
+          set -e
+          git clone --depth 1 https://github.com/feimacode/open-design-agent-kit /src
+          cd /src
+          git rev-parse HEAD
+          npm ci --no-audit --no-fund
+          npm run compile -w packages/mcp-server
+          echo "=== out ==="; ls -l packages/mcp-server/out/
+          echo "=== contains OPEN_DESIGN_BROWSER_URL? ==="; grep -c "OPEN_DESIGN_BROWSER_URL" packages/mcp-server/out/index.js || true
+          echo "=== contains puppeteer.connect/browserURL? ==="; grep -oE "browserURL|puppeteer-core|connect\(" packages/mcp-server/out/index.js | sort -u | head
