@@ -18,17 +18,31 @@ jobs:
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
-      - name: 进网（user 身份）＋ 簇视角 ＋ egress 代理探测
+      - uses: actions/checkout@v4
+      - name: 签 key（github 身份，ephemeral 1h）
+        id: mint
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
-          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
-            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
-          [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
+          RESP="$(mktemp)"
+          CODE="$(curl -sS -m 30 -o "$RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys)"
+          MINTED="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))" < "$RESP")"
+          if [ -z "$MINTED" ]; then echo "FAIL: user key mint 失败 HTTP=$CODE body=$(head -c 300 "$RESP")"; shred -u "$RESP"; exit 1; fi
+          shred -u "$RESP"
           echo "::add-mask::$MINTED"
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edgeprobe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          echo "key=$MINTED" >> "$GITHUB_OUTPUT"
+          unset MINTED
+      - name: 进网（声明式 conffile 试点）
+        uses: ./.github/actions/ts-bringup
+        with:
+          auth_key: ${{ steps.mint.outputs.key }}
+          hostname: ci-edgeprobe-${{ github.run_id }}
+          mode: conffile
+      - name: 簇视角 ＋ egress 代理探测
+        run: |
           echo "== 簇节点（.69 视角） =="
           sudo tailscale ssh root@100.93.119.21 'kubectl get nodes -o wide'
           echo "== egress 出口代理（.69 视角） =="

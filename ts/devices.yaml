@@ -1,5 +1,7 @@
 # Tailscale 设备期望状态（真相源，一期：CI 模板 + 静态设备声明）
 #
+# tag 口径以 #752 总纲 v2 为准：只剩 hw/ali/oci/github/pc 五个（按来源），
+# user/mesh/guest/admin 等已退役；CI 只有需 kubectl 的 deploy runner 进网，一律 tag:github。
 # 规矩：
 #   - authKey 永不进仓：apply 时由 ts-mint 现签现填（见 ts/README.md）。
 #   - 只用 alpha0 最小稳定子集（version/authKey/hostname/locked/enabled/acceptDNS/acceptRoutes），
@@ -11,7 +13,7 @@
 
 ci_conventions:
   template: ts/daemon.ci.json.tmpl
-  allowed_tags: ["tag:github", "tag:mesh", "tag:user"]
+  allowed_tags: ["tag:github"]
   routes: []                # 临时机不广播路由
   hostname_prefixes: ["ci-", "k3s-drill-", "k3s-oauth-boot-"]
 
