@@ -1,0 +1,9 @@
+[
+  {"slug": "litellm",             "identity": "litellm-operator",             "role": "viewer", "ua": {"name": "litellm-ua",             "namespace": "litellm"}},
+  {"slug": "opencode-team",       "identity": "opencode-team-operator",       "role": "viewer", "ua": {"name": "opencode-team-ua",       "namespace": "opencode-team"}},
+  {"slug": "opencode-xieyucheng", "identity": "opencode-xieyucheng-operator", "role": "viewer", "ua": {"name": "opencode-xieyucheng-ua", "namespace": "opencode-xieyucheng"}},
+  {"slug": "opencode-yingxin",    "identity": "opencode-yingxin-operator",    "role": "viewer", "ua": {"name": "opencode-yingxin-ua",    "namespace": "opencode-yingxin"}},
+  {"slug": "browserless",         "identity": "browserless-operator",         "role": "viewer", "ua": {"name": "browserless-ua",         "namespace": "opencode-team"}},
+  {"slug": "erpnext",             "identity": "erpnext-operator",             "role": "viewer", "ua": {"name": "erpnext-ua",             "namespace": "erpnext"}},
+  {"slug": "traefik-edge",        "identity": "traefik-operator",             "role": "admin",  "ua": {"name": "traefik-ua",             "namespace": "kube-system"}}
+]

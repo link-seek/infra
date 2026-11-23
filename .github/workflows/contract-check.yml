@@ -1,0 +1,20 @@
+name: contract-check
+
+# 声明式契约校验：infra pin 的 artifact digest 必须真实存在于 SWR。
+# 全量 PR 触发（无 paths 过滤），可进 branch protection required checks。
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify artifact digest exists
+        run: python3 scripts/contract_check.py
