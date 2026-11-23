@@ -1,0 +1,23 @@
+name: swr-delete-probe
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+    steps:
+      - name: install skopeo
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+      - name: login
+        run: echo "$SWR_LOGIN_PASS" | skopeo login swr.cn-north-9.myhuaweicloud.com -u "$SWR_LOGIN_USER" --password-stdin
+      - name: probe delete permission (nonexistent tag)
+        run: |
+          set +e
+          out=$(skopeo delete docker://swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools:__probe_nonexistent__ 2>&1)
+          rc=$?
+          echo "rc=$rc"
+          echo "$out" | tail -5
