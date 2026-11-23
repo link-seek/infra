@@ -67,7 +67,7 @@ jobs:
           set -uo pipefail
           MODE="${MODE:-verify}"; RESTART="${RESTART:-no}"
           echo "MODE=$MODE RESTART=$RESTART"
-          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || true
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || { echo "FAIL: pyyaml 不可用"; exit 1; }
           echo "== 声明概览 =="; python3 scripts/render-k3s-config.py --list
           NODES_EXPECT="$(python3 -c "import yaml;print(len(yaml.safe_load(open('node/node-config.yaml'))['hosts']))")"
           echo "NODES_EXPECT=$NODES_EXPECT"
@@ -81,6 +81,8 @@ jobs:
               if h.get('role','server') == 'server':
                   print('\t'.join([h['name'], h['ssh']]))
           PY
+          [ -s /tmp/servers.tsv ] || { echo "FAIL: servers.tsv 为空（node-config.yaml 解析失败？）"; exit 1; }
+          echo "servers: $(wc -l < /tmp/servers.tsv)"
 
           FAIL=0
           while IFS=$'\t' read -r NAME SSH; do
@@ -90,7 +92,7 @@ jobs:
               python3 scripts/render-k3s-config.py --host "$NAME"; continue
             fi
             ssh $SOPT root@$SSH 'cat /etc/rancher/k3s/config.yaml' > /tmp/cur.yaml 2>/dev/null || { echo "FAIL: 读不到 $NAME config.yaml"; FAIL=1; continue; }
-            python3 scripts/render-k3s-config.py --host "$NAME" --json > /tmp/want.json
+            python3 scripts/render-k3s-config.py --host "$NAME" --json > /tmp/want.json || { echo "FAIL: render $NAME"; FAIL=1; continue; }
             if ! python3 - "$NAME" <<'PY'
           import json,sys,yaml
           name=sys.argv[1]
@@ -117,13 +119,14 @@ jobs:
           cur.update(want)
           open('/tmp/final.yaml','w').write(yaml.safe_dump(cur,sort_keys=False,allow_unicode=True))
           PY
-              scp $SOPT /tmp/final.yaml root@$SSH:/tmp/k3s-config.new
-              ssh $SOPT root@$SSH 'set -euo pipefail; C=/etc/rancher/k3s/config.yaml; cp -a "$C" "$C.bak-$(date +%s)"; install -m 600 /tmp/k3s-config.new "$C"; rm -f /tmp/k3s-config.new; echo WROTE; sed "s/^\(token:\).*/\1 ***/" "$C"'
+              [ -s /tmp/final.yaml ] || { echo "FAIL: merge 产出为空 $NAME"; FAIL=1; continue; }
+              scp $SOPT /tmp/final.yaml root@$SSH:/tmp/k3s-config.new || { echo "FAIL: scp $NAME"; FAIL=1; continue; }
+              ssh $SOPT root@$SSH 'set -euo pipefail; C=/etc/rancher/k3s/config.yaml; cp -a "$C" "$C.bak-$(date +%s)"; install -m 600 /tmp/k3s-config.new "$C"; rm -f /tmp/k3s-config.new; echo WROTE; sed "s/^\(token:\).*/\1 ***/" "$C"' || { echo "FAIL: install $NAME"; FAIL=1; continue; }
               if [ "$RESTART" = yes ]; then
-                ssh $SOPT root@$SSH 'systemctl restart k3s && sleep 20 && systemctl is-active k3s'
+                ssh $SOPT root@$SSH 'systemctl restart k3s && sleep 20 && systemctl is-active k3s' || { echo "FAIL: restart $NAME"; FAIL=1; continue; }
                 for i in $(seq 1 24); do
                   sleep 15
-                  READY=$(ssh $SOPT root@$SERVER_TAIL "kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready'" || echo 0)
+                  READY=$(ssh $SOPT root@$SERVER_TAIL "kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready'" 2>/dev/null); READY="$(printf '%s' "$READY" | tail -1)"; [ -n "$READY" ] || READY=0
                   echo "ready=$READY/$NODES_EXPECT ($i/24)"
                   [ "$READY" = "$NODES_EXPECT" ] && break
                   [ "$i" = 24 ] && { echo "FAIL: $NAME 重启后未恢复全 Ready，停"; exit 1; }
