@@ -64,7 +64,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/ci_key"
-          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || pip3 install --quiet pyyaml || true
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || pip3 install --quiet pyyaml || { echo "FAIL: pyyaml 不可用"; exit 1; }
           python3 - <<'PY' > /tmp/hosts.tsv
           import yaml
           for h in yaml.safe_load(open('node/node-config.yaml'))['hosts']:
@@ -74,6 +74,8 @@ jobs:
                   str(h['expect_flannel_mtu']),
               ]))
           PY
+          [ -s /tmp/hosts.tsv ] || { echo "FAIL: hosts.tsv 为空（node-config.yaml 解析失败？）"; exit 1; }
+          echo "hosts: $(wc -l < /tmp/hosts.tsv)"
           FAIL=0
           while IFS=$'\t' read -r NAME SSH ROLE SVC NIP EIP IFACE MTU; do
             [ -n "$NAME" ] || continue
@@ -122,7 +124,9 @@ jobs:
                 if grep -qE "^[[:space:]]*$k:" "$CFG"; then sed -i "s#^[[:space:]]*$k:.*#$kv#" "$CFG"; else printf '%s\n' "$kv" >> "$CFG"; fi
               fi
               echo APPLIED; cat "$CFG"
-              if [ "${RESTART:-no}" = yes ]; then systemctl restart "$SVC" && echo RESTARTED; fi
+              if [ "${RESTART:-no}" = yes ]; then
+                if systemctl restart "$SVC"; then echo RESTARTED; else echo RESTART-FAILED; drift=1; fi
+              fi
             fi
           fi
           [ "$drift" = 0 ] && echo NODE-OK || echo NODE-DRIFT
@@ -132,6 +136,5 @@ jobs:
             echo "$OUT" | grep -q NODE-OK || FAIL=1
           done < /tmp/hosts.tsv
           shred -u ~/.ssh/ci_key 2>/dev/null || true
-          if [ "$MODE" = apply ]; then echo "APPLY 完成（restart=$RESTART；请再跑一次 verify）"; else
-            if [ "$FAIL" = 0 ]; then echo "RESULT: 全节点无漂移"; else echo "RESULT: 存在漂移"; exit 1; fi
-          fi
+          if [ "$FAIL" != 0 ]; then echo "RESULT: FAIL（mode=$MODE）"; exit 1; fi
+          if [ "$MODE" = apply ]; then echo "APPLY 完成（restart=$RESTART；请再跑一次 verify）"; else echo "RESULT: 全节点无漂移"; fi
