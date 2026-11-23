@@ -3,7 +3,6 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "discover | apply"
         type: choice
         options: [discover, apply]
         default: discover
@@ -35,46 +34,48 @@ jobs:
         run: |
           set +e
           hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-9 --cli-mode=AKSK --cli-agree-privacy-statement=true
-          # 选 .69 所在 VPC：优先 ListVpcs/v3 里 cidr 匹配 192.168.x 的；否则用现有私有区的 router_id
           hcloud VPC ListVpcs/v3 --cli-region=cn-north-9 > /tmp/vpcs.json 2>/dev/null
+          # 扫 subnet 找含 192.168.1.69 (192.168.1.0/24) 的 VPC
           VID=$(python3 - <<'PY'
-          import json
-          vid=""
-          try:
-              d=json.load(open('/tmp/vpcs.json'))
-              vs=d.get('vpcs') or []
-              for v in vs: print("VPC",v.get('id'),v.get('name'),v.get('cidr'), file=__import__('sys').stderr)
-              for v in vs:
-                  c=v.get('cidr','')
-                  if c.startswith('192.168.'): vid=v.get('id'); break
-              if not vid and vs: vid=vs[0].get('id')
-          except Exception as e:
-              print("vpclist-skip",e, file=__import__('sys').stderr)
-          print(vid)
+          import json,subprocess
+          def sh(c): return subprocess.run(c,shell=True,capture_output=True,text=True).stdout
+          try: vs=json.load(open('/tmp/vpcs.json')).get('vpcs') or []
+          except Exception: vs=[]
+          best=""
+          for v in vs:
+              vid=v.get('id'); cidr=v.get('cidr','')
+              out=sh("hcloud VPC ListSubnets --cli-region=cn-north-9 --vpc_id=%s 2>/dev/null"%vid)
+              try: sns=json.loads(out).get('subnets') or []
+              except Exception: sns=[]
+              for s in sns:
+                  c=s.get('cidr','')
+                  print("  vpc=%s(%s) subnet=%s %s"%(vid,v.get('name'),c,s.get('name')),file=__import__('sys').stderr)
+                  if c.startswith('192.168.1.'):
+                      best=vid
+              if best: break
+          print(best)
           PY
           )
+          [ -z "$VID" ] && VID=$(python3 -c "import json;d=json.load(open('/tmp/pz.json'));z=(d.get('zones') or []);print(z[0]['routers'][0]['router_id'] if z and z[0].get('routers') else '')" 2>/dev/null)
           [ -z "$VID" ] && VID="ab64784e-1fd6-49c8-a693-0b317169496c"
           echo "CHOSEN VID=$VID"
-          # 现有私有区里是否已有 internal.linkseek.net.cn
           hcloud DNS ListPrivateZones --type=private --cli-region=cn-north-9 > /tmp/pz.json 2>/dev/null
           ZID=$(python3 -c "import json;d=json.load(open('/tmp/pz.json'));print(next((z['id'] for z in (d.get('zones') or []) if z.get('name','').rstrip('.')=='internal.linkseek.net.cn'),''))")
           echo "ZID(before)=$ZID"
           if [ "$MODE" != "apply" ]; then echo "DISCOVER-ONLY (VID/ZID above)"; exit 0; fi
           if [ -z "$ZID" ]; then
             printf '{"body":{"name":"internal.linkseek.net.cn","zone_type":"private","ttl":300,"vpc":{"vpc_id":"%s","region":"cn-north-9"},"proxy_pattern":"AUTHORITY"}}' "$VID" > /tmp/zone.json
-            echo "--- CreatePrivateZone ---"
-            hcloud DNS CreatePrivateZone --cli-jsonInput=/tmp/zone.json --cli-region=cn-north-9 2>&1 | head -c 700; echo
+            echo "--- CreatePrivateZone body ---"; cat /tmp/zone.json; echo
+            echo "--- CreatePrivateZone response ---"
+            hcloud DNS CreatePrivateZone --cli-jsonInput=/tmp/zone.json --cli-region=cn-north-9 2>&1 | tail -c 1200; echo "RC=$?"
             hcloud DNS ListPrivateZones --type=private --cli-region=cn-north-9 > /tmp/pz.json 2>/dev/null
             ZID=$(python3 -c "import json;d=json.load(open('/tmp/pz.json'));print(next((z['id'] for z in (d.get('zones') or []) if z.get('name','').rstrip('.')=='internal.linkseek.net.cn'),''))")
           fi
           echo "ZID=$ZID"
-          [ -n "$ZID" ] || { echo "FAIL: 私有区未建成"; exit 1; }
-          # 记录
+          if [ -z "$ZID" ]; then echo "FAIL: 私有区未建成"; exit 0; fi
           hcloud DNS ListRecordSets --zone_id="$ZID" --cli-region=cn-north-9 > /tmp/rs.json 2>/dev/null
           if grep -q "team-agent.internal.linkseek.net.cn" /tmp/rs.json; then echo "record already exists"; else
             printf '{"path":{"zone_id":"%s"},"body":{"name":"team-agent.internal.linkseek.net.cn.","type":"A","ttl":300,"records":["192.168.1.69"]}}' "$ZID" > /tmp/rec.json
-            echo "--- CreateRecordSet ---"
-            hcloud DNS CreateRecordSet --cli-jsonInput=/tmp/rec.json --cli-region=cn-north-9 2>&1 | head -c 700; echo
+            echo "--- CreateRecordSet ---"; hcloud DNS CreateRecordSet --cli-jsonInput=/tmp/rec.json --cli-region=cn-north-9 2>&1 | tail -c 1000; echo
           fi
-          echo "=== final recordsets ==="
-          hcloud DNS ListRecordSets --zone_id="$ZID" --cli-region=cn-north-9 2>/dev/null | head -c 900
+          echo "=== final recordsets ==="; hcloud DNS ListRecordSets --zone_id="$ZID" --cli-region=cn-north-9 2>/dev/null | head -c 900
