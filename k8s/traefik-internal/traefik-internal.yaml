@@ -17,13 +17,16 @@ spec:
       labels: {app: traefik-internal}
     spec:
       serviceAccountName: traefik
+      automountServiceAccountToken: true
+      imagePullSecrets:
+        - name: swr-pull
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
         kubernetes.io/hostname: ecs-ies-euleros-jmupervm-zhangzhirui
       containers:
         - name: traefik
-          image: rancher/mirrored-library-traefik:3.7.15
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/k3s-traefik:3.7.15
           args:
             - --entryPoints.web.address=:80
             - --entryPoints.websecure.address=:443
