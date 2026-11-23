@@ -25,7 +25,7 @@ on:
         required: false
         default: ""
       tags:
-        description: "tag-device 用：完整 tag 集合，逗号分隔（覆盖式，如 tag:mesh,tag:prod）"
+        description: "tag-device 用：完整 tag 集合，逗号分隔（覆盖式，如 tag:hw。口径见 #752，只剩 hw/ali/oci/github/pc）"
         required: false
         default: ""
       confirm:

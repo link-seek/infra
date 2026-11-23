@@ -5,6 +5,10 @@ name: runner-net（标准进网：mesh+user 进 tailnet，直连 :6443）
 description: "标准进网：mint mesh+user（ephemeral 1h）＋ tailscale up ＋组 kubeconfig＋pre-flight 门"
 
 inputs:
+  mode:
+    description: "进网方式：up=传统一行（默认）；conffile=声明式（ts/daemon.ci.json.tmpl）"
+    required: false
+    default: "up"
   ts_api_key:
     description: "TAILSCALE_API_KEY（mint 用）"
     required: true
@@ -35,7 +39,8 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: 进网（mint mesh+user，ephemeral 1h）
+    - name: 签 key（mesh+user，ephemeral 1h）
+      id: mint
       shell: bash
       run: |
         set -euo pipefail
@@ -43,20 +48,25 @@ runs:
         TSKEY="$(printf '%s' "${{ inputs.ts_api_key }}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: ts_api_key 未配"; exit 1; }
         echo "::add-mask::$TSKEY"
         MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-          -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:mesh","tag:user"]}}},"expirySeconds":3600}' \
+          -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":3600}' \
           https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
         [ -n "$MINTED" ] || { echo "FAIL: key mint 失败"; exit 1; }
         echo "::add-mask::$MINTED"
+        echo "key=$MINTED" >> "$GITHUB_OUTPUT"
         HN="${{ inputs.node_name }}"; [ -n "$HN" ] || HN="ci-net-$GITHUB_RUN_ID"
-        timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="$HN" --accept-routes=false --accept-dns=false
+        echo "hostname=$HN" >> "$GITHUB_OUTPUT"
         unset MINTED
-        sudo tailscale ip -4
-        echo NETMAP-OK
+    - name: 进网（ts-bringup）
+      uses: ./.github/actions/ts-bringup
+      with:
+        auth_key: ${{ steps.mint.outputs.key }}
+        hostname: ${{ steps.mint.outputs.hostname }}
+        mode: ${{ inputs.mode }}
     - name: pre-flight（本机→server :6443，401 即通）
       shell: bash
       run: |
         set -euo pipefail
-        curl -k -sS -m 20 -o /dev/null -w 'apiserver http=%{http_code} time=%{time_total}s\n' https://${{ inputs.server_tail }}:6443/version || { echo "FAIL: 本机到 ${{ inputs.server_tail }}:6443 不通（须 tag:mesh，见 policy.hujson）"; ip route get ${{ inputs.server_tail }} || true; exit 1; }
+        curl -k -sS -m 20 -o /dev/null -w 'apiserver http=%{http_code} time=%{time_total}s\n' https://${{ inputs.server_tail }}:6443/version || { echo "FAIL: 本机到 ${{ inputs.server_tail }}:6443 不通（须 tag:github，见 policy.hujson）"; ip route get ${{ inputs.server_tail }} || true; exit 1; }
         echo PREFLIGHT-OK
     - name: 组 kubeconfig＋验身份
       id: kube

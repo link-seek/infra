@@ -33,7 +33,7 @@ jobs:
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
-      - name: 进网（tag:user；取凭据只需 ssh）
+      - name: 进网（tag:github；取凭据只需 ssh）
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
