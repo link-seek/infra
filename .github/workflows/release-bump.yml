@@ -1,0 +1,24 @@
+name: release-bump
+
+# 每周检查 SWR 上的 latest artifact，若比 infra pin 新则开 draft PR（不自动合并）。
+on:
+  schedule:
+    - cron: "0 1 * * 1"   # 每周一 09:00 CST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: propose pin bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_bump.py

@@ -13,7 +13,7 @@
 升级一个发布：
 1. docker-images 合 PR → 等 `flux-artifact` 成功
 2. 从 run summary 取 `tag / digest`（格式：`ref: { digest: sha256:... }`）
-3. infra PR 改 `git-docker-images.yaml` 的 `digest` + 注释 `# release: <tag>`
+3. infra PR 改 `git-docker-images.yaml` 的 `digest` + 注释 `# release: <tag>`（或等每周一 `release-bump` 自动开 draft PR）
 4. `contract-check` 绿 → 合并 → Flux 5 分钟内对账
 
 回滚：
@@ -28,6 +28,12 @@
 | pin digest 存在性 | infra `contract-check` | 硬 |
 | 渲染产物 digest / 禁 latest | docker-images `policy` | **硬**（required check） |
 | PR 需审批 | 两仓 branch protection | **已开**（required 1；`enforce_admins=false` 保留管理员紧急绕过） |
+
+## system-upgrade
+
+- 控制器已启用（`system-upgrade` ns，1/1）。
+- `k3s-server` plan：控制面逐台，`concurrency: 1`。
+- `k3s-agent` plan：**opt-in**，节点打 `system-upgrade.k3s.io/enabled=true` 才会参与（避免自动 drain 跑着 Traefik/egress 的边缘节点）。
 
 ## 已知边界
 
