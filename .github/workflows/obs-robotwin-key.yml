@@ -29,8 +29,7 @@ jobs:
           mkdir -p /tmp/kd; OBS cp obs://robotwin-assets/key/ /tmp/kd -r -f >/dev/null 2>&1
           python3 - <<'PY' > /tmp/ck.env
           import re
-          t=open('/tmp/kd/key/credentials.csv',errors='ignore').read()
-          ak=sk=None
+          t=open('/tmp/kd/key/credentials.csv',errors='ignore').read(); ak=sk=None
           for line in t.splitlines():
               cells=[c.strip().strip('"') for c in line.split(',')]
               for c in cells:
@@ -44,30 +43,28 @@ jobs:
           . /tmp/ck.env
           echo "::add-mask::$AK2"; echo "::add-mask::$SK2"
           hcloud configure set --cli-access-key="$AK2" --cli-secret-key="$SK2" --cli-region=cn-north-4 --cli-mode=AKSK --cli-agree-privacy-statement=true >/dev/null 2>&1
+          hcloud ECS ListServersDetails --cli-region=cn-north-4 --limit=100 > /tmp/sl.json 2>/dev/null
+          PID=$(python3 -c "import json;d=json.load(open('/tmp/sl.json'));print(next((s.get('tenant_id') for s in d.get('servers',[]) if s.get('id')=='c5b805bd-5e8d-4ba5-a5ab-7523244da0fa'),''))")
+          echo "PROJECT_ID=$PID"
           SG=ab0adda4-9bfc-49d7-8dd6-0958bb4d3416
-          echo "== current ingress rules (22 / all) =="
-          hcloud VPC ListSecurityGroupRules/v3 --security_group_id $SG --cli-region=cn-north-4 > /tmp/r.json 2>/tmp/re; head -c120 /tmp/re
+          echo "== current SG rules =="
+          hcloud VPC ShowSecurityGroup/v3 --security_group_id $SG --project_id "$PID" --cli-region=cn-north-4 > /tmp/sg.json 2>/tmp/sge; head -c150 /tmp/sge
           python3 - <<'PY'
           import json
-          d=json.load(open('/tmp/r.json'))
-          rs=d.get('security_group_rules') or []
-          for r in rs:
-              if (r.get('direction')=='ingress'):
-                  print("ingress", r.get('protocol'), r.get('port_range_min'),'-',r.get('port_range_max'), r.get('remote_ip_prefix'), r.get('ethertype'))
+          try:
+           d=json.load(open('/tmp/sg.json')); sg=d.get('security_group') or d
+           for r in (sg.get('security_group_rules') or []):
+             print('rule',r.get('direction'),r.get('protocol'),r.get('multiport'),r.get('port_range_min'),'-',r.get('port_range_max'),r.get('remote_ip_prefix'),r.get('ethertype'),r.get('description'))
+          except Exception as e: print('parse-fail',e,open('/tmp/sg.json').read()[:200])
           PY
-          EXIST=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(sum(1 for r in (d.get('security_group_rules') or []) if r.get('direction')=='ingress' and r.get('protocol')=='tcp' and (r.get('remote_ip_prefix') or '').startswith('121.37.127.185') and str(r.get('port_range_min'))=='22'))")
-          echo "EXIST_185_22=$EXIST"
-          if [ "$EXIST" = "0" ]; then
-            echo "== create rule 121.37.127.185/32 tcp22 =="
-            hcloud VPC CreateSecurityGroupRule/v3 --cli-region=cn-north-4 \
-              --security_group_rule.security_group_id=$SG \
-              --security_group_rule.direction=ingress \
-              --security_group_rule.ethertype=IPv4 \
-              --security_group_rule.protocol=tcp \
-              --security_group_rule.port_range_min=22 \
-              --security_group_rule.port_range_max=22 \
-              --security_group_rule.remote_ip_prefix=121.37.127.185/32 \
-              --security_group_rule.description=opencode-team-69-egress 2>&1 | head -c 400; echo " CREATE_RC=$?"
-          else echo ALREADY_PRESENT; fi
-          echo "== after =="
-          hcloud VPC ListSecurityGroupRules/v3 --security_group_id $SG --cli-region=cn-north-4 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);print('\n'.join('ingress '+str(r.get('protocol'))+' '+str(r.get('port_range_min'))+'-'+str(r.get('port_range_max'))+' '+str(r.get('remote_ip_prefix')) for r in (d.get('security_group_rules') or []) if r.get('direction')=='ingress' and str(r.get('port_range_min'))=='22'))"
+          echo "== create rule 121.37.127.185/32 tcp 22 =="
+          hcloud VPC CreateSecurityGroupRule/v3 --project_id "$PID" --cli-region=cn-north-4 \
+            --security_group_rule.security_group_id=$SG \
+            --security_group_rule.direction=ingress \
+            --security_group_rule.ethertype=IPv4 \
+            --security_group_rule.protocol=tcp \
+            --security_group_rule.multiport=22 \
+            --security_group_rule.remote_ip_prefix=121.37.127.185/32 \
+            --security_group_rule.description=opencode-team-69-egress > /tmp/cr.json 2>/tmp/cre; echo "rc=$?"; head -c 400 /tmp/cre; echo; head -c 400 /tmp/cr.json; echo
+          echo "== after rules (22) =="
+          hcloud VPC ShowSecurityGroup/v3 --security_group_id $SG --project_id "$PID" --cli-region=cn-north-4 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);sg=d.get('security_group') or d;[print('rul',r.get('direction'),r.get('protocol'),r.get('multiport'),r.get('port_range_min'),r.get('remote_ip_prefix')) for r in (sg.get('security_group_rules') or []) if str(r.get('multiport'))=='22' or str(r.get('port_range_min'))=='22' or '121.37.127.185' in str(r.get('remote_ip_prefix'))]"
