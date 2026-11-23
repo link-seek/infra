@@ -1,5 +1,4 @@
 name: swr-cleanup-chrome-cjk
-# 临时：清理无人引用的旧镜像 swr.../xieyucheng123/chrome-cjk（已迁 browserless）。用完删。
 on:
   workflow_dispatch:
     inputs:
@@ -35,28 +34,23 @@ jobs:
         run: |
           set +e
           hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-9 --cli-mode=AKSK --cli-agree-privacy-statement=true
-          NS=xieyucheng123; REPO=chrome-cjk
-          echo "=== ShowRepository ==="
-          hcloud SWR ShowRepository --namespace=$NS --repository=$REPO --cli-region=cn-north-9 2>&1 | head -c 800; echo
-          echo "=== ListRepositoryTags ==="
-          hcloud SWR ListRepositoryTags --namespace=$NS --repository=$REPO --cli-region=cn-north-9 > /tmp/tags.json 2>/tmp/tags.err
-          head -c 300 /tmp/tags.err
-          python3 - <<'PY'
-          import json
-          try:
-              d=json.load(open('/tmp/tags.json'))
-              tags=[(t.get('name') or t.get('tag')) for t in (d.get('tags') or [])]
-              print("tags:",tags)
-          except Exception as e:
-              print("parse-fail",e,open('/tmp/tags.json').read()[:300])
-          PY
+          echo "=== ListNamespaces cn-north-9 ==="
+          hcloud SWR ListNamespaces --cli-region=cn-north-9 2>&1 | head -c 1500; echo
+          echo "=== probe link-seek/opencode-tools (cn-north-9) ==="
+          hcloud SWR ShowRepository --namespace=link-seek --repository=opencode-tools --cli-region=cn-north-9 2>&1 | head -c 400; echo
+          echo "=== probe xieyucheng123/chrome-cjk (cn-north-9) ==="
+          hcloud SWR ShowRepository --namespace=xieyucheng123 --repository=chrome-cjk --cli-region=cn-north-9 2>&1 | head -c 400; echo
+          echo "=== probe xieyucheng123/chrome-cjk (cn-north-4) ==="
+          hcloud SWR ShowRepository --namespace=xieyucheng123 --repository=chrome-cjk --cli-region=cn-north-4 2>&1 | head -c 400; echo
+          echo "=== list repos in xieyucheng123 (cn-north-9) ==="
+          hcloud SWR ListNamespaceRepositories --namespace=xieyucheng123 --cli-region=cn-north-9 2>&1 | head -c 800; echo
           if [ "$MODE" != "apply" ]; then echo DISCOVER_ONLY_DONE; exit 0; fi
+          NS=xieyucheng123; REPO=chrome-cjk
           echo "=== APPLY: delete tags then repo ==="
+          hcloud SWR ListRepositoryTags --namespace=$NS --repository=$REPO --cli-region=cn-north-9 > /tmp/tags.json 2>/tmp/tags.err
+          head -c 200 /tmp/tags.err
           for t in $(python3 -c "import json;d=json.load(open('/tmp/tags.json'));print('\n'.join([str(x.get('name') or x.get('tag')) for x in (d.get('tags') or []) if (x.get('name') or x.get('tag'))]))" 2>/dev/null); do
-            echo "-- delete tag $t --"
-            hcloud SWR DeleteRepoTag --namespace=$NS --repository=$REPO --tag="$t" --cli-region=cn-north-9 2>&1 | tail -c 200; echo
+            echo "-- delete tag $t --"; hcloud SWR DeleteRepoTag --namespace=$NS --repository=$REPO --tag="$t" --cli-region=cn-north-9 2>&1 | tail -c 150; echo
           done
-          echo "=== DeleteRepo ==="
-          hcloud SWR DeleteRepo --namespace=$NS --repository=$REPO --cli-region=cn-north-9 2>&1 | tail -c 300; echo "DELETE_RC=$?"
-          echo "=== verify (应报仓库不存在) ==="
-          hcloud SWR ShowRepository --namespace=$NS --repository=$REPO --cli-region=cn-north-9 2>&1 | head -c 400; echo
+          echo "=== DeleteRepo ==="; hcloud SWR DeleteRepo --namespace=$NS --repository=$REPO --cli-region=cn-north-9 2>&1 | tail -c 250; echo "DELETE_RC=$?"
+          echo "=== verify ==="; hcloud SWR ShowRepository --namespace=$NS --repository=$REPO --cli-region=cn-north-9 2>&1 | head -c 300; echo
