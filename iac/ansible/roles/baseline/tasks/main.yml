@@ -1,0 +1,54 @@
+---
+# 基线角色：只做与 k3s 相关、且可安全重复执行的主机基线（不碰 k3s 配置/unit）。
+- name: 断言 cgroup v2（k3s 必需）
+  ansible.builtin.stat:
+    path: /sys/fs/cgroup/cgroup.controllers
+  register: cgv2
+  changed_when: false
+
+- name: cgroup v1 直接失败（切 v2 见 k3s-join-* 历史链）
+  ansible.builtin.assert:
+    that: cgv2.stat.exists
+    fail_msg: "{{ inventory_hostname }} 仍是 cgroup v1，k3s 需 v2"
+    success_msg: "{{ inventory_hostname }} cgroup v2 OK"
+
+- name: 安装基础包（best-effort：部分节点 yum/apt 源不可达时不阻断整条 play）
+  ansible.builtin.package:
+    name: "{{ baseline_packages }}"
+    state: present
+  register: baseline_pkg
+  ignore_errors: true
+  when: baseline_manage_packages | bool
+
+- name: 提示基础包未装全（人工处理）
+  ansible.builtin.debug:
+    msg: "WARN: {{ inventory_hostname }} 基础包未装全（repo 不可达？）：{{ baseline_pkg.msg | default('') }}"
+  when: baseline_manage_packages | bool and baseline_pkg is failed
+
+- name: k8s 内核模块开机加载
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    mode: "0644"
+    content: |
+      overlay
+      br_netfilter
+
+- name: 立即加载内核模块
+  ansible.builtin.command: "modprobe {{ item }}"
+  loop:
+    - overlay
+    - br_netfilter
+  changed_when: false
+
+- name: k8s 相关 sysctl
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes.conf
+    mode: "0644"
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+
+- name: 应用 sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false
