@@ -1,5 +1,5 @@
 # Flux Kustomization: system-upgrade-controller + k3s 升级 Plan。
-# 默认 suspend：SWR 镜像就绪后再去掉 suspend（见 k8s/system-upgrade/README.md）。
+# SWR 镜像已就绪（2026-11-23），已解锁；Plan version 与现网一致，不会触发升级。
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -9,7 +9,7 @@ spec:
   interval: 10m0s
   path: ./k8s/system-upgrade
   prune: true
-  suspend: true
+  suspend: false
   sourceRef:
     kind: OCIRepository
     name: flux-system
