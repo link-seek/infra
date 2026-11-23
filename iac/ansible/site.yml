@@ -1,0 +1,12 @@
+---
+# 主机配置收敛（iac 阶段3，第一增量）：基线 + registries.yaml。
+# 只读预览：ansible-playbook site.yml --check
+# 真改：ansible-playbook site.yml（iac-host-apply.yml 里 apply 需 confirm）
+# 安全边界：不碰 /etc/rancher/k3s/config.yaml（k3s-config-reconcile 管）、不重启 k3s。
+- name: 主机基线 + k3s 公共文件
+  hosts: all
+  serial: 1
+  gather_facts: true
+  roles:
+    - baseline
+    - k3s_common

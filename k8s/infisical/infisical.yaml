@@ -35,6 +35,9 @@ spec:
             - secretRef: {name: infisical-env}
           env:
             - {name: NODE_ENV, value: production}
+            # 允许连集群私有地址：Kubernetes Auth 需访问 kubernetes.default.svc(10.43.0.1)。
+            # 自建单租户可信实例，按官方 ALLOW_INTERNAL_IP_CONNECTIONS 放开 SSRF 私有 IP 限制。
+            - {name: ALLOW_INTERNAL_IP_CONNECTIONS, value: "true"}
           ports:
             - {containerPort: 8080}
           readinessProbe:

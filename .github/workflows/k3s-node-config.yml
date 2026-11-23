@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: join tailnet (tag:user)
+      - name: join tailnet (tag:github)
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
