@@ -1,0 +1,36 @@
+name: obs-robotwin-key
+on:
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      AK: ${{ secrets.PROD_HCLOUD_AK }}
+      SK: ${{ secrets.PROD_HCLOUD_SK }}
+    steps:
+      - name: install hcloud
+        run: |
+          set -e
+          ok=0
+          for u in https://obs.cn-north-4.myhuaweicloud.com/koocli/cli/latest/huaweicloud-cli-linux-amd64.tar.gz https://cn-north-4-hdn-koocli.obs.cn-north-4.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz ; do
+            curl -fsSL --retry 4 "$u" -o /tmp/hc.tgz && { ok=1; break; } || true
+          done
+          [ "$ok" = 1 ] || { echo FAIL; exit 1; }
+          mkdir -p /tmp/hc && tar xzf /tmp/hc.tgz -C /tmp/hc
+          install -m755 "$(find /tmp/hc -type f -name hcloud|head -1)" /usr/local/bin/hcloud
+      - name: list
+        run: |
+          set +e
+          ENDP=https://obs.cn-north-4.myhuaweicloud.com
+          OBS(){ hcloud OBS "$@" -i="$AK" -k="$SK" -e="$ENDP"; }
+          echo "== buckets (ls) =="; OBS ls 2>&1 | head -20
+          echo "== ls obs://so101-sim-pipeline/assets/robotwin/ (dirs) =="
+          OBS ls obs://so101-sim-pipeline/assets/robotwin/ -d 2>&1 | head -40
+          echo "== ls obs://so101-sim-pipeline/assets/robotwin/ (brief) =="
+          OBS ls obs://so101-sim-pipeline/assets/robotwin/ -s 2>&1 | tail -40
+          for d in assets/robotwin/key assets/robotwin/keys assets/robotwin/.key assets/robotwin/aksk; do
+            echo "== try obs://so101-sim-pipeline/$d/ =="
+            OBS ls "obs://so101-sim-pipeline/$d" -s 2>&1 | head -15
+          done
