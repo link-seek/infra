@@ -1,7 +1,6 @@
 name: dns-privatezone-internal
-
-# 建华为云内网私有区 internal.linkseek.net.cn（关联 .69 所在 VPC）+ A 记录 team-agent.internal.linkseek.net.cn -> 192.168.1.69。
-# mode=discover 只读列出 VPC/subnet/私有区；mode=apply 幂等创建。用 PROD_HCLOUD_AK/SK（KooCLI）。
+# 建华为云内网私有区 internal.linkseek.net.cn + A 记录 team-agent.internal.linkseek.net.cn -> 192.168.1.69。
+# mode=discover 只读列 VPC/subnet/私有区；mode=apply 幂等创建。用 PROD_HCLOUD_AK/SK（KooCLI）。
 on:
   workflow_dispatch:
     inputs:
@@ -10,10 +9,8 @@ on:
         type: choice
         options: [discover, apply]
         default: discover
-
 permissions:
   contents: read
-
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -39,48 +36,51 @@ jobs:
           mkdir -p /tmp/hc && tar xzf /tmp/hc.tgz -C /tmp/hc
           install -m755 "$(find /tmp/hc -type f -name hcloud | head -1)" /usr/local/bin/hcloud
           hcloud version
-
       - name: discover / apply
         run: |
           set +e
           hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-9 --cli-mode=AKSK --cli-agree-privacy-statement=true
           echo "=== VPCs ==="
-          hcloud VPC ListVpcs --cli-region=cn-north-9 > /tmp/vpcs.json 2>/tmp/vpcs.err; head -c 200 /tmp/vpcs.err
+          hcloud VPC ListVpcs --cli-region=cn-north-9 > /tmp/vpcs.json 2>/tmp/vpcs.err; head -c 300 /tmp/vpcs.err
           python3 - <<'PY'
-import json
-d=json.load(open('/tmp/vpcs.json'))
-for v in (d.get('vpcs') or []):
-    print("VPC", v.get('id'), v.get('name'), v.get('cidr'))
-PY
-          echo "=== subnets per VPC (find 192.168.1.0/24) ==="
+          import json
+          try:
+              d=json.load(open('/tmp/vpcs.json'))
+              for v in (d.get('vpcs') or []):
+                  print("VPC", v.get('id'), v.get('name'), v.get('cidr'))
+          except Exception as e:
+              print("VPC parse-fail:", e, open('/tmp/vpcs.json').read()[:300])
+          PY
+          echo "=== subnets (找含 192.168.1.69 的) ==="
           python3 - <<'PY' > /tmp/vpcids.txt
-import json
-d=json.load(open('/tmp/vpcs.json'))
-for v in (d.get('vpcs') or []): print(v.get('id'))
-PY
+          import json
+          try:
+              d=json.load(open('/tmp/vpcs.json'))
+              for v in (d.get('vpcs') or []): print(v.get('id'))
+          except Exception: pass
+          PY
           for vid in $(cat /tmp/vpcids.txt); do
             hcloud VPC ListSubnets --cli-region=cn-north-9 --vpc_id="$vid" > /tmp/sn.json 2>/dev/null
             python3 - "$vid" <<'PY'
-import json,sys
-d=json.load(open('/tmp/sn.json'))
-for s in (d.get('subnets') or []):
-    print("SUBNET vpc="+sys.argv[1], s.get('id'), s.get('cidr'), s.get('name'))
-PY
+          import json,sys
+          try:
+              d=json.load(open('/tmp/sn.json'))
+              for s in (d.get('subnets') or []):
+                  print("SUBNET vpc="+sys.argv[1], s.get('id'), s.get('cidr'), s.get('name'))
+          except Exception: pass
+          PY
           done
-          echo "=== existing private zones (DNS) ==="
-          hcloud DNS ListPrivateZones --type=private --cli-region=cn-north-9 > /tmp/pz.json 2>/tmp/pz.err; head -c 200 /tmp/pz.err
+          echo "=== private zones (DNS) ==="
+          hcloud DNS ListPrivateZones --type=private --cli-region=cn-north-9 > /tmp/pz.json 2>/tmp/pz.err; head -c 300 /tmp/pz.err
           python3 - <<'PY'
-import json
-try:
-  d=json.load(open('/tmp/pz.json'))
-  print("private_zones count:", len(d.get('private_zones') or d.get('zones') or []))
-  print(json.dumps(d, ensure_ascii=False)[:800])
-except Exception as e:
-  print("parse-fail", e); print(open('/tmp/pz.json').read()[:300])
-PY
+          import json
+          try:
+              d=json.load(open('/tmp/pz.json'))
+              zs=d.get('private_zones') or d.get('zones') or []
+              print("private_zones:", len(zs))
+              print(json.dumps(d, ensure_ascii=False)[:1200])
+          except Exception as e:
+              print("PZ parse-fail:", e, open('/tmp/pz.json').read()[:400])
+          PY
           if [ "$MODE" != "apply" ]; then echo "DISCOVER-ONLY done"; exit 0; fi
-          echo "=== APPLY: create private zone + record (idempotent) ==="
-          python3 - <<'PY'
-# placeholder for apply phase; filled after discover confirms shapes
-print("APPLY phase not yet enabled in discover run")
-PY
+          echo "APPLY phase: (to be enabled after discover)"
