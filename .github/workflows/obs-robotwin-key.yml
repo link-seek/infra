@@ -26,9 +26,9 @@ jobs:
           hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-4 --cli-mode=AKSK --cli-agree-privacy-statement=true 2>&1 | tail -1
           ENDP=https://obs.cn-north-4.myhuaweicloud.com
           OBS(){ hcloud OBS "$@" -i="$AK" -k="$SK" -e="$ENDP" 2>&1; }
-          echo "== buckets =="; OBS ls | head -20
-          echo "== robotwin dirs =="; OBS ls obs://so101-sim-pipeline/assets/robotwin/ -d | head -40
-          echo "== robotwin brief =="; OBS ls obs://so101-sim-pipeline/assets/robotwin/ -s | tail -50
-          for d in assets/robotwin/key assets/robotwin/keys assets/robotwin/.key assets/robotwin/aksk assets/robotwin/credentials; do
-            echo "== $d =="; OBS ls "obs://so101-sim-pipeline/$d" -s | head -15
+          echo "== so101-sim-pipeline root dirs =="; OBS ls obs://so101-sim-pipeline/ -d | head -80
+          echo "== assets dirs =="; OBS ls obs://so101-sim-pipeline/assets/ -d | head -80
+          echo "== sha dir full =="; OBS ls obs://so101-sim-pipeline/assets/robotwin/c3ddfa8b97d5519efa828b075999bd0006778e5e/ -s | head -40
+          for p in key keys secrets config .keys aksk ak_sk credential credentials; do
+            echo "== so101-sim-pipeline/$p =="; OBS ls "obs://so101-sim-pipeline/$p" -s | head -8
           done
