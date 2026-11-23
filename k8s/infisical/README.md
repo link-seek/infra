@@ -36,4 +36,4 @@
 4. 每个应用：在本仓 `iac/infisical/apps.json` 加一行声明 → 跑 `.github/workflows/infisical-provision.yml`（默认 dry-run，`apply=true` 才变更）自动确保「项目 / 机器身份 `<slug>-operator` / 项目授权 / `<ns>-ua` secret」存在（只补缺、不动已有）；密钥值仍在 Infisical 里灌；建 `InfisicalSecret` CR（见 `k8s/infisical-apps/`）。
 
 ## 镜像
-`infisical` / `postgres:14-alpine` / `redis:7-alpine` / `kubernetes-operator:v0.11.18` 均从 SWR（`swr.cn-north-9.../link-seek/...`）拉取；因华为节点直连 docker.io 不通，镜像由 `.github/workflows/mirror-infisical-images.yml` 从 docker.io mirror 进 SWR。
+`infisical` / `postgres:14-alpine` / `redis:7-alpine` / `kubernetes-operator:v0.11.18` 均从 SWR（`swr.cn-north-9.../link-seek/...`）拉取；因华为节点直连 docker.io 不通，镜像由 docker-images 仓的 `images/mirror.yaml`（runner 侧 skopeo 同步）mirror 进 SWR。
