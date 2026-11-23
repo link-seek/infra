@@ -72,10 +72,9 @@ jobs:
       - name: 预览（--check）
         working-directory: iac/ansible
         run: |
-          set -uo pipefail
+          set -euo pipefail
           ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory/hosts.yml site.yml \
             --check --private-key ~/.ssh/ci_key -v
-          echo "CHECK_EXIT=$?"
 
       - name: 真改（仅 mode=apply 且 confirm=APPLY）
         if: inputs.mode == 'apply' && inputs.confirm == 'APPLY'
@@ -87,4 +86,4 @@ jobs:
 
       - name: 擦除 key
         if: always()
-        run: shred -u ~/.ssh/ci_key 2>/dev/null || true
+        run: shred -u ~/.ssh/ci_key

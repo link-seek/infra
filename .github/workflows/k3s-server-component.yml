@@ -103,7 +103,12 @@ jobs:
             echo "===== disable $H ====="
             ssh $SOPT "root@$H" 'set -euo pipefail; C=/etc/rancher/k3s/config.yaml; M="${{ inputs.component }}";
               case "${{ inputs.disable }}" in
-                remove) [ -f "$C" ] && sed -i "/^[[:space:]]*-[[:space:]]*$M[[:space:]]*$/d" "$C" || true; U=/etc/systemd/system/k3s.service; [ -f "$U" ] && python3 /tmp/k3s-unit-disable.py "$U" "$M" remove || true; systemctl daemon-reload || true; echo "disable removed" ;;
+                remove)
+                  if [ -f "$C" ]; then sed -i "/^[[:space:]]*-[[:space:]]*$M[[:space:]]*$/d" "$C"; fi
+                  U=/etc/systemd/system/k3s.service
+                  if [ -f "$U" ]; then python3 /tmp/k3s-unit-disable.py "$U" "$M" remove; fi
+                  systemctl daemon-reload
+                  echo "disable removed" ;;
                 add) grep -q "disable:" "$C" 2>/dev/null || printf "disable:\n" >> "$C"; grep -q "$M" "$C" || sed -i "/disable:/a\\  - $M" "$C"; echo "disable added" ;;
                 keep) echo "disable kept" ;;
               esac; grep -i -A3 "disable" "$C" 2>/dev/null || echo "config: no disable stanza"'
@@ -115,14 +120,14 @@ jobs:
         run: |
           set -euo pipefail
           FNAME="$(basename "${{ inputs.manifest_path }}")"
-          [ -n "$FNAME" ] || { echo "FAIL: 需传 manifest_path 指定要清理的文件名"; exit 1; }
+          [ -n "$FNAME" ] && [ "$FNAME" != "." ] && [ "$FNAME" != "/" ] || { echo "FAIL: manifest_path 无效（得到 '$FNAME'）"; exit 1; }
           echo "将删除三台 server 上 /var/lib/rancher/k3s/server/manifests/$FNAME（Flux 已是唯一写入者）"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
           for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
             echo "===== purge $H ====="
-            ssh $SOPT "root@$H" "M=/var/lib/rancher/k3s/server/manifests/$FNAME; if [ -f \"\$M\" ]; then rm -f \"\$M\" && echo PURGED \$M; else echo ABSENT \$M; fi; ls /var/lib/rancher/k3s/server/manifests/ | grep -i traefik || echo 'manifests: traefik.yaml only'"
+            ssh $SOPT "root@$H" "M=\"/var/lib/rancher/k3s/server/manifests/$FNAME\"; if [ -f \"\$M\" ]; then rm -f \"\$M\" && echo PURGED \$M; else echo ABSENT \$M; fi; ls /var/lib/rancher/k3s/server/manifests/ | grep -i traefik || echo 'manifests: traefik.yaml only'"
           done
           shred -u ~/.ssh/ci_key
           echo PURGE-DONE
