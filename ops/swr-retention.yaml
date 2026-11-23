@@ -1,0 +1,46 @@
+# SWR 版本保留策略（只用于报告；不自动删除，避免误删在用的 digest）
+# keep：建议保留的版本数上限（含 latest/stable）。超过则周报 WARN。
+registry: swr.cn-north-9.myhuaweicloud.com
+repos:
+  # 发布制品：每次 main 合并 + 手动 dispatch 都会新增（当前 ~10）
+  - name: link-seek/docker-images-manifests
+    keep: 30
+  # 主力工具镜像（当前 41，接近需要清理的阈值）
+  - name: link-seek/opencode-tools
+    keep: 20
+  - name: link-seek/opencode-team
+    keep: 20
+  # 应用镜像
+  - name: link-seek/litellm-gateway
+    keep: 15
+  - name: link-seek/browserless-chrome-cjk
+    keep: 10
+  - name: link-seek/erpnext
+    keep: 10
+  - name: link-seek/reloader
+    keep: 10
+  # 上游中转（按需，保留少量）
+  - name: link-seek/cosign
+    keep: 5
+  - name: link-seek/postgres
+    keep: 5
+  - name: link-seek/valkey
+    keep: 5
+  - name: link-seek/rustfs
+    keep: 5
+  - name: link-seek/omnara-api
+    keep: 5
+  - name: link-seek/omnara-worker
+    keep: 5
+  - name: link-seek/omnara-web
+    keep: 5
+  - name: link-seek/omnara-maintenance
+    keep: 5
+  - name: link-seek/omnara-migrations
+    keep: 5
+  - name: link-seek/system-upgrade-controller
+    keep: 5
+  - name: link-seek/kubectl
+    keep: 5
+  - name: link-seek/k3s-upgrade
+    keep: 5

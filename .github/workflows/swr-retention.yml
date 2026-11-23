@@ -1,0 +1,31 @@
+name: swr-retention
+
+# 每周只读报告：SWR 各仓库 tag 数 vs 保留策略（不删除任何东西）。
+on:
+  schedule:
+    - cron: "0 2 * * 1"   # 每周一 10:00 CST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install skopeo + pyyaml
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo
+          python3 -m pip install --quiet pyyaml
+      - name: login SWR
+        run: |
+          set -euo pipefail
+          echo "$SWR_LOGIN_PASS" | skopeo login swr.cn-north-9.myhuaweicloud.com -u "$SWR_LOGIN_USER" --password-stdin
+      - name: retention report
+        run: python3 scripts/swr_retention_report.py
