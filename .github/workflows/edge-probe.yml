@@ -18,7 +18,9 @@ jobs:
     env:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
-      - name: 进网（user 身份）＋ 簇视角 ＋ egress 代理探测
+      - uses: actions/checkout@v4
+      - name: 签 key（user 身份，ephemeral 1h）
+        id: mint
         run: |
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
@@ -28,7 +30,16 @@ jobs:
             https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
           [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
           echo "::add-mask::$MINTED"
-          timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-edgeprobe-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          echo "key=$MINTED" >> "$GITHUB_OUTPUT"
+          unset MINTED
+      - name: 进网（声明式 conffile 试点）
+        uses: ./.github/actions/ts-bringup
+        with:
+          auth_key: ${{ steps.mint.outputs.key }}
+          hostname: ci-edgeprobe-${{ github.run_id }}
+          mode: conffile
+      - name: 簇视角 ＋ egress 代理探测
+        run: |
           echo "== 簇节点（.69 视角） =="
           sudo tailscale ssh root@100.93.119.21 'kubectl get nodes -o wide'
           echo "== egress 出口代理（.69 视角） =="

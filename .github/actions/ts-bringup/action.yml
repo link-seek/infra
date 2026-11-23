@@ -1,0 +1,60 @@
+name: ts-bringup（tailscale 进网唯一入口）
+# mode=up：传统 tailscale up 一行（现状，默认）。
+# mode=conffile：声明式，渲染 ts/daemon.ci.json.tmpl → /etc/tailscale/ci.json(600)
+#   ＋ systemd drop-in 给 ExecStart 追 --config → daemon-reload/restart → 验 tailnet IP。
+# 调用方负责 mint（tags/expiry 各链不同）＋ 事先 checkout（conffile 要读仓里模板）。
+# authKey 永不落日志（add-mask），只活本 step 内存＋/etc/tailscale/ci.json(600)；临时机随 runner 焚毁。
+description: "tailscale 进网：up 或声明式 conffile"
+
+inputs:
+  auth_key:
+    description: "已 mint 的 authkey（现签现用）"
+    required: true
+  hostname:
+    description: "本机 tailnet hostname"
+    required: true
+  mode:
+    description: "up=传统一行；conffile=声明式"
+    required: false
+    default: "up"
+  template:
+    description: "conffile 模板（相对仓根，需先 checkout）"
+    required: false
+    default: "ts/daemon.ci.json.tmpl"
+  render_script:
+    description: "渲染脚本（相对仓根）"
+    required: false
+    default: "ts/render.py"
+
+runs:
+  using: composite
+  steps:
+    - name: 进网
+      shell: bash
+      env:
+        TS_AUTH_KEY: ${{ inputs.auth_key }}
+      run: |
+        set -euo pipefail
+        echo "::add-mask::$TS_AUTH_KEY"
+        HN="${{ inputs.hostname }}"
+        if [ "${{ inputs.mode }}" = conffile ]; then
+          [ -f "${{ inputs.template }}" ] || { echo "FAIL: 缺模板 ${{ inputs.template }}（先 actions/checkout）"; exit 1; }
+          [ -f "${{ inputs.render_script }}" ] || { echo "FAIL: 缺脚本 ${{ inputs.render_script }}（先 actions/checkout）"; exit 1; }
+          sudo mkdir -p /etc/tailscale /etc/systemd/system/tailscaled.service.d
+          python3 "${{ inputs.render_script }}" render "${{ inputs.template }}" "$HN" | sudo tee /etc/tailscale/ci.json >/dev/null
+          sudo chmod 600 /etc/tailscale/ci.json
+          UNIT_LINE="$(systemctl cat tailscaled 2>/dev/null | grep -m1 '^ExecStart=' | cut -d= -f2-)"
+          [ -n "$UNIT_LINE" ] || { echo "FAIL: 读不到 tailscaled ExecStart"; exit 1; }
+          printf '[Service]\nExecStart=\nExecStart=%s --config=/etc/tailscale/ci.json\n' "$UNIT_LINE" | sudo tee /etc/systemd/system/tailscaled.service.d/10-conffile.conf >/dev/null
+          sudo systemctl daemon-reload
+          sudo systemctl restart tailscaled
+          for i in $(seq 1 12); do
+            if [ -n "$(sudo tailscale ip -4 2>/dev/null)" ]; then echo NETMAP-OK; break; fi
+            sleep 10
+            [ "$i" = 12 ] && { echo "FAIL: conffile 进网 120s 未拿到 tailnet IP"; sudo journalctl -u tailscaled --no-pager -n 30 || true; exit 1; }
+          done
+        else
+          timeout 120 sudo tailscale up --authkey="$TS_AUTH_KEY" --hostname="$HN" --accept-routes=false --accept-dns=false
+        fi
+        sudo tailscale ip -4
+        echo NETMAP-OK
