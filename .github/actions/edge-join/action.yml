@@ -25,11 +25,13 @@ inputs:
     required: false
     default: ""
   k3s_bin_url:
-    description: "k3s 二进制国内中转 URL"
-    required: true
+    description: "k3s 二进制国内中转 URL（留空=官方 GitHub；预签名 URL 走 dispatch 传入，勿入库）"
+    required: false
+    default: ""
   k3s_sha_url:
-    description: "k3s sha256 国内中转 URL"
-    required: true
+    description: "k3s sha256 校验 URL（留空=官方 GitHub）"
+    required: false
+    default: ""
   bin_source:
     description: "二进制源：auto=测速自选；obs=强制国内中转；github=强制官方"
     required: false
@@ -106,11 +108,12 @@ runs:
         OBS_BIN='${{ inputs.k3s_bin_url }}'; OBS_SHA='${{ inputs.k3s_sha_url }}'
         pick_bin() {
           # $1=obs_url $2=gh_url -> 打印选用 URL。auto：10s 探活＋测速，快的赢；都不通即红。
+          # obs_url 为空（未配国内中转）→ 视为不可用，回落官方 GitHub。
           case "${{ inputs.bin_source }}" in
-            obs) echo "$1" ;;
+            obs) if [ -n "$1" ]; then echo "$1"; else echo "WARN: bin_source=obs 但未给中转 URL，回落 github" >&2; echo "$2"; fi ;;
             github) echo "$2" ;;
             *)
-              OBS_T="$(curl -sfL -o /dev/null -w '%{time_total}' --max-time 10 "$1" 2>/dev/null || echo 999)"
+              if [ -n "$1" ]; then OBS_T="$(curl -sfL -o /dev/null -w '%{time_total}' --max-time 10 "$1" 2>/dev/null || echo 999)"; else OBS_T=999; fi
               GH_T="$(curl -sfL -o /dev/null -w '%{time_total}' --max-time 10 "$2" 2>/dev/null || echo 999)"
               echo "probe obs=${OBS_T}s github=${GH_T}s" >&2
               if awk "BEGIN{exit !(($OBS_T+0) < ($GH_T+0) && ($OBS_T+0) < 9)}"; then echo "$1"; else echo "$2"; fi ;;
