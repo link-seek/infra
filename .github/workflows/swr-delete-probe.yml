@@ -14,10 +14,12 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
       - name: login
         run: echo "$SWR_LOGIN_PASS" | skopeo login swr.cn-north-9.myhuaweicloud.com -u "$SWR_LOGIN_USER" --password-stdin
-      - name: probe delete permission (nonexistent tag)
+      - name: delete oldest ci- tag (safe temp tag)
         run: |
-          set +e
-          out=$(skopeo delete docker://swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools:__probe_nonexistent__ 2>&1)
-          rc=$?
-          echo "rc=$rc"
-          echo "$out" | tail -5
+          set -euo pipefail
+          REPO=swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools
+          TAG=$(skopeo list-tags docker://$REPO | python3 -c "import sys,json;t=sorted(x for x in json.load(sys.stdin).get('Tags') or [] if x.startswith('ci-'));print(t[0] if t else '')")
+          echo "candidate=$TAG"
+          [ -n "$TAG" ] || { echo "no ci- tag"; exit 0; }
+          skopeo delete docker://$REPO:$TAG
+          echo "DELETED $TAG"
