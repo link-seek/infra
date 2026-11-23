@@ -26,8 +26,8 @@
 | 不可变 tag | docker-images `flux-artifact` | 硬（digest 不一致直接红） |
 | 制品路径收窄 | docker-images `flux-artifact` | 硬 |
 | pin digest 存在性 | infra `contract-check` | 硬 |
-| 渲染产物 digest / 禁 latest | docker-images `policy` | **audit**（`continue-on-error`），稳定后转硬 |
-| PR 需审批 | 两仓 branch protection | **未开**（需人工决定，开了会挡紧急合并） |
+| 渲染产物 digest / 禁 latest | docker-images `policy` | **硬**（required check） |
+| PR 需审批 | 两仓 branch protection | **已开**（required 1；`enforce_admins=false` 保留管理员紧急绕过） |
 
 ## 已知边界
 
