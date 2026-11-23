@@ -48,7 +48,7 @@ runs:
         TSKEY="$(printf '%s' "${{ inputs.ts_api_key }}" | tr -d '\r\n ')"; [ -n "$TSKEY" ] || { echo "FAIL: ts_api_key 未配"; exit 1; }
         echo "::add-mask::$TSKEY"
         MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-          -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:mesh","tag:user"]}}},"expirySeconds":3600}' \
+          -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":3600}' \
           https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
         [ -n "$MINTED" ] || { echo "FAIL: key mint 失败"; exit 1; }
         echo "::add-mask::$MINTED"
@@ -66,7 +66,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        curl -k -sS -m 20 -o /dev/null -w 'apiserver http=%{http_code} time=%{time_total}s\n' https://${{ inputs.server_tail }}:6443/version || { echo "FAIL: 本机到 ${{ inputs.server_tail }}:6443 不通（须 tag:mesh，见 policy.hujson）"; ip route get ${{ inputs.server_tail }} || true; exit 1; }
+        curl -k -sS -m 20 -o /dev/null -w 'apiserver http=%{http_code} time=%{time_total}s\n' https://${{ inputs.server_tail }}:6443/version || { echo "FAIL: 本机到 ${{ inputs.server_tail }}:6443 不通（须 tag:github，见 policy.hujson）"; ip route get ${{ inputs.server_tail }} || true; exit 1; }
         echo PREFLIGHT-OK
     - name: 组 kubeconfig＋验身份
       id: kube

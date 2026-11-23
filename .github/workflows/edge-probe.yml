@@ -19,7 +19,7 @@ jobs:
       TS_API_KEY: ${{ secrets.TS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: 签 key（user 身份，ephemeral 1h）
+      - name: 签 key（github 身份，ephemeral 1h）
         id: mint
         run: |
           set -euo pipefail
@@ -27,7 +27,7 @@ jobs:
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
           RESP="$(mktemp)"
           CODE="$(curl -sS -m 30 -o "$RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
-            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":3600}' \
             https://api.tailscale.com/api/v2/tailnet/-/keys)"
           MINTED="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))" < "$RESP")"
           if [ -z "$MINTED" ]; then echo "FAIL: user key mint 失败 HTTP=$CODE body=$(head -c 300 "$RESP")"; shred -u "$RESP"; exit 1; fi
