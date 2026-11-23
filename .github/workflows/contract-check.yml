@@ -1,7 +1,7 @@
 name: contract-check
 
 # 声明式契约校验：infra pin 的 artifact digest 必须真实存在于 SWR。
-# 全量 PR 触发（无 paths 过滤），可直接进 branch protection required checks。
+# 全量 PR 触发（无 paths 过滤），可进 branch protection required checks。
 on:
   pull_request:
   push:
@@ -17,29 +17,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: verify artifact digest exists
-        run: |
-          set -euo pipefail
-          F=clusters/k3s/git-docker-images.yaml
-          URL="$(python3 - <<'PY'
-import re
-t=open("clusters/k3s/git-docker-images.yaml").read()
-print(re.search(r'url:\s*oci://(\S+)',t).group(1))
-PY
-)"
-          DIGEST="$(python3 - <<'PY'
-import re
-t=open("clusters/k3s/git-docker-images.yaml").read()
-m=re.search(r'digest:\s*(sha256:[0-9a-f]{64})',t)
-print(m.group(1) if m else "")
-PY
-)"
-          [ -n "$DIGEST" ] || { echo "FAIL: no digest pinned"; exit 1; }
-          HOST="${URL%%/*}"; REPO="${URL#*/}"
-          TOK="$(curl -sf "https://$HOST/swr/auth/v2/registry/auth/?scope=repository:$REPO:pull&service=dockyard" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')"
-          GOT="$(curl -s -o /dev/null -D - -H "Authorization: Bearer $TOK" \
-            -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-            "https://$HOST/v2/$REPO/manifests/$DIGEST" \
-            | awk 'tolower($1)=="docker-content-digest:"{print $2}' | tr -d '\r')"
-          echo "pinned=$DIGEST"; echo "remote=$GOT"
-          [ "$GOT" = "$DIGEST" ] || { echo "FAIL: pinned digest not found in registry"; exit 1; }
-          echo CONTRACT-OK
+        run: python3 scripts/contract_check.py
