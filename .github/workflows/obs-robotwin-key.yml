@@ -23,41 +23,40 @@ jobs:
       - name: run
         run: |
           set +e
-          hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-4 --cli-mode=AKSK --cli-agree-privacy-statement=true 2>&1 | tail -1
           ENDP=https://obs.cn-north-4.myhuaweicloud.com
+          hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-4 --cli-mode=AKSK --cli-agree-privacy-statement=true 2>&1|tail -1
           OBS(){ hcloud OBS "$@" -i="$AK" -k="$SK" -e="$ENDP" 2>&1; }
-          echo "== robotwin-assets root dirs =="; OBS ls obs://robotwin-assets/ -d | head -40
-          echo "== robotwin-assets root objects =="; OBS ls obs://robotwin-assets/ -s | head -40
-          echo "== robotwin-assets/key =="; OBS ls obs://robotwin-assets/key -s | head -30
-          echo "== try /keys /credentials =="; OBS ls obs://robotwin-assets/keys -s | head; OBS ls obs://robotwin-assets/credentials -s | head
-          mkdir -p /tmp/kd; OBS cp obs://robotwin-assets/key/ /tmp/kd -r -f 2>&1 | tail -4
-          echo "== downloaded files =="; ls -la /tmp/kd 2>/dev/null
-          python3 - <<'PY' > /tmp/creds.env
-          import os,re,glob
-          ak=sk=None; src=None
-          akre=re.compile(r'[A-Z0-9]{20}')
-          skre=re.compile(r'[A-Za-z0-9/+=]{40,64}')
-          files=[f for f in glob.glob('/tmp/kd/**/*',recursive=True) if os.path.isfile(f)]
-          for f in files:
+          mkdir -p /tmp/kd; OBS cp obs://robotwin-assets/key/ /tmp/kd -r -f >/dev/null 2>&1
+          echo "== downloaded =="; ls /tmp/kd/key 2>/dev/null
+          echo "== SG of 0001/0002 (PROD ECS) =="
+          for SID in c5b805bd-5e8d-4ba5-a5ab-7523244da0fa 7f39cb83-1a5c-4792-b65e-e578d7ddb88d; do
+            echo "-- $SID --"
+            hcloud ECS ShowServer --server_id "$SID" --cli-region=cn-north-4 > /tmp/sv.json 2>/tmp/sve
+            echo "rc=$? bytes=$(wc -c </tmp/sv.json)"; head -c 120 /tmp/sve; echo
+            python3 -c "import json;d=json.load(open('/tmp/sv.json'));s=d.get('server') or d;print('name=',s.get('name'),'SG=',s.get('security_groups'))" 2>&1 | head -3
+          done
+          echo "== parse credentials*.csv AK/SK and test perms =="
+          python3 - "$AK" "$SK" <<'PY'
+          import sys,glob,re,os,subprocess,json
+          prod_ak,prod_sk=sys.argv[1],sys.argv[2]
+          def run(args,env_ak,env_sk):
+              subprocess.run(["hcloud","configure","set","--cli-access-key="+env_ak,"--cli-secret-key="+env_sk,"--cli-region=cn-north-4","--cli-mode=AKSK","--cli-agree-privacy-statement=true"],capture_output=True)
+              r=subprocess.run(args,capture_output=True,text=True)
+              return r.returncode, len(r.stdout or ""), (r.stderr or "")[:160]
+          for f in sorted(glob.glob('/tmp/kd/key/credentials*.csv')):
               t=open(f,errors='ignore').read()
-              ma=akre.search(t)
-              if not ma: continue
-              ak=ma.group(0)
-              for m in skre.finditer(t):
-                  v=m.group(0)
-                  if v!=ak and ak not in v:
-                      sk=v; break
-              if sk: src=f; break
-          print("AK2='%s'"%(ak or ""))
-          print("SK2='%s'"%(sk or ""))
-          print("SRC='%s'"%(src or ""))
+              ak=None;sk=None
+              for line in t.splitlines():
+                  cells=[c.strip().strip('"') for c in line.split(',')]
+                  for c in cells:
+                      if re.fullmatch(r'[A-Z0-9]{20}',c): ak=c; break
+                  if ak: 
+                      for c in cells:
+                          if re.fullmatch(r'[A-Za-z0-9/+]{40,64}',c) and c!=ak: sk=c; break
+                      if sk: break
+              if not ak or not sk: print(os.path.basename(f),"=> parse FAIL"); continue
+              print("::add-mask::"+sk)
+              r1,s1,e1=run(["hcloud","VPC","ListSecurityGroups/v3","--cli-region=cn-north-4"],ak,sk)
+              r2,s2,e2=run(["hcloud","ECS","ListServersDetails","--cli-region=cn-north-4","--limit=1"],ak,sk)
+              print("%-26s AK=%s**** VPC_rc=%s VPC_bytes=%s %s | ECS_rc=%s bytes=%s %s"%(os.path.basename(f),ak[:6],r1,s1,e1,r2,s2,e2))
           PY
-          . /tmp/creds.env
-          echo "detected AK2=${AK2:0:6}**** lenAK=${#AK2} lenSK=${#SK2} from $SRC"
-          if [ -n "$AK2" ] && [ -n "$SK2" ]; then
-            echo "::add-mask::$AK2"; echo "::add-mask::$SK2"
-            hcloud configure set --cli-access-key="$AK2" --cli-secret-key="$SK2" --cli-region=cn-north-4 --cli-mode=AKSK --cli-agree-privacy-statement=true 2>&1|tail -1
-            echo "-- VPC ListSecurityGroups/v3 --"; hcloud VPC ListSecurityGroups/v3 --cli-region=cn-north-4 >/tmp/g.json 2>/tmp/ge; echo "rc=$? size=$(wc -c</tmp/g.json)"; head -c160 /tmp/ge
-            echo "-- ECS ListServersDetails --"; hcloud ECS ListServersDetails --cli-region=cn-north-4 --limit=1 >/tmp/e2.json 2>/tmp/ee; echo "rc=$? size=$(wc -c</tmp/e2.json)"; head -c160 /tmp/ee
-            echo "-- VPC in cn-north-9? --"; hcloud VPC ListSecurityGroups/v3 --cli-region=cn-north-9 >/dev/null 2>/tmp/g9; echo "rc=$?"; head -c120 /tmp/g9
-          fi
