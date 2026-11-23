@@ -35,6 +35,13 @@
 - `k3s-server` plan：控制面逐台，`concurrency: 1`。
 - `k3s-agent` plan：**opt-in**，节点打 `system-upgrade.k3s.io/enabled=true` 才会参与（避免自动 drain 跑着 Traefik/egress 的边缘节点）。
 
+## 暂不启用：签名/验签
+
+- cosign 工具镜像已中转进 SWR：`link-seek/cosign:v2.6.5`。
+- 但**基础版 SWR 不支持 OCI 规范（v1.0/v1.1）制品推送**（官方文档明确写“可使用企业版 SWR 进行推送”），cosign 上传签名 blob 会被 `DENIED`。
+- 因此签名/验签默认关闭；CI secrets `COSIGN_PRIVATE_KEY`/`COSIGN_PASSWORD` 已删除，需要时重新生成。
+- 恢复路径：升级企业版 SWR，或把镜像+签名迁到 Harbor/Zot（原生 OCI referrers），再启用 Flux `OCIRepository.verify`。
+
 ## 已知边界
 
 - `latest` 仍发布，但**生产不引用**；它只给预检/开发。
