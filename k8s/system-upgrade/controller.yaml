@@ -5,6 +5,8 @@ kind: ServiceAccount
 metadata:
   name: system-upgrade
   namespace: system-upgrade
+imagePullSecrets:
+  - name: swr-pull   # SWR 私有仓凭据（与其它 ns 同源；AK/SK 过期时走 registry 凭据）
 ---
 apiVersion: v1
 kind: ConfigMap
