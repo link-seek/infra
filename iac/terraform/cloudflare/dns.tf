@@ -791,3 +791,27 @@ resource "cloudflare_dns_record" "xieyucheng_top_17" {
   type    = "AAAA"
   zone_id = "f46e66f694af4a9e8f8830d0673822b9"
 }
+
+# 内网域名入口（公网 A 记录，DNS-only，非代理）—— 指向华为 VPC 内网 Traefik (192.168.1.69)。
+# 背景：本环境为 IES（智能边缘小站），标准华为 VPC DNS(100.125.x) 从节点不可达、主机走公网 DNS，
+#   故华为云私有区对 IES 主机不生效；改用公网 A 记录，让 VPC 内主机用公网 DNS 即零配置解析到内网 IP，
+#   再经内网 Traefik(.69) 访问。该 IP 为私有地址，公网客户端无法路由（仅暴露内网拓扑，不对外可达）。
+resource "cloudflare_dns_record" "linkseek_net_cn_team_agent_internal" {
+  comment                 = "internal ingress: team-agent -> VPC internal Traefik 192.168.1.69"
+  content                 = "192.168.1.69"
+  data                    = null
+  include_shadow_metadata = false
+  name                    = "team-agent.internal.linkseek.net.cn"
+  priority                = null
+  private_routing         = null
+  proxied                 = false
+  settings = {
+    flatten_cname = null
+    ipv4_only     = null
+    ipv6_only     = null
+  }
+  tags    = []
+  ttl     = 600
+  type    = "A"
+  zone_id = "4cdd8779bc924de8f682abf0a765f51c"
+}
