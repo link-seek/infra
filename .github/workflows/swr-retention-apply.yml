@@ -1,0 +1,33 @@
+name: swr-retention-apply
+
+# 把 ops/swr-retention.yaml 写成 SWR 原生老化规则（tag_rule）。默认 dry-run。
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "true=真正写入（false 只打印计划）"
+        required: true
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROD_HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
+      PROD_HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet pyyaml
+      - name: retention policy
+        run: |
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            python3 scripts/swr_retention_apply.py --apply
+          else
+            python3 scripts/swr_retention_apply.py
+          fi

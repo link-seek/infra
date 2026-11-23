@@ -24,6 +24,7 @@ repos:
     keep: 5
   - name: link-seek/postgres
     keep: 5
+    protect: ["14-alpine"]
   - name: link-seek/valkey
     keep: 5
   - name: link-seek/rustfs
