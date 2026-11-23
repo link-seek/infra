@@ -1,0 +1,90 @@
+name: iac-host-apply
+
+# 主机配置收敛（iac 阶段3）：先 --check 预览，再按 confirm 决定是否真改。
+# 只碰基线（包/内核模块/sysctl）与 registries.yaml；不碰 k3s config.yaml、不重启 k3s。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check=只读预览（--check）；apply=真改（需 confirm=APPLY）"
+        type: choice
+        options: [check, apply]
+        default: check
+        required: true
+      confirm:
+        description: "mode=apply 时必须填 APPLY"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iac-host-apply
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 参数门（apply 需 confirm=APPLY）
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.mode }}" = apply ] && [ "${{ inputs.confirm }}" != APPLY ]; then
+            echo "FAIL: mode=apply 需 confirm=APPLY，当前 '${{ inputs.confirm }}'"; exit 1
+          fi
+
+      - name: 加入 tailnet（一次性 ephemeral 节点）
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          [ -n "$TSKEY" ] || { echo "FAIL: TS_API_KEY 未配"; exit 1; }
+          echo "::add-mask::$TSKEY"
+          MINT="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":21600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys;print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINT" ] || { echo "FAIL: tailnet key mint 失败"; exit 1; }
+          echo "::add-mask::$MINT"
+          timeout 120 sudo tailscale up --authkey="$MINT" --hostname="ci-hostapply-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+
+      - name: 安装 ansible
+        run: pip install 'ansible-core>=2.16'
+
+      - name: 准备 SSH key
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+
+      - name: syntax-check
+        working-directory: iac/ansible
+        run: ansible-playbook --syntax-check -i inventory/hosts.yml site.yml
+
+      - name: 预览（--check）
+        working-directory: iac/ansible
+        run: |
+          set -uo pipefail
+          ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory/hosts.yml site.yml \
+            --check --private-key ~/.ssh/ci_key -v
+          echo "CHECK_EXIT=$?"
+
+      - name: 真改（仅 mode=apply 且 confirm=APPLY）
+        if: inputs.mode == 'apply' && inputs.confirm == 'APPLY'
+        working-directory: iac/ansible
+        run: |
+          set -euo pipefail
+          ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory/hosts.yml site.yml \
+            --private-key ~/.ssh/ci_key -v
+
+      - name: 擦除 key
+        if: always()
+        run: shred -u ~/.ssh/ci_key 2>/dev/null || true

@@ -34,14 +34,14 @@ on:
         default: ""
         type: string
       k3s_bin_url:
-        description: "k3s 二进制国内中转 URL（url2hc download-to-obs 预签名，过期重转）"
+        description: "k3s 二进制中转 URL（留空=用官方 GitHub；如需国内中转，dispatch 时填临时预签名 URL，勿写入仓库）"
         required: false
-        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/k3s?Expires=1795504324&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=az4IutRXGVzhonWH8vfNMUgtTds%3D"
+        default: ""
         type: string
       k3s_sha_url:
-        description: "k3s sha256 国内中转 URL（同上）"
+        description: "k3s sha256 校验 URL（同上，留空=官方 GitHub）"
         required: false
-        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/sha256sum-amd64.txt?Expires=1795504328&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=hs0Y3DheEzxIHYUWv2fk%3D"
+        default: ""
         type: string
       pause_image:
         description: "agent pause 镜像（SWR 常驻，国内可拉）"
@@ -72,11 +72,11 @@ on:
         type: string
       k3s_bin_url:
         required: false
-        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/k3s?Expires=1795504324&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=hs0Y3DheEzxIHYUWv2fk%3D"
+        default: ""
         type: string
       k3s_sha_url:
         required: false
-        default: "https://xieyucheng.obs.cn-north-9.myhuaweicloud.com/%E4%B8%8B%E8%BD%BD/k3s/v1.37.2%2Bk3s1/sha256sum-amd64.txt?Expires=1795504328&AccessKeyId=HPUAIBICHVRQWFEP6HXC&Signature=hs0Y3DheEzxIHYUWv2fk%3D"
+        default: ""
         type: string
       pause_image:
         required: false

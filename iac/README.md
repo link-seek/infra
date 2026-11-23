@@ -14,11 +14,15 @@ iac/ansible/
   ansible.cfg
   inventory/hosts.yml            # 5 台主机（经 tailnet）
   playbooks/check-baseline.yml   # 只读基线巡检（--check）
+  site.yml                       # 实配入口（roles: baseline + k3s_common）
+  roles/baseline/                # cgroup v2 断言 / 基础包 / 内核模块 / sysctl
+  roles/k3s_common/              # 下发 registries.yaml（不碰 config.yaml、不重启 k3s）
 .github/workflows/
   iac-check.yml          # PR 只做 fmt/validate + ansible syntax-check（不连线上）
   iac-adopt-cloudflare.yml  # dispatch：只读生成 DNS 的 .tf 制品（接管前用）
   iac-cloudflare.yml     # dispatch：plan / adopt(import) / apply（需人工 confirm）
   iac-host-check.yml     # dispatch：进 tailnet 跑 ansible --check（只读）
+  iac-host-apply.yml     # dispatch：--check 预览 → mode=apply(+confirm=APPLY) 真改
 ```
 
 ## 接管已有资源（一次性）
@@ -40,3 +44,6 @@ iac/ansible/
 1. 只读对账（plan / --check）。
 2. CF DNS 接管（本仓 `dns.tf` 已就绪，待 mode=adopt import）。
 3. 主机配置逐步 Ansible 化（systemd/包/文件/cloudflared/tailscale）。
+   - 第一增量已落地：`site.yml`（baseline + k3s_common），safe 可重复；`iac-host-apply.yml` 预览→确认 apply。
+   - 包管理默认关闭（`.69`/`vm-proxy` 源不可达）；需装包时 `-e baseline_manage_packages=true`（best-effort）。
+   - 尚未纳管：k3s config.yaml（由 `k3s-config-reconcile` 渲染）、systemd unit、cloudflared/tailscale。
