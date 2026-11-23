@@ -32,9 +32,11 @@ metadata:
 spec:
   concurrency: 2            # edge agent 可并行
   version: v1.37.2+k3s1
+  # opt-in：边缘节点跑着 Traefik/egress，自动 drain 会断入口。
+  # 要升级某台 agent，先打标签 system-upgrade.k3s.io/enabled=true。
   nodeSelector:
-    matchExpressions:
-      - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+    matchLabels:
+      system-upgrade.k3s.io/enabled: "true"
   serviceAccountName: system-upgrade
   prepare:
     # 与 upgrade 同一个 k3s-upgrade 镜像，先 prepare 好依赖
