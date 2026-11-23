@@ -1,0 +1,39 @@
+# k3s 集群级配置的唯一声明源（版本 + 集群级 flag）。
+# 节点级参数（node-ip / node-external-ip / flannel-iface / MTU）见 node/node-config.yaml。
+# 渲染器 scripts/render-k3s-config.py 合并「本文件 + node-config + k3s-version」生成每台 server 的 config.yaml。
+# 用法：k3s-config-reconcile.yml（render 预览 / verify 漂移 / apply 收敛）。
+#
+# ⚠️ 本文件按 2026-11-23 现网实况 codify（per-node 差异见 overrides）；apply 采用「合并」语义：
+#    只覆盖本声明里的键，其余现有键（token / 未纳管键）原样保留，不整体重写。
+# 注意：token 不进本文件——apply 合并时保留目标机现有 token。
+apiVersion: infra.link-seek/v1
+kind: K3sClusterSpec
+metadata:
+  name: link-seek-k3s
+
+version_file: node/k3s-version          # 版本单一来源（升级只改这一个文件）
+api_server: https://192.168.1.69:6443   # 非 cluster-init 节点加入的 server 地址
+cluster_init_node: mesh-hw-69           # 以 --cluster-init 起 etcd 的首节点
+# 各 server 共用的配置项
+settings:
+  flannel-iface: tailscale0
+
+# 单节点差异（按 hostname）：现网 .41/.69 有 etcd S3 快照配置，.21 没有；
+# write-kubeconfig-mode 仅 .21/.41 有；.69 为 cluster-init（无 token / 无 write-kubeconfig-mode）。
+# 这里如实 codify 现状，后续如需统一再有意改本文件走 PR。
+overrides:
+  mesh-hw-21:
+    write-kubeconfig-mode: "644"
+  mesh-hw-41:
+    write-kubeconfig-mode: "644"
+    etcd-snapshot-schedule-cron: "0 */6 * * *"
+    etcd-snapshot-retention: 28
+    etcd-s3: true
+    etcd-s3-config-secret: k3s-etcd-snapshot-s3-config
+    etcd-s3-retention: 28
+  mesh-hw-69:
+    etcd-snapshot-schedule-cron: "0 */6 * * *"
+    etcd-snapshot-retention: 28
+    etcd-s3: true
+    etcd-s3-config-secret: k3s-etcd-snapshot-s3-config
+    etcd-s3-retention: 28

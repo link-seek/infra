@@ -1,0 +1,62 @@
+# 内网 Traefik 入口（HW VPC）：与公网入口(mesh-ali-gz)同配置，hostNetwork 绑 HW 节点(.69) 的 80/443，
+# 让 VPC 内客户端用「域名→内网IP」访问各应用（IngressRoute 按 Host 路由 + le-prod 证书）。
+# 复用 SA traefik 的 clusterrole 与 acme-cf（Cloudflare DNS-01）secret；acme 存本机 hostPath。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik-internal
+  namespace: kube-system
+  labels: {app: traefik-internal}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: traefik-internal}
+  template:
+    metadata:
+      labels: {app: traefik-internal}
+    spec:
+      serviceAccountName: traefik
+      automountServiceAccountToken: true
+      imagePullSecrets:
+        - name: swr-pull
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: ecs-ies-euleros-jmupervm-zhangzhirui
+      containers:
+        - name: traefik
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/k3s-traefik:3.7.15
+          args:
+            - --entryPoints.web.address=:80
+            - --entryPoints.websecure.address=:443
+            - --entryPoints.web.http.redirections.entryPoint.to=:443
+            - --entryPoints.web.http.redirections.entryPoint.scheme=https
+            - --entryPoints.web.http.redirections.entryPoint.permanent=true
+            - --entryPoints.websecure.http.tls=true
+            - --providers.kubernetescrd
+            - --providers.kubernetescrd.allowExternalNameServices=true
+            - --providers.kubernetesingress
+            - --providers.kubernetesingress.allowExternalNameServices=true
+            - --log.level=INFO
+            - --certificatesresolvers.le-prod.acme.dnsChallenge.provider=cloudflare
+            - --certificatesresolvers.le-prod.acme.dnsChallenge.delayBeforeCheck=30s
+            - --certificatesresolvers.le-prod.acme.email=1223067890@qq.com
+            - --certificatesresolvers.le-prod.acme.storage=/data/acme.json
+            - --certificatesresolvers.le-staging.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory
+            - --certificatesresolvers.le-staging.acme.dnsChallenge.provider=cloudflare
+            - --certificatesresolvers.le-staging.acme.dnsChallenge.delayBeforeCheck=30s
+            - --certificatesresolvers.le-staging.acme.email=1223067890@qq.com
+            - --certificatesresolvers.le-staging.acme.storage=/data/acme-staging.json
+          env:
+            - name: CLOUDFLARE_DNS_API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: acme-cf, key: CF_DNS_API_TOKEN, optional: true}
+          ports:
+            - {name: web, containerPort: 80}
+            - {name: websecure, containerPort: 443}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          hostPath: {path: /var/lib/traefik-internal-data, type: DirectoryOrCreate}

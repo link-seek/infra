@@ -1,8 +1,9 @@
 name: k3s-node-config
 
-# 声明式节点配置（k3s over TS underlay）：node/node-config.yaml 为真相。
-#   verify（默认）：只读核对 config.yaml 关键项 + flannel.1 运行时（dev/local/mtu）+ public-ip，有漂移即 fail。
-#   apply：写入缺失/不符的 config 行（备份），restart=yes 才重启 k3s（重启后请再跑 verify）。
+# 声明式节点配置（k3s over TS underlay），覆盖全部 5 节点（3 server + 2 edge agent）。
+#   verify（默认）：只读核对 config.yaml/unit 关键项 + flannel.1 运行时（local/dev/mtu）+ public-ip，有漂移即 fail。
+#   apply：仅对 server 写入缺失/不符的 config 行（备份），restart=yes 才重启对应服务（重启后请再跑 verify）。
+#          agent 的参数在 systemd unit 的 ExecStart（--node-ip/--flannel-iface），本链只 verify，不 sed unit。
 # 定时 verify 作为漂移巡检。
 on:
   workflow_dispatch:
@@ -14,7 +15,7 @@ on:
         default: verify
         required: true
       restart:
-        description: "apply 后是否重启 k3s（配置有变化时）"
+        description: "apply 后是否重启（配置有变化时）"
         type: choice
         options: ["no", "yes"]
         default: "no"
@@ -32,7 +33,7 @@ concurrency:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
       MODE: ${{ inputs.mode }}
@@ -40,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: join tailnet (tag:user)
+      - name: join tailnet (tag:github)
         env:
           TS_API_KEY: ${{ secrets.TS_API_KEY }}
         run: |
@@ -55,7 +56,7 @@ jobs:
           sudo tailscale up --authkey="$MINTED" --hostname="ci-nodecfg-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
           tailscale status --self | head -2 || true
 
-      - name: reconcile
+      - name: reconcile（5 节点）
         run: |
           set -uo pipefail
           MODE="${MODE:-verify}"; RESTART="${RESTART:-no}"
@@ -67,36 +68,62 @@ jobs:
           python3 - <<'PY' > /tmp/hosts.tsv
           import yaml
           for h in yaml.safe_load(open('node/node-config.yaml'))['hosts']:
-              print('\t'.join([h['name'], h['ssh'], h['node_ip'], h['node_external_ip'], h['flannel_iface'], str(h['expect_flannel_mtu'])]))
+              print('\t'.join([
+                  h['name'], h['ssh'], h.get('role','server'), h.get('service','k3s'),
+                  h['node_ip'], h.get('node_external_ip','') or '', h['flannel_iface'],
+                  str(h['expect_flannel_mtu']),
+              ]))
           PY
           FAIL=0
-          while IFS=$'\t' read -r NAME SSH NIP EIP IFACE MTU; do
+          while IFS=$'\t' read -r NAME SSH ROLE SVC NIP EIP IFACE MTU; do
             [ -n "$NAME" ] || continue
-            echo "===== $NAME ($SSH) ====="
-            OUT=$(ssh $SOPT root@$SSH "MODE=$MODE RESTART=$RESTART NIP=$NIP EIP=$EIP IFACE=$IFACE MTU=$MTU bash -s" <<'REMOTE' || true
+            echo "===== $NAME ($SSH) role=$ROLE svc=$SVC ====="
+            OUT=$(ssh $SOPT root@$SSH "MODE=$MODE RESTART=$RESTART ROLE=$ROLE SVC=$SVC NIP=$NIP EIP=$EIP IFACE=$IFACE MTU=$MTU bash -s" <<'REMOTE' || true
           set -uo pipefail
           CFG=/etc/rancher/k3s/config.yaml
+          SVC="${SVC:-k3s}"
+          # agent 的 flag 在 unit ExecStart，且可能是多行+单引号（--node-ip \n '1.2.3.4'），先规整成单行
+          UNIT_NORM="$(systemctl cat "$SVC" 2>/dev/null | tr -d "'" | tr -d '\\' | tr '\n\t' '  ' | tr -s ' ')"
           drift=0
-          have=$(grep -E '^(node-ip|node-external-ip|flannel-iface):' "$CFG" 2>/dev/null || true)
-          echo "--- config have ---"; echo "$have"
-          for kv in "node-ip: $NIP" "node-external-ip: $EIP" "flannel-iface: $IFACE"; do
-            echo "$have" | grep -qxF "$kv" || { echo "DRIFT-MISSING $kv"; drift=1; }
+          has_kv() { # $1=key $2=val: yaml "key: val" 或 unit "--key val"/"--key=val"
+            local k="$1" v="$2" vre
+            vre="$(printf '%s' "$v" | sed 's/\./\\./g')"
+            grep -qE "^[[:space:]]*${k}:[[:space:]]*\"?${vre}\"?[[:space:]]*$" "$CFG" 2>/dev/null && return 0
+            printf '%s' "$UNIT_NORM" | grep -qE -- "--${k}[=[:space:]]+${vre}([[:space:]\"']|$)" && return 0
+            return 1
+          }
+          echo "--- config.yaml/unit 关键项 ---"
+          { grep -E "node-ip|node-external-ip|flannel-iface" "$CFG" 2>/dev/null || true; printf '%s\n' "$UNIT_NORM" | grep -oE -- "--(node-ip|node-external-ip|flannel-iface)[=[:space:]]+[0-9a-zA-Z./]+" || true; } | head
+          for kv in "node-ip $NIP" "flannel-iface $IFACE"; do
+            set -- $kv; has_kv "$1" "$2" || { echo "DRIFT-MISSING $1=$2"; drift=1; }
           done
+          if [ -n "${EIP:-}" ]; then has_kv node-external-ip "$EIP" || { echo "DRIFT-MISSING node-external-ip=$EIP"; drift=1; }; fi
+          EXPECT_LOCAL="${EIP:-$NIP}"
           rt=$(ip -d link show flannel.1 2>/dev/null | grep -o "local [0-9.]* dev [a-z0-9.]*" || true)
           mtu=$(cat /sys/class/net/flannel.1/mtu 2>/dev/null || echo '?')
-          echo "runtime: $rt mtu=$mtu"
-          [ "$rt" = "local $EIP dev $IFACE" ] || { echo "DRIFT-FLANNEL [$rt]"; drift=1; }
+          echo "runtime: $rt mtu=$mtu expect_local=$EXPECT_LOCAL"
+          [ "$rt" = "local $EXPECT_LOCAL dev $IFACE" ] || { echo "DRIFT-FLANNEL [$rt]"; drift=1; }
           [ "$mtu" = "$MTU" ] || { echo "DRIFT-MTU $mtu"; drift=1; }
-          pub=$(KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl get node "$(hostname)" -o jsonpath='{.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip}' 2>/dev/null || true)
-          echo "public-ip=$pub"; [ "$pub" = "$EIP" ] || { echo "DRIFT-PUB [$pub]"; drift=1; }
+          if [ -n "${EIP:-}" ]; then
+            pub=$(KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl get node "$(hostname)" -o jsonpath='{.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip}' 2>/dev/null || true)
+            echo "public-ip=$pub"; [ "$pub" = "$EIP" ] || { echo "DRIFT-PUB [$pub]"; drift=1; }
+          fi
           if [ "${MODE:-verify}" = apply ] && [ "$drift" = 1 ]; then
-            cp -a "$CFG" "$CFG.bak-$(date +%s)"
-            for kv in "node-ip: $NIP" "node-external-ip: $EIP" "flannel-iface: $IFACE"; do
-              k=${kv%%:*}
-              if grep -q "^$k:" "$CFG"; then sed -i "s#^$k:.*#$kv#" "$CFG"; else echo "$kv" >> "$CFG"; fi
-            done
-            echo APPLIED; cat "$CFG"
-            if [ "${RESTART:-no}" = yes ]; then systemctl restart k3s && echo RESTARTED; fi
+            if [ "${ROLE}" != server ]; then
+              echo "SKIP-APPLY role=${ROLE}（agent 参数在 unit ExecStart，改配置走 k3s-join-edge 重装）"
+            else
+              cp -a "$CFG" "$CFG.bak-$(date +%s)"
+              for kv in "node-ip: $NIP" "flannel-iface: $IFACE"; do
+                k=${kv%%:*}
+                if grep -qE "^[[:space:]]*$k:" "$CFG"; then sed -i "s#^[[:space:]]*$k:.*#$kv#" "$CFG"; else printf '%s\n' "$kv" >> "$CFG"; fi
+              done
+              if [ -n "${EIP:-}" ]; then
+                k=node-external-ip; kv="node-external-ip: $EIP"
+                if grep -qE "^[[:space:]]*$k:" "$CFG"; then sed -i "s#^[[:space:]]*$k:.*#$kv#" "$CFG"; else printf '%s\n' "$kv" >> "$CFG"; fi
+              fi
+              echo APPLIED; cat "$CFG"
+              if [ "${RESTART:-no}" = yes ]; then systemctl restart "$SVC" && echo RESTARTED; fi
+            fi
           fi
           [ "$drift" = 0 ] && echo NODE-OK || echo NODE-DRIFT
           REMOTE

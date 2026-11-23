@@ -1,0 +1,136 @@
+name: k3s-config-reconcile
+
+# 声明式生成/收敛 server 的 /etc/rancher/k3s/config.yaml。
+# 真相：node/k3s-cluster.yaml（集群 settings/版本源）+ node/node-config.yaml（节点参数）+ node/k3s-version。
+#   取代 join/etcd 工作流里散落的 printf/sed 拼 config.yaml 的做法（那些只保留一次性历史用途）。
+# 模式：
+#   render = 只打印每台 server 渲染结果（审阅）
+#   verify = 抓每台现有 config.yaml，比对声明值（缺失/不符即 fail；未纳管的多余键仅告警）
+#   apply  = 备份后写回渲染结果（token 从目标机就地保留，不入仓），restart=yes 才逐台重启并过 quorum 门
+# 仅管理 role=server 的 config.yaml；agent 参数在 systemd unit，见 k3s-node-config / k3s-join-edge。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "render | verify | apply"
+        type: choice
+        options: [render, verify, apply]
+        default: verify
+        required: true
+      restart:
+        description: "apply 后是否逐台重启（配置有变化时）"
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
+        required: true
+      server_tail:
+        description: "kubectl 视角 server（默认 .69）"
+        required: false
+        default: "100.93.119.21"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3s-config-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      MODE: ${{ inputs.mode }}
+      RESTART: ${{ inputs.restart }}
+      SERVER_TAIL: ${{ inputs.server_tail }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: join tailnet (tag:user)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint key"; exit 1; }
+          echo "::add-mask::$MINTED"
+          sudo tailscale up --authkey="$MINTED" --hostname="ci-cfg-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+          tailscale status --self | head -2 || true
+
+      - name: reconcile
+        run: |
+          set -uo pipefail
+          MODE="${MODE:-verify}"; RESTART="${RESTART:-no}"
+          echo "MODE=$MODE RESTART=$RESTART"
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || true
+          echo "== 声明概览 =="; python3 scripts/render-k3s-config.py --list
+          NODES_EXPECT="$(python3 -c "import yaml;print(len(yaml.safe_load(open('node/node-config.yaml'))['hosts']))")"
+          echo "NODES_EXPECT=$NODES_EXPECT"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/ci_key"
+
+          python3 - > /tmp/servers.tsv <<'PY'
+          import yaml
+          for h in yaml.safe_load(open('node/node-config.yaml'))['hosts']:
+              if h.get('role','server') == 'server':
+                  print('\t'.join([h['name'], h['ssh']]))
+          PY
+
+          FAIL=0
+          while IFS=$'\t' read -r NAME SSH; do
+            [ -n "$NAME" ] || continue
+            echo "===== $NAME ($SSH) ====="
+            if [ "$MODE" = render ]; then
+              python3 scripts/render-k3s-config.py --host "$NAME"; continue
+            fi
+            ssh $SOPT root@$SSH 'cat /etc/rancher/k3s/config.yaml' > /tmp/cur.yaml 2>/dev/null || { echo "FAIL: 读不到 $NAME config.yaml"; FAIL=1; continue; }
+            python3 scripts/render-k3s-config.py --host "$NAME" --json > /tmp/want.json
+            if ! python3 - "$NAME" <<'PY'
+          import json,sys,yaml
+          name=sys.argv[1]
+          want=json.load(open('/tmp/want.json'))
+          cur=yaml.safe_load(open('/tmp/cur.yaml')) or {}
+          bad=[]
+          for k,v in want.items():
+              if k not in cur: bad.append(f"MISSING {k}={v!r}")
+              elif cur[k]!=v: bad.append(f"DIFF {k}: want {v!r} got {cur[k]!r}")
+          extra=[k for k in cur if k not in want and k!='token']
+          for b in bad: print("  "+b)
+          if extra: print("  WARN 未纳管键:", ", ".join(extra))
+          print("  "+("OK" if not bad else "DRIFT"))
+          sys.exit(0 if not bad else 1)
+          PY
+            then FAIL=1; fi
+            if [ "$MODE" = apply ]; then
+              # 合并语义：以目标机现有 config.yaml 为底（保留 token / 未纳管键），只覆盖声明键
+              cp /tmp/cur.yaml /tmp/cur-merge.yaml
+              python3 - <<'PY'
+          import json,yaml
+          cur=yaml.safe_load(open('/tmp/cur-merge.yaml')) or {}
+          want=json.load(open('/tmp/want.json'))
+          cur.update(want)
+          open('/tmp/final.yaml','w').write(yaml.safe_dump(cur,sort_keys=False,allow_unicode=True))
+          PY
+              scp $SOPT /tmp/final.yaml root@$SSH:/tmp/k3s-config.new
+              ssh $SOPT root@$SSH 'set -euo pipefail; C=/etc/rancher/k3s/config.yaml; cp -a "$C" "$C.bak-$(date +%s)"; install -m 600 /tmp/k3s-config.new "$C"; rm -f /tmp/k3s-config.new; echo WROTE; sed "s/^\(token:\).*/\1 ***/" "$C"'
+              if [ "$RESTART" = yes ]; then
+                ssh $SOPT root@$SSH 'systemctl restart k3s && sleep 20 && systemctl is-active k3s'
+                for i in $(seq 1 24); do
+                  sleep 15
+                  READY=$(ssh $SOPT root@$SERVER_TAIL "kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready'" || echo 0)
+                  echo "ready=$READY/$NODES_EXPECT ($i/24)"
+                  [ "$READY" = "$NODES_EXPECT" ] && break
+                  [ "$i" = 24 ] && { echo "FAIL: $NAME 重启后未恢复全 Ready，停"; exit 1; }
+                done
+              fi
+            fi
+          done < /tmp/servers.tsv
+          shred -u ~/.ssh/ci_key 2>/dev/null || true
+          [ "$MODE" = render ] && { echo "RENDER-DONE"; exit 0; }
+          if [ "$FAIL" = 0 ]; then echo "RESULT: OK"; else echo "RESULT: 存在漂移/失败"; exit 1; fi

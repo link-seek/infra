@@ -1,0 +1,7 @@
+# SUC 控制面命名空间（privileged：升级 Job 需 hostPath/特权）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: system-upgrade
+  labels:
+    pod-security.kubernetes.io/enforce: privileged

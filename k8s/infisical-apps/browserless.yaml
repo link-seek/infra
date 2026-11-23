@@ -5,7 +5,10 @@ spec:
   hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
   syncConfig: {resyncInterval: 30s, instantUpdates: false}
   authentication:
-    universalAuth:
-      credentialsRef: {secretName: browserless-ua, secretNamespace: opencode-team}
+    # Phase B 试点：Kubernetes Auth（operator 用 SA 短时 token 认证，无需 *-ua secret）
+    kubernetesAuth:
+      identityId: d9d37159-381c-48e2-a448-f26eb3bff0d4
+      serviceAccountRef: {name: browserless-infisical, namespace: opencode-team}
+      autoCreateServiceAccountToken: true
       secretsScope: {projectSlug: browserless, envSlug: prod, secretsPath: /, recursive: false}
   managedSecretReference: {secretName: browserless-env, secretNamespace: opencode-team, creationPolicy: Orphan}

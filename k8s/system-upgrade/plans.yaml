@@ -1,0 +1,47 @@
+# k3s 声明式升级 Plan（system-upgrade-controller）。
+#
+# ⚠️ version 与 node/k3s-version 必须同值：升级流程 = 改 node/k3s-version + 本文件 version
+#    + 确认 k3s-upgrade 镜像已镜像到 SWR → apply。SUC 会把 version 的 "+" 换成 "-" 作为镜像 tag
+#    （v1.37.2+k3s1 → k3s-upgrade:v1.37.2-k3s1）。
+# 后续可改为 Flux postBuild 从 node/k3s-version 注入，消除这处手工同步（见目录 README）。
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-server
+  namespace: system-upgrade
+  labels:
+    k3s-upgrade: server
+spec:
+  concurrency: 1            # server 逐台升级，保护 etcd quorum
+  version: v1.37.2+k3s1
+  nodeSelector:
+    matchExpressions:
+      - {key: node-role.kubernetes.io/control-plane, operator: Exists}
+  serviceAccountName: system-upgrade
+  cordon: true
+  upgrade:
+    image: swr.cn-north-9.myhuaweicloud.com/link-seek/k3s-upgrade:v1.37.2-k3s1
+---
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-agent
+  namespace: system-upgrade
+  labels:
+    k3s-upgrade: agent
+spec:
+  concurrency: 2            # edge agent 可并行
+  version: v1.37.2+k3s1
+  nodeSelector:
+    matchExpressions:
+      - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+  serviceAccountName: system-upgrade
+  prepare:
+    # 与 upgrade 同一个 k3s-upgrade 镜像，先 prepare 好依赖
+    image: swr.cn-north-9.myhuaweicloud.com/link-seek/k3s-upgrade:v1.37.2-k3s1
+    args: ["prepare", "k3s-server"]
+  drain:
+    force: true
+    skipWaitForDeleteTimeout: 60
+  upgrade:
+    image: swr.cn-north-9.myhuaweicloud.com/link-seek/k3s-upgrade:v1.37.2-k3s1

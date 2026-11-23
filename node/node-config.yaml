@@ -3,22 +3,50 @@
 # 纪律：node-ip 钉 LAN（etcd/API 确定性）；node-external-ip=该机 tailnet IP（让 flannel
 #       public-ip = VTEP，跨云才能通）；flannel-iface=tailscale0（VXLAN over TS，MTU 1230）。
 # 2026-11-21 L1 迁移（.41→.21→.69）已验证并落地。
+#
+# role: server = control-plane+etcd（三台华为云）；agent = edge（ali-gz 公网入口、vm-proxy 东京出口）。
+#   - server 的 node-ip/flannel-iface/node-external-ip 落在 config.yaml；
+#   - agent 的同类参数由 k3s 官方 install 写进 systemd unit 的 ExecStart（--node-ip/--flannel-iface），
+#     drift 检查会同时读 config.yaml 与 unit，因此两类都能覆盖。
+#   - server 可 apply（sed config.yaml + 可选重启）；agent 仅 verify（参数在 unit，改配置走 k3s-join-edge 重装）。
 hosts:
   - name: mesh-hw-21
     ssh: 100.100.246.95
+    role: server
+    service: k3s
     node_ip: 192.168.1.21
     node_external_ip: 100.100.246.95
     flannel_iface: tailscale0
     expect_flannel_mtu: 1230
   - name: mesh-hw-41
     ssh: 100.73.182.4
+    role: server
+    service: k3s
     node_ip: 192.168.1.41
     node_external_ip: 100.73.182.4
     flannel_iface: tailscale0
     expect_flannel_mtu: 1230
   - name: mesh-hw-69
     ssh: 100.93.119.21
+    role: server
+    service: k3s
     node_ip: 192.168.1.69
     node_external_ip: 100.93.119.21
+    flannel_iface: tailscale0
+    expect_flannel_mtu: 1230
+  - name: mesh-ali-gz
+    ssh: 100.85.128.116
+    role: agent
+    service: k3s-agent
+    node_ip: 100.85.128.116
+    node_external_ip: ""
+    flannel_iface: tailscale0
+    expect_flannel_mtu: 1230
+  - name: vm-proxy
+    ssh: 100.73.221.121
+    role: agent
+    service: k3s-agent
+    node_ip: 100.73.221.121
+    node_external_ip: ""
     flannel_iface: tailscale0
     expect_flannel_mtu: 1230
