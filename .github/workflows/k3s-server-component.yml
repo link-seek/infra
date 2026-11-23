@@ -1,23 +1,31 @@
 name: k3s-server-component
-# 通用能力：管 server packaged component（HelmChartConfig 下发＋disable 开关＋逐台滚动重启）。
-# 可复用：component/manifest/mode 全参数化；加组件不改本文件（开闭）。
-# 阶段一用法：component=traefik 下发 ClusterIP 版 HelmChartConfig，去 disable，逐台重启。
-# 切流（LoadBalancer/缩池）在本链之外另议，不混。
+# 通用能力：管 server packaged component（disable 开关 + registries 下发 + 逐台滚动重启 + 一次性清理节点 manifests 残留）。
+#
+# ⚠️ 单一写入者原则：packaged component 的 HelmChartConfig 一律由 Flux 下发（k8s/**），本链**不再** scp 任何
+#    manifest 到 /var/lib/rancher/k3s/server/manifests/。历史上本链会把 k8s/traefik-edge/k3s-traefik-config.yaml
+#    同时塞进 manifests 目录，和 Flux 形成"双写"（改仓被旧副本回滚 / prune 复活 / ownership 互踩）。
+#
+# 注：HelmChartConfig 当前仍由现有 Flux Kustomization `traefik-edge` 管理（本 PR 不迁移 ownership，避免
+#     两 Kustomization 争抢同一对象的时序问题）。仅去掉 scp + 提供 mode=purge 清节点残留，双写即消除。
+#     后续若要把它从"试点目录 k8s/traefik-edge"迁出，需单开 PR 并按"先建新 Kustomization 接管→再删旧"
+#     的顺序做，避免迁移瞬间对象被旧 Kustomization prune 掉。
+#
+# 阶段一用法：component=traefik（Flux 已管 HelmChartConfig）→ 本链只需 remove disable + 滚动重启。
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "recon=只读；apply=下发＋去disable＋滚动重启；restart=仅滚动重启；ship=只下发（HelmChartConfig 热生效类）"
+        description: "recon=只读；apply=去/加disable＋registries＋滚动重启；restart=仅滚动重启；ship=只改disable/registries不重启；purge=删除节点 manifests 残留（一次性去双写）"
         required: false
         default: "recon"
         type: choice
-        options: [recon, apply, restart, ship]
+        options: [recon, apply, restart, ship, purge]
       component:
         description: "packaged component 名（traefik/coredns/servicelb…）"
         required: false
         default: "traefik"
       manifest_path:
-        description: "仓内 HelmChartConfig 声明路径（apply 时下发到 manifests 目录）"
+        description: "仅 purge 用：要清理的节点 manifests 文件名（相对路径，取其 basename）"
         required: false
         default: "k8s/traefik-edge/k3s-traefik-config.yaml"
       disable:
@@ -69,7 +77,7 @@ jobs:
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-srvcomp-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
       - name: recon 三处抓现状
-        if: inputs.mode == 'recon' || inputs.mode == 'apply' || inputs.mode == 'ship'
+        if: inputs.mode == 'recon' || inputs.mode == 'apply' || inputs.mode == 'ship' || inputs.mode == 'purge'
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -77,25 +85,22 @@ jobs:
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
           for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
             echo "===== $H ====="
-            ssh $SOPT "root@$H" 'echo "-- config.yaml (token 脱敏) --"; sed "s/^\\(token:\\)\\s.*\\$/\\1 ***/" /etc/rancher/k3s/config.yaml 2>/dev/null; echo "-- unit disable? --"; systemctl cat k3s 2>/dev/null | grep -i -E "disable|ExecStart=" || echo "unit: no disable"; echo "-- manifests ${{ inputs.component }}? --"; ls /var/lib/rancher/k3s/server/manifests/ | grep -i "${{ inputs.component }}" || echo "manifests: absent"' || echo "$H SSH-FAIL"
+            ssh $SOPT "root@$H" 'echo "-- config.yaml (token 脱敏) --"; sed "s/^\(token:\)\s.*$/\1 ***/" /etc/rancher/k3s/config.yaml 2>/dev/null; echo "-- unit disable? --"; systemctl cat k3s 2>/dev/null | grep -i -E "disable|ExecStart=" || echo "unit: no disable"; echo "-- manifests ${{ inputs.component }}? --"; ls /var/lib/rancher/k3s/server/manifests/ | grep -i "${{ inputs.component }}" || echo "manifests: absent"' || echo "$H SSH-FAIL"
           done
           shred -u ~/.ssh/ci_key
           echo RECON-DONE
-      - name: 下发声明（apply 含去disable；ship 需传 disable=keep）
+      - name: disable 开关（apply/ship；不再下发任何 manifest）
         if: inputs.mode == 'apply' || inputs.mode == 'ship'
         run: |
           set -euo pipefail
-          [ -f "${{ inputs.manifest_path }}" ] || { echo "FAIL: 声明文件不在仓：${{ inputs.manifest_path }}"; exit 1; }
-          python3 -c "import yaml; d=yaml.safe_load(open('${{ inputs.manifest_path }}')); assert d['kind']=='HelmChartConfig', d.get('kind')"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
-          FNAME="$(basename "${{ inputs.manifest_path }}")"
-          scp $SOPT scripts/k3s-unit-disable.py "root@${{ inputs.hw69_tail }}:/tmp/k3s-unit-disable.py"
-          for H in ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do scp $SOPT scripts/k3s-unit-disable.py "root@$H:/tmp/k3s-unit-disable.py"; done
           for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
-            echo "===== ship $H ====="
-            scp $SOPT "${{ inputs.manifest_path }}" "root@$H:/var/lib/rancher/k3s/server/manifests/$FNAME"
+            scp $SOPT scripts/k3s-unit-disable.py "root@$H:/tmp/k3s-unit-disable.py"
+          done
+          for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
+            echo "===== disable $H ====="
             ssh $SOPT "root@$H" 'set -euo pipefail; C=/etc/rancher/k3s/config.yaml; M="${{ inputs.component }}";
               case "${{ inputs.disable }}" in
                 remove) [ -f "$C" ] && sed -i "/^[[:space:]]*-[[:space:]]*$M[[:space:]]*$/d" "$C" || true; U=/etc/systemd/system/k3s.service; [ -f "$U" ] && python3 /tmp/k3s-unit-disable.py "$U" "$M" remove || true; systemctl daemon-reload || true; echo "disable removed" ;;
@@ -104,7 +109,23 @@ jobs:
               esac; grep -i -A3 "disable" "$C" 2>/dev/null || echo "config: no disable stanza"'
           done
           shred -u ~/.ssh/ci_key
-          echo APPLY-DONE
+          echo DISABLE-DONE
+      - name: 清理节点 manifests 残留（mode=purge，一次性去双写）
+        if: inputs.mode == 'purge'
+        run: |
+          set -euo pipefail
+          FNAME="$(basename "${{ inputs.manifest_path }}")"
+          [ -n "$FNAME" ] || { echo "FAIL: 需传 manifest_path 指定要清理的文件名"; exit 1; }
+          echo "将删除三台 server 上 /var/lib/rancher/k3s/server/manifests/$FNAME（Flux 已是唯一写入者）"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=no -o StrictHostKeyChecking=accept-new -i ~/.ssh/ci_key"
+          for H in ${{ inputs.hw69_tail }} ${{ inputs.hw21_tail }} ${{ inputs.hw41_tail }}; do
+            echo "===== purge $H ====="
+            ssh $SOPT "root@$H" "M=/var/lib/rancher/k3s/server/manifests/$FNAME; if [ -f \"\$M\" ]; then rm -f \"\$M\" && echo PURGED \$M; else echo ABSENT \$M; fi; ls /var/lib/rancher/k3s/server/manifests/ | grep -i traefik || echo 'manifests: traefik.yaml only'"
+          done
+          shred -u ~/.ssh/ci_key
+          echo PURGE-DONE
       - name: ship registries.yaml（空即跳过）
         if: (inputs.mode == 'apply' || inputs.mode == 'ship') && inputs.reg_src != ''
         run: |
