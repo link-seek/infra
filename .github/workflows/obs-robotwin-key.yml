@@ -27,7 +27,6 @@ jobs:
           hcloud configure set --cli-access-key="$AK" --cli-secret-key="$SK" --cli-region=cn-north-4 --cli-mode=AKSK --cli-agree-privacy-statement=true 2>&1|tail -1
           OBS(){ hcloud OBS "$@" -i="$AK" -k="$SK" -e="$ENDP" 2>&1; }
           mkdir -p /tmp/kd; OBS cp obs://robotwin-assets/key/ /tmp/kd -r -f >/dev/null 2>&1
-          # parse credentials.csv AK/SK -> configure
           python3 - <<'PY' > /tmp/ck.env
           import re
           t=open('/tmp/kd/key/credentials.csv',errors='ignore').read()
@@ -43,16 +42,32 @@ jobs:
           print("AK2='%s'"%(ak or "")); print("SK2='%s'"%(sk or ""))
           PY
           . /tmp/ck.env
-          echo "AK2=${AK2:0:6}**** lenSK=${#SK2}"
-          [ -z "$AK2" ] && { echo NO_CREDS; exit 0; }
           echo "::add-mask::$AK2"; echo "::add-mask::$SK2"
           hcloud configure set --cli-access-key="$AK2" --cli-secret-key="$SK2" --cli-region=cn-north-4 --cli-mode=AKSK --cli-agree-privacy-statement=true >/dev/null 2>&1
-          echo "== ListServersDetails -> SG ids =="
-          hcloud ECS ListServersDetails --cli-region=cn-north-4 --limit=100 > /tmp/sl.json 2>/tmp/sle; head -c120 /tmp/sle
+          SG=ab0adda4-9bfc-49d7-8dd6-0958bb4d3416
+          echo "== current ingress rules (22 / all) =="
+          hcloud VPC ListSecurityGroupRules/v3 --security_group_id $SG --cli-region=cn-north-4 > /tmp/r.json 2>/tmp/re; head -c120 /tmp/re
           python3 - <<'PY'
           import json
-          d=json.load(open('/tmp/sl.json'))
-          for s in d.get('servers',[]):
-              if s.get('id') in ('c5b805bd-5e8d-4ba5-a5ab-7523244da0fa','7f39cb83-1a5c-4792-b65e-e578d7ddb88d'):
-                  print(s['id'], s.get('name'), 'SG=', s.get('security_groups'))
+          d=json.load(open('/tmp/r.json'))
+          rs=d.get('security_group_rules') or []
+          for r in rs:
+              if (r.get('direction')=='ingress'):
+                  print("ingress", r.get('protocol'), r.get('port_range_min'),'-',r.get('port_range_max'), r.get('remote_ip_prefix'), r.get('ethertype'))
           PY
+          EXIST=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(sum(1 for r in (d.get('security_group_rules') or []) if r.get('direction')=='ingress' and r.get('protocol')=='tcp' and (r.get('remote_ip_prefix') or '').startswith('121.37.127.185') and str(r.get('port_range_min'))=='22'))")
+          echo "EXIST_185_22=$EXIST"
+          if [ "$EXIST" = "0" ]; then
+            echo "== create rule 121.37.127.185/32 tcp22 =="
+            hcloud VPC CreateSecurityGroupRule/v3 --cli-region=cn-north-4 \
+              --security_group_rule.security_group_id=$SG \
+              --security_group_rule.direction=ingress \
+              --security_group_rule.ethertype=IPv4 \
+              --security_group_rule.protocol=tcp \
+              --security_group_rule.port_range_min=22 \
+              --security_group_rule.port_range_max=22 \
+              --security_group_rule.remote_ip_prefix=121.37.127.185/32 \
+              --security_group_rule.description=opencode-team-69-egress 2>&1 | head -c 400; echo " CREATE_RC=$?"
+          else echo ALREADY_PRESENT; fi
+          echo "== after =="
+          hcloud VPC ListSecurityGroupRules/v3 --security_group_id $SG --cli-region=cn-north-4 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);print('\n'.join('ingress '+str(r.get('protocol'))+' '+str(r.get('port_range_min'))+'-'+str(r.get('port_range_max'))+' '+str(r.get('remote_ip_prefix')) for r in (d.get('security_group_rules') or []) if r.get('direction')=='ingress' and str(r.get('port_range_min'))=='22'))"
