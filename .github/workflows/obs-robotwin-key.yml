@@ -48,7 +48,7 @@ jobs:
           echo "PROJECT_ID=$PID"
           SG=ab0adda4-9bfc-49d7-8dd6-0958bb4d3416
           echo "== current SG rules =="
-          hcloud VPC ShowSecurityGroup/v3 --security_group_id $SG --project_id "$PID" --cli-region=cn-north-4 > /tmp/sg.json 2>/tmp/sge; head -c150 /tmp/sge
+          hcloud VPC ShowSecurityGroup/v3 --security_group_id="$SG" --project_id="$PID" --cli-region=cn-north-4 > /tmp/sg.json 2>/tmp/sge; head -c150 /tmp/sge
           python3 - <<'PY'
           import json
           try:
@@ -58,7 +58,7 @@ jobs:
           except Exception as e: print('parse-fail',e,open('/tmp/sg.json').read()[:200])
           PY
           echo "== create rule 121.37.127.185/32 tcp 22 =="
-          hcloud VPC CreateSecurityGroupRule/v3 --project_id "$PID" --cli-region=cn-north-4 \
+          hcloud VPC CreateSecurityGroupRule/v3 --project_id="$PID" --cli-region=cn-north-4 \
             --security_group_rule.security_group_id=$SG \
             --security_group_rule.direction=ingress \
             --security_group_rule.ethertype=IPv4 \
@@ -67,4 +67,4 @@ jobs:
             --security_group_rule.remote_ip_prefix=121.37.127.185/32 \
             --security_group_rule.description=opencode-team-69-egress > /tmp/cr.json 2>/tmp/cre; echo "rc=$?"; head -c 400 /tmp/cre; echo; head -c 400 /tmp/cr.json; echo
           echo "== after rules (22) =="
-          hcloud VPC ShowSecurityGroup/v3 --security_group_id $SG --project_id "$PID" --cli-region=cn-north-4 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);sg=d.get('security_group') or d;[print('rul',r.get('direction'),r.get('protocol'),r.get('multiport'),r.get('port_range_min'),r.get('remote_ip_prefix')) for r in (sg.get('security_group_rules') or []) if str(r.get('multiport'))=='22' or str(r.get('port_range_min'))=='22' or '121.37.127.185' in str(r.get('remote_ip_prefix'))]"
+          hcloud VPC ShowSecurityGroup/v3 --security_group_id="$SG" --project_id="$PID" --cli-region=cn-north-4 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);sg=d.get('security_group') or d;[print('rul',r.get('direction'),r.get('protocol'),r.get('multiport'),r.get('port_range_min'),r.get('remote_ip_prefix')) for r in (sg.get('security_group_rules') or []) if str(r.get('multiport'))=='22' or str(r.get('port_range_min'))=='22' or '121.37.127.185' in str(r.get('remote_ip_prefix'))]"
