@@ -25,10 +25,13 @@ jobs:
           set -euo pipefail
           curl -fsSL https://tailscale.com/install.sh | sh
           TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
-          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+          RESP="$(mktemp)"
+          CODE="$(curl -sS -m 30 -o "$RESP" -w '%{http_code}' -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
             -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:user"]}}},"expirySeconds":3600}' \
-            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))")"
-          [ -n "$MINTED" ] || { echo "FAIL: user key mint 失败"; exit 1; }
+            https://api.tailscale.com/api/v2/tailnet/-/keys)"
+          MINTED="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('key',''))" < "$RESP")"
+          if [ -z "$MINTED" ]; then echo "FAIL: user key mint 失败 HTTP=$CODE body=$(head -c 300 "$RESP")"; shred -u "$RESP"; exit 1; fi
+          shred -u "$RESP"
           echo "::add-mask::$MINTED"
           echo "key=$MINTED" >> "$GITHUB_OUTPUT"
           unset MINTED
