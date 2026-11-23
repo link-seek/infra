@@ -58,7 +58,7 @@ def desired(keep, protect):
         "rules": [
             {
                 "template": "tag_rule",
-                "params": {"num": int(keep)},
+                "params": json.dumps({"num": str(int(keep))}),
                 "tag_selectors": [{"kind": "label", "pattern": p} for p in protect],
             }
         ],
