@@ -1,0 +1,18 @@
+# Kyverno 策略（#317 item7）：Enforce，作用域为受管 app 命名空间。
+# dependsOn kyverno 确保 CRD 就绪后再下发。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno-policies
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/kyverno-policies
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: flux-system
+  dependsOn:
+    - name: kyverno
+  wait: true
+  timeout: 5m
