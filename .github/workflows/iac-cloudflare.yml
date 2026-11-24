@@ -40,7 +40,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.5
+          terraform_version: v1.17.2
           terraform_wrapper: false
 
       - name: 危险模式需 confirm=yes
