@@ -35,7 +35,7 @@ spec:
             - name: NFS_SERVER
               value: 10.43.200.200
             - name: NFS_PATH
-              value: /exports
+              value: /
           resources:
             requests: {cpu: 50m, memory: 64Mi}
             limits: {cpu: 500m, memory: 256Mi}
@@ -43,4 +43,4 @@ spec:
         - name: nfs-client-root
           nfs:
             server: 10.43.200.200
-            path: /exports
+            path: /
