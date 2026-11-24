@@ -1,0 +1,11 @@
+# opencode Helm chart（#317 Phase 2）：chart 在 SWR OCI，repo 私有 → secretRef swr-pull。
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: opencode-chart
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  url: oci://swr.cn-north-9.myhuaweicloud.com/link-seek/opencode
+  ref: {tag: 0.1.0}
+  secretRef: {name: swr-pull}
