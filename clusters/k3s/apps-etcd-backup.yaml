@@ -1,0 +1,17 @@
+# Flux Kustomization: etcd-backup（k3s 原生 S3 异机备份，OBS north-9 同 region）。
+# 由 flux-system（path ./clusters/k3s）收编 → merge 即下发。
+# 链路：CronJob（6h）→ metadata 取 24h 临时钥匙 → PATCH kube-system Secret → k3s 定时快照直传 OBS。
+# 无 HW21，无宿主机 cron，无落盘钥匙。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: etcd-backup
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/etcd-backup
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: flux-system
+  wait: false

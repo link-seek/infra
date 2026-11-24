@@ -1,15 +1,11 @@
 name: k3s-etcd-obs-backup
 # etcd 异机备份（OBS north-9，同 region）：k3s 原生 S3 直传，零中转。
 # 链路：k3s 定时快照（6h）→ server 读 kube-system Secret（三元组临时钥匙）→ 直传 OBS。
-# 钥匙：CronJob（k8s/etcd-backup）每 6h 从 metadata 取 24h 临时钥匙刷 Secret；HW21 已出局。
-# 用法：dispatch mode=deploy（全量下发+验证）；每天定时只跑 verify（新增对象 30h 内必须有）。
+# 钥匙：CronJob（k8s/etcd-backup，经 Flux 下发）每 6h 从 metadata 取 24h 临时钥匙刷 Secret；HW21 已出局。
+# 用法：dispatch 即全量下发+验证（RBAC/CronJob 由 Flux 对账，只读验证已删：直接登录集群查看）。
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: "deploy=下发+验证；verify=只验"
-        required: false
-        default: "deploy"
       hw69_tail:
         description: ".69 tailnet 地址（直连免跳）"
         required: false
@@ -22,8 +18,6 @@ on:
         description: "runner 进网身份（需 user 才能登 mesh）"
         required: false
         default: "tag:github"
-  schedule:
-    - cron: "0 1 * * *"
 concurrency:
   group: k3s-etcd-obs
   cancel-in-progress: false
@@ -48,7 +42,7 @@ jobs:
           echo "::add-mask::$MINTED"
           timeout 120 sudo tailscale up --authkey="$MINTED" --hostname="ci-etcd-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
       - name: 下发 RBAC+CronJob（digest 现取现钉）
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy'
+        if: github.event_name == 'workflow_dispatch'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
           SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
@@ -74,15 +68,12 @@ jobs:
           [ -n "\$WANT" ] || { echo "FAIL: 取不到 cronjob digest"; exit 1; }
           if crictl images --digests 2>/dev/null | grep -q "\$WANT"; then echo "image cached: \$WANT"; else echo "WARN: digest \$WANT 未在 .69 缓存（Job 将用 imagePullSecrets 现拉，不阻断；真门禁是后续 REFRESH-OK）"; fi
           echo STAGE-apply
-          # swr-pull 已在 kube-system（集群常态存在）；缺则失败。避免依赖未传到远端的 SWR 变量（旧 bug）
-          kubectl -n kube-system get secret swr-pull >/dev/null 2>&1 || { echo "FAIL: kube-system/swr-pull 不存在"; exit 1; }
-          kubectl apply -f k8s/etcd-backup/rbac.yaml
-          kubectl apply -f k8s/etcd-backup/refresh-script.yaml
-          kubectl apply -f k8s/etcd-backup/cronjob.yaml
+          # RBAC+CronJob 已收进 Flux（k8s/etcd-backup + clusters/k3s/apps-etcd-backup.yaml）；
+          # 此处不再 kubectl apply，只等 Flux 对账（声明式唯一真相）。
           echo RBAC-CRONJOB-OK
           INNEREOF
       - name: 首刷 + config 下发 + 滚动重启 + 实传验证
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy'
+        if: github.event_name == 'workflow_dispatch'
         env:
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
         run: |
@@ -166,45 +157,3 @@ jobs:
           echo "== 清旧链（跳板残留） =="
           rm -f /usr/local/bin/k3s-etcd-fetch-upload.sh /etc/cron.d/k3s-etcd-fetch-upload /tmp/k3s-etcd-fetch-upload.sh /tmp/etcd-bak.tgz
           echo DEPLOY-OK
-      - name: 验（CR + 刷新新鲜度，不碰钥匙值）
-        env:
-          SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
-          H69="${{ inputs.hw69_tail }}"; [ -n "$H69" ] || H69="100.93.119.21"
-          H41="${{ inputs.hw41_tail }}"; [ -n "$H41" ] || H41="100.73.182.4"
-          ssh-keyscan -H "$H69" >> ~/.ssh/known_hosts 2>/dev/null || true
-          ssh-keyscan -H "$H41" >> ~/.ssh/known_hosts 2>/dev/null || true
-          SOPT="-o BatchMode=no -o StrictHostKeyChecking=no -i ~/.ssh/ci_key"
-          K69="ssh -n $SOPT root@$H69"
-          kexec() { $K69 "kubectl $*" 2>/dev/null || ssh -n $SOPT root@$H41 "kubectl $*"; }
-          echo "== Secret 刷新新鲜度（<12h） =="
-          kexec "get secret -n kube-system k3s-etcd-snapshot-s3-config -o jsonpath='{.metadata.annotations.refreshed-at}'" | python3 -c "
-          import sys,datetime
-          ts = sys.stdin.read().strip()
-          age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(ts.replace('Z','+00:00'))).total_seconds()
-          print('refreshed-at=' + ts + ' age_h=%.1f' % (age/3600))
-          sys.exit(0 if age < 43200 else 1)" || { echo "FAIL: Secret 超 12h 没刷"; exit 1; }
-          echo "== S3 快照新鲜度（<30h） =="
-          kexec "get etcdsnapshotfile -o json" | python3 -c "
-          import json,sys,datetime
-          now = datetime.datetime.now(datetime.timezone.utc)
-          best = None
-          for it in json.load(sys.stdin).get('items', []):
-              loc = ((it.get('spec') or {}).get('location')) or ''
-              if not loc.startswith('s3://'):
-                  continue
-              ts = ((it.get('status') or {}).get('creationTime')) or ((it.get('metadata') or {}).get('creationTimestamp')) or ''
-              try:
-                  age = (now - datetime.datetime.fromisoformat(ts.replace('Z','+00:00'))).total_seconds()
-              except Exception:
-                  continue
-              if best is None or age < best[0]:
-                  best = (age, loc)
-          if best is None:
-              print('FAIL: 没有 S3 快照 CR'); sys.exit(1)
-          print('newest s3 snapshot age_h=%.1f %s' % (best[0]/3600, best[1]))
-          sys.exit(0 if best[0] < 108000 else 1)" || { echo "FAIL: 30h 内无 S3 快照"; exit 1; }
-          echo VERIFY-DONE
