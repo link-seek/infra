@@ -4,21 +4,21 @@ registry: swr.cn-north-9.myhuaweicloud.com
 repos:
   # 发布制品：每次 main 合并 + 手动 dispatch 都会新增（当前 ~10）
   - name: link-seek/docker-images-manifests
-    keep: 30
+    keep: 60   # k8s 变更 1–2/天 → 约 1–2 个月
   # 主力工具镜像（当前 41，接近需要清理的阈值）
   - name: link-seek/opencode-tools
-    keep: 10
+    keep: 40   # 版本 ~0.2/天 → 约 6 个月；ci-* 另由清理任务保留 3 个
   - name: link-seek/opencode-team
     keep: 20
   # 应用镜像
   - name: link-seek/litellm-gateway
-    keep: 15
+    keep: 30
   - name: link-seek/browserless-chrome-cjk
-    keep: 10
+    keep: 30
   - name: link-seek/erpnext
-    keep: 10
+    keep: 30
   - name: link-seek/reloader
-    keep: 10
+    keep: 30
   # 上游中转（按需，保留少量）
   - name: link-seek/cosign
     keep: 5

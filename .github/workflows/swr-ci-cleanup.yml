@@ -1,0 +1,39 @@
+name: swr-ci-cleanup
+
+# 每天清理 ci-* 临时 tag，只保留最近 3 个（默认 dry-run，需 apply=true）。
+on:
+  schedule:
+    - cron: "0 19 * * *"   # 03:00 CST
+  workflow_dispatch:
+    inputs:
+      apply:
+        required: true
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo
+          python3 -m pip install --quiet pyyaml
+      - name: login
+        run: echo "$SWR_LOGIN_PASS" | skopeo login swr.cn-north-9.myhuaweicloud.com -u "$SWR_LOGIN_USER" --password-stdin
+      - name: cleanup
+        run: |
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            python3 scripts/swr_ci_cleanup.py --apply
+          else
+            python3 scripts/swr_ci_cleanup.py
+          fi
