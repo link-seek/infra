@@ -1,0 +1,46 @@
+# nfs-subdir-external-provisioner（上游原样重打，SWR digest pin 即版本）。
+# 每个 RWX PVC 自动在 /exports 下建子目录；archiveOnDelete=false 删 PVC 即删数据（见 StorageClass）。
+# 单副本 + Recreate（和 server 同节点的 NFS 挂载不能 multi-attach，必须先下后上）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nfs-provisioner
+  namespace: nfs
+  labels:
+    app: nfs-provisioner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nfs-provisioner
+  template:
+    metadata:
+      labels:
+        app: nfs-provisioner
+    spec:
+      serviceAccountName: nfs-provisioner
+      imagePullSecrets:
+        - name: swr-pull
+      containers:
+        - name: nfs-provisioner
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/nfs-provisioner@sha256:63d5e04551ec8b5aae83b6f35938ca5ddc50a88d85492d9731810c31591fa4c9 # v4.0.2（k8s.io/images.yaml dmap 实锤）
+          volumeMounts:
+            - name: nfs-client-root
+              mountPath: /persistentvolumes
+          env:
+            - name: PROVISIONER_NAME
+              value: link-seek/nfs-omnara
+            - name: NFS_SERVER
+              value: nfs-server.nfs.svc.cluster.local
+            - name: NFS_PATH
+              value: /exports
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+      volumes:
+        - name: nfs-client-root
+          nfs:
+            server: nfs-server.nfs.svc.cluster.local
+            path: /exports

@@ -1,0 +1,67 @@
+# NFS server（自打镜像 docker-images/docker/nfs-server，NFSv4-only，单 export /exports）。
+# 用途：nfs-provisioner 的后端；首个消费者是 Omnara memory-data（api/worker/maintenance 共挂 RWX）。
+# 钉主节点 hostname：local-path 卷不跟人走，单副本 server 必须和盘在同一台；主节点 16核/62G，20G 盘微不足道。
+# edge 节点（东京/广州）靠 dedicated=edge:NoSchedule taint 天然排除，本清单不加任何 edge toleration。
+# 备份：/exports 整体定时同步到 OBS（待办，见 README）；节点挂掉=丢自上次备份的增量。
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nfs-server
+  namespace: nfs
+  labels:
+    app: nfs-server
+spec:
+  serviceName: nfs-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nfs-server
+  template:
+    metadata:
+      labels:
+        app: nfs-server
+    spec:
+      imagePullSecrets:
+        - name: swr-pull
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [ecs-ies-euleros-jmupervm-xieyucheng]
+      containers:
+        - name: nfs-server
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/nfs-server@sha256:44e6a530837311872af5c3b55de64001a6743ecd5a2cf9abc1c56fa704ad55ae # 1.0（bake 45304132191 转正）
+          ports:
+            - {name: nfs, containerPort: 2049}
+          securityContext:
+            privileged: true # 内核 nfsd 必需；仅监听 cluster 内网 2049，无公网暴露
+          volumeMounts:
+            - {name: exports, mountPath: /exports}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 2000m, memory: 2Gi}
+  volumeClaimTemplates:
+    - metadata:
+        name: exports
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests: {storage: 20Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nfs-server
+  namespace: nfs
+  labels:
+    app: nfs-server
+spec:
+  clusterIP: None # headless：server 单副本，provisioner 直连 pod DNS 即可；要 ClusterIP 也行，保持简单
+  selector:
+    app: nfs-server
+  ports:
+    - {name: nfs, port: 2049}

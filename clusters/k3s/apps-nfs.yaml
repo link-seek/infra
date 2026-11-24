@@ -1,0 +1,16 @@
+# Flux Kustomization: nfs（集群内 RWX 共享存储，Omnara memory-data 底座）。
+# 由 flux-system（path ./clusters/k3s）收编 → merge 即下发。
+# server 自打镜像（digest pin），provisioner 上游重打（digest pin）；只认 SWR。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: nfs
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/nfs
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: flux-system
+  wait: true
