@@ -1,0 +1,37 @@
+name: kubeconform
+
+# #317 adopt-list：渲染后 k8s manifest schema 校验（社区 kubeconform）。
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kubeconform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: ensure kubectl
+        run: |
+          set -euo pipefail
+          command -v kubectl >/dev/null || {
+            curl -fsSL -o /tmp/kubectl https://dl.k8s.io/release/v1.30.3/bin/linux/amd64/kubectl
+            sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          }
+          kubectl version --client
+      - name: install kubeconform (pinned)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download v0.8.0 -R yannh/kubeconform -p kubeconform-linux-amd64.tar.gz -D /tmp/kc --clobber
+          tar xzf /tmp/kc/kubeconform-linux-amd64.tar.gz -C /tmp/kc
+          sudo install -m 0755 /tmp/kc/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+      - name: schema check (rendered)
+        run: bash scripts/kubeconform_scan.sh
