@@ -8,6 +8,7 @@
     | sed 's/namespace: kube-system/namespace: kyverno/' | kubectl apply -f -
   ```
   （与 `scripts/k3s-restore-drill.sh` 同法；Secret 不进仓。）
-- 策略在 `k8s/kyverno-policies`（`dependsOn: kyverno`），**Enforce**，作用域=受管 app 命名空间
+- 策略在 `k8s/kyverno-policies`（`dependsOn: kyverno`），**Enforce（validationActions: Deny）**，作用域=受管 app 命名空间
   （opencode-* / litellm / erpnext / cognee-trial / nfs / reloader）。
+  **注意**：Kyverno v1.20 起用 `policies.kyverno.io/v1 ValidatingPolicy`（CEL），旧 `kyverno.io/v1 ClusterPolicy` 会被拒。
 - 升级 Kyverno：改 `install.yaml` 版本 + `images/mirror.yaml` 对应镜像，发 PR。
