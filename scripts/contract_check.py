@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
-"""契约校验：infra pin 的 artifact digest 必须存在于 SWR（#317 Phase 1：委托 regctl，匿名）。
+"""契约校验：infra pin 的 artifact digest 必须存在于 SWR，且来自 **main 绿构建**。
 
-不再自研 registry token 流；regctl（regclient）匿名取 manifest 并比对 digest。
+#317 item6/8：
+  1) 制品 digest 必须真实存在（regctl 匿名取）；
+  2) 其 `org.opencontainers.image.revision` 必须是 `main@sha1:<40hex>`
+     —— 即 flux-artifact 在 main push（绿）时推的正式制品，而非分支/临时构建。
 """
+import json
 import re
 import subprocess
 import sys
 
 FILE = "clusters/k3s/git-docker-images.yaml"
+REV_RE = re.compile(r"^main@sha1:[0-9a-f]{40}$")
+
+
+def regctl(*args):
+    return subprocess.run(["regctl", *args], capture_output=True, text=True, timeout=90)
 
 
 def main() -> int:
@@ -22,14 +31,8 @@ def main() -> int:
         return 1
     digest = d.group(1)
     ref = f"{m.group(1)}@{digest}"
-    try:
-        r = subprocess.run(
-            ["regctl", "manifest", "get", ref, "--format", "{{.GetDescriptor.Digest}}"],
-            capture_output=True, text=True, timeout=90,
-        )
-    except Exception as ex:  # noqa: BLE001
-        print(f"FAIL: regctl exec: {ex}")
-        return 1
+
+    r = regctl("manifest", "get", ref, "--format", "{{.GetDescriptor.Digest}}")
     got = (r.stdout or "").strip()
     print(f"pinned={digest}")
     print(f"remote={got or '(none)'}")
@@ -39,6 +42,23 @@ def main() -> int:
             print(err[-1][:200])
         print("FAIL: pinned digest not found in registry")
         return 1
+
+    # 只认 main 绿构建：制品 annotations 里的 revision 必须是 main@sha1:<sha>
+    r2 = regctl("manifest", "get", ref, "--format", "{{json .}}")
+    if r2.returncode != 0:
+        print("FAIL: 读取制品 manifest 失败（无法校验 revision）")
+        return 1
+    try:
+        doc = json.loads(r2.stdout)
+    except Exception as e:  # noqa: BLE001
+        print(f"FAIL: manifest JSON 解析失败: {e}")
+        return 1
+    ann = doc.get("annotations") or doc.get("Annotations") or {}
+    rev = ann.get("org.opencontainers.image.revision", "")
+    if not REV_RE.match(rev):
+        print(f"FAIL: 制品 revision 非 main 绿构建: '{rev}'（须 main@sha1:<40hex>）")
+        return 1
+    print(f"REVISION OK: {rev}")
     print("CONTRACT-OK")
     return 0
 
