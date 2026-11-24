@@ -13,8 +13,10 @@
 升级一个发布：
 1. docker-images 合 PR → 等 `flux-artifact` 成功
 2. 从 run summary 取 `tag / digest`（格式：`ref: { digest: sha256:... }`）
-3. infra PR 改 `git-docker-images.yaml` 的 `digest` + 注释 `# release: <tag>`（或等每周一 `release-bump` 自动开 draft PR）
-4. `contract-check` 绿 → 合并 → Flux 5 分钟内对账
+3. infra PR 改 `git-docker-images.yaml` 的 `digest` + 注释 `# release: <tag>`
+   （或等 `release-bump` 按**最新不可变 tag + main 绿构建**自动开 draft PR，#317 item6；bump PR 用 PAT 以便触发 CI）
+4. `contract-check`（=verify-pin）绿 → 合并 → Flux 5 分钟内对账。
+   verify-pin 除 digest 存在外，还校验制品 `annotations.revision=main@sha1:<sha>`（#317 item8）。
 
 回滚：
 - 把 `digest` 改回上一条 release 的 digest，提 PR 合并。git 历史即备份。
@@ -45,4 +47,6 @@
 ## 已知边界
 
 - `latest` 仍发布，但**生产不引用**；它只给预检/开发。
-- 自动晋升（ImageUpdateAutomation / Renovate）尚未接入：当前 digest 由人从 run summary 取。后续接入后，本文件的“日常操作”第 2 步会消失。
+- 自动升级：Renovate 自托管已上线（每日 + 手动 dispatch，major 走 Dependency Dashboard 审批；GitHub Actions runner，不占自有机器）。
+  `release-bump` 已改为读**最新不可变 tag + main 绿构建**自动开 draft PR（#317 item6）。
+- opencode 三实例已切 Flux `HelmRelease`（chart `link-seek/opencode:0.1.0` + 内联 values），版本由 Renovate 管 chart。
