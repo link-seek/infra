@@ -60,7 +60,8 @@ metadata:
   labels:
     app: nfs-server
 spec:
-  clusterIP: None # headless：server 单副本，provisioner 直连 pod DNS 即可；要 ClusterIP 也行，保持简单
+  # 固定 ClusterIP：kubelet 在宿主机 mount，不认 cluster.local 域名，只能用 IP（上游官方示例也是 IP）。
+  # 10.43.200.0/24 经查全段空闲，取 .200；集群 service CIDR 默认 10.43.0.0/16。
   selector:
     app: nfs-server
   ports:
