@@ -86,7 +86,15 @@ def main() -> int:
         print(f"{name}: keep={item['keep']} protect={protect} -> {action}")
         if not args.apply:
             continue
-        code, data = call("PATCH" if rid else "POST", f"{base}/{rid}" if rid else base, body)
+        if rid:
+            code, data = call("PATCH", f"{base}/{rid}", body)
+            if code not in (200, 201):
+                # 已有规则模板不同（如 date_rule）无法修改，删掉重建
+                dcode, ddata = call("DELETE", f"{base}/{rid}")
+                print(f"  delete old rule: HTTP {dcode} {'' if dcode in (200, 204) else ddata}")
+                code, data = call("POST", base, body)
+        else:
+            code, data = call("POST", base, body)
         print(f"  {action}: HTTP {code} {'' if code in (200, 201) else data}")
     print("APPLIED" if args.apply else "DRY-RUN (use --apply)")
     return 0
