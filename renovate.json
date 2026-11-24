@@ -3,6 +3,13 @@
   "extends": ["config:recommended"],
   "schedule": ["at any time"],
   "dependencyDashboard": true,
+  "hostRules": [
+    {
+      "matchHost": "swr.cn-north-9.myhuaweicloud.com",
+      "username": "{{env \"SWR_LOGIN_USER\"}}",
+      "password": "{{env \"SWR_LOGIN_PASS\"}}"
+    }
+  ],
   "ignorePaths": ["clusters/k3s/flux-system/gotk-components.yaml"],
   "packageRules": [
     { "matchUpdateTypes": ["major"], "dependencyDashboardApproval": true }
