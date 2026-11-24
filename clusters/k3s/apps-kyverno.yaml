@@ -1,0 +1,16 @@
+# Kyverno（策略引擎，#317 item7）。由 flux-system 从 infra 制品下发。
+# 镜像已重写为 SWR（reg.kyverno.io 国内不可达），见 k8s/kyverno/install.yaml。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/kyverno
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
