@@ -7,7 +7,7 @@ repos:
     keep: 30
   # 主力工具镜像（当前 41，接近需要清理的阈值）
   - name: link-seek/opencode-tools
-    keep: 30   # 当前 ~41（含 ci-*），首次执行只清最老 11 个
+    keep: 300  # 临时停用：曾删掉在用 digest，恢复后再收紧
   - name: link-seek/opencode-team
     keep: 20
   # 应用镜像
