@@ -7,8 +7,7 @@ repos:
     keep: 30
   # 主力工具镜像（当前 41，接近需要清理的阈值）
   - name: link-seek/opencode-tools
-    keep: 20
-    protect: ["2.3.0"]   # 线上 pin 的 tag（digest 4334606…）
+    keep: 10
   - name: link-seek/opencode-team
     keep: 20
   # 应用镜像
@@ -24,8 +23,7 @@ repos:
   - name: link-seek/cosign
     keep: 5
   - name: link-seek/postgres
-    keep: 20   # 当前 ~18；先不触发删除，只设上限
-    protect: ["14-alpine"]
+    keep: 10
   - name: link-seek/valkey
     keep: 5
   - name: link-seek/rustfs
