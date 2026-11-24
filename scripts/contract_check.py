@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""契约校验：infra pin 的 artifact digest 必须存在于 SWR（匿名 token 流程）。"""
-import json
+"""契约校验：infra pin 的 artifact digest 必须存在于 SWR（#317 Phase 1：委托 regctl，匿名）。
+
+不再自研 registry token 流；regctl（regclient）匿名取 manifest 并比对 digest。
+"""
 import re
+import subprocess
 import sys
-import urllib.parse
-import urllib.request
 
 FILE = "clusters/k3s/git-docker-images.yaml"
 
@@ -20,25 +21,22 @@ def main() -> int:
         print("FAIL: no digest pinned (ref.digest required)")
         return 1
     digest = d.group(1)
-    host, repo = m.group(1).split("/", 1)
-
-    q = urllib.parse.urlencode({"scope": f"repository:{repo}:pull", "service": "dockyard"})
-    with urllib.request.urlopen(f"https://{host}/swr/auth/v2/registry/auth/?{q}", timeout=30) as r:
-        token = json.load(r)["token"]
-
-    req = urllib.request.Request(
-        f"https://{host}/v2/{repo}/manifests/{digest}",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.oci.image.manifest.v1+json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        got = r.headers.get("Docker-Content-Digest")
-
+    ref = f"{m.group(1)}@{digest}"
+    try:
+        r = subprocess.run(
+            ["regctl", "manifest", "get", ref, "--format", "{{.GetDescriptor.Digest}}"],
+            capture_output=True, text=True, timeout=90,
+        )
+    except Exception as ex:  # noqa: BLE001
+        print(f"FAIL: regctl exec: {ex}")
+        return 1
+    got = (r.stdout or "").strip()
     print(f"pinned={digest}")
-    print(f"remote={got}")
-    if got != digest:
+    print(f"remote={got or '(none)'}")
+    if r.returncode != 0 or got != digest:
+        err = (r.stderr or "").strip().splitlines()
+        if err:
+            print(err[-1][:200])
         print("FAIL: pinned digest not found in registry")
         return 1
     print("CONTRACT-OK")

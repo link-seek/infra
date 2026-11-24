@@ -16,5 +16,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: install regctl (regclient, pinned)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/regctl "https://github.com/regclient/regclient/releases/download/v0.11.7/regctl-linux-amd64"
+          sudo install -m 0755 /tmp/regctl /usr/local/bin/regctl
+          regctl version | head -1
       - name: verify artifact digest exists
         run: python3 scripts/contract_check.py
