@@ -43,7 +43,6 @@ jobs:
       node_hostname: mesh-ali-gz
       agent_ip: ${{ inputs.agent_ip }}
       server_tail: ${{ inputs.server_tail }}
-      verify: true
       k3s_bin_url: ${{ inputs.k3s_bin_url }}
       k3s_sha_url: ${{ inputs.k3s_sha_url }}
     secrets: inherit
