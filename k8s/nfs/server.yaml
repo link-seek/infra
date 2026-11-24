@@ -33,16 +33,21 @@ spec:
                     values: [ecs-ies-euleros-jmupervm-xieyucheng]
       containers:
         - name: nfs-server
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/nfs-server@sha256:1df52dc5c0715374d1d36663aa07263a2d8750606902bc2d8599ed0ef1b178d9 # 1.4（无 fsid=0，NFSv4 客户端可挂 /exports；bake 转正）
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/nfs-server@sha256:1df52dc5c0715374d1d36663aa07263a2d8750606902bc2d8599ed0ef1b178d9 # 1.4；exports 由 ConfigMap 管（fsid=0 伪根，客户端挂 :/）
           ports:
             - {name: nfs, containerPort: 2049}
           securityContext:
             privileged: true # 内核 nfsd 必需；仅监听 cluster 内网 2049，无公网暴露
           volumeMounts:
             - {name: exports, mountPath: /exports}
+            - {name: exports-config, mountPath: /etc/exports, subPath: exports, readOnly: true}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits: {cpu: 2000m, memory: 2Gi}
+      volumes:
+        - name: exports-config
+          configMap:
+            name: nfs-server-exports
   volumeClaimTemplates:
     - metadata:
         name: exports

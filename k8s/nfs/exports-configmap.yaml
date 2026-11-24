@@ -1,0 +1,11 @@
+# NFSv4-only 导出配置（由 ConfigMap 管，避免为改 exports 重打镜像）。
+# 关键：fsid=0 让 /exports 成为 NFSv4 伪根，客户端必须挂 server:/（而不是 server:/exports）。
+# 实测：无 fsid=0 时 :/ 与 :/exports 均 ENOENT；fsid=0 时 :/ 与 :/subdir 均可挂可写。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nfs-server-exports
+  namespace: nfs
+data:
+  exports: |
+    /exports *(rw,sync,no_subtree_check,no_root_squash,fsid=0)
