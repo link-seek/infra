@@ -44,3 +44,8 @@ repos:
     keep: 5
   - name: link-seek/k3s-upgrade
     keep: 5
+  # NFS 底座（Omnara memory-data 用；server 自打迭代慢，provisioner 跟上游）
+  - name: link-seek/nfs-server
+    keep: 10
+  - name: link-seek/nfs-provisioner
+    keep: 5
