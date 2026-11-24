@@ -10,3 +10,6 @@ parameters:
   archiveOnDelete: "false"
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
+# 官方 nfs-subdir-external-provisioner 示例：NFSv4 显式版本，避免客户端协商异常。
+mountOptions:
+  - nfsvers=4.1
