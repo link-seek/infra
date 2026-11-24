@@ -33,7 +33,7 @@ spec:
                     values: [ecs-ies-euleros-jmupervm-xieyucheng]
       containers:
         - name: nfs-server
-          image: swr.cn-north-9.myhuaweicloud.com/link-seek/nfs-server@sha256:44e6a530837311872af5c3b55de64001a6743ecd5a2cf9abc1c56fa704ad55ae # 1.0（bake 45304132191 转正）
+          image: swr.cn-north-9.myhuaweicloud.com/link-seek/nfs-server@sha256:163e1d0133ea427bfd9ea7db5c26d1aecd72e190964e2042868f8071081b65d3 # 1.1（nfsd -N 2 -N 3 修 CrashLoop；bake 45306922926 转正）
           ports:
             - {name: nfs, containerPort: 2049}
           securityContext:
