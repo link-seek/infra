@@ -1,6 +1,6 @@
 name: release-bump
 
-# 每周检查 SWR 上的 latest artifact，若比 infra pin 新则开 draft PR（不自动合并）。
+# 检查 SWR 上最新的**不可变 tag**（main 绿构建）是否比 infra pin 新，是则开 draft PR（不自动合并）。
 on:
   schedule:
     - cron: "0 1 * * 1"   # 每周一 09:00 CST
@@ -18,7 +18,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.AGENT_GITHUB_TOKEN }}   # PAT：bump PR 的事件需能触发 CI（GITHUB_TOKEN 造的 PR 不触发）
       - name: propose pin bump
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
         run: python3 scripts/release_bump.py
