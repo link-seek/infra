@@ -11,7 +11,7 @@ metadata:
 spec:
   interval: 5m0s
   path: ./k8s/opencode-team
-  prune: true
+  prune: false  # Helm 切换过渡：删除本 Kustomization 时不要 prune 资源
   sourceRef:
     kind: OCIRepository
     name: docker-images
