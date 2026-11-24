@@ -1,0 +1,22 @@
+name: k8s-dedup
+
+# #317 item10：两仓 k8s/<name> 不得同名（清单真相源唯一）。
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dedup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: check k8s dir uniqueness across repos
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        run: python3 scripts/check_k8s_dup.py
