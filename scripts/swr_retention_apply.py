@@ -82,6 +82,8 @@ def main() -> int:
             continue
         rules = data if isinstance(data, list) else (data or {}).get("retentions") or []
         rid = rules[0].get("id") if rules else None
+        if rules:
+            print(f"  current: {json.dumps(rules[0], ensure_ascii=False)[:220]}")
         action = "update" if rid else "create"
         print(f"{name}: keep={item['keep']} protect={protect} -> {action}")
         if not args.apply:
