@@ -46,6 +46,12 @@ jobs:
           echo "$SWR_LOGIN_PASS" | helm registry login swr.cn-north-9.myhuaweicloud.com -u "$SWR_LOGIN_USER" --password-stdin
           helm pull "oci://$REG/opencode" --version "$TAG" -d /tmp/charts
           helm registry logout swr.cn-north-9.myhuaweicloud.com >/dev/null 2>&1 || true
+          ls -l /tmp/charts
+          TGZ="$(ls /tmp/charts/opencode-*.tgz | head -1)"
+          [ -n "$TGZ" ] || { echo "FAIL: chart tgz 未落盘"; exit 1; }
+          rm -rf /tmp/chart && mkdir -p /tmp/chart && tar xzf "$TGZ" -C /tmp/chart
+          CHART_DIR=/tmp/chart/opencode
+          [ -f "$CHART_DIR/Chart.yaml" ] || { echo "FAIL: chart 解包异常"; ls -R /tmp/chart | head; exit 1; }
           mkdir -p /tmp/render
           python3 - <<'PYEOF'
           import yaml
@@ -57,8 +63,8 @@ jobs:
                   yaml.safe_dump(vals, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
               print("extracted", inst)
           PYEOF
-          helm template opencode-team /tmp/charts/opencode-*.tgz -n opencode-team -f /tmp/values-team.yaml > /tmp/render/team.yaml
-          helm template opencode-xieyucheng /tmp/charts/opencode-*.tgz -n opencode-xieyucheng -f /tmp/values-xieyucheng.yaml > /tmp/render/xie.yaml
-          helm template opencode-yingxin /tmp/charts/opencode-*.tgz -n opencode-yingxin -f /tmp/values-yingxin.yaml > /tmp/render/ying.yaml
+          helm template opencode-team "$CHART_DIR" -n opencode-team -f /tmp/values-team.yaml > /tmp/render/team.yaml
+          helm template opencode-xieyucheng "$CHART_DIR" -n opencode-xieyucheng -f /tmp/values-xieyucheng.yaml > /tmp/render/xie.yaml
+          helm template opencode-yingxin "$CHART_DIR" -n opencode-yingxin -f /tmp/values-yingxin.yaml > /tmp/render/ying.yaml
           kubeconform -strict -ignore-missing-schemas -skip IngressRoute /tmp/render/team.yaml /tmp/render/xie.yaml /tmp/render/ying.yaml
           echo VALUES-RENDER-OK
