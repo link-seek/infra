@@ -1,0 +1,17 @@
+# Flux Kustomization: omnara-machines（Omnara kubernetes provider 机器池，见上游 omnara-ai/omnara#878）。
+# 由 flux-system（path ./clusters/k3s）收编 → merge 即下发。
+# 内容：ns（baseline enforce）＋ 最小 RBAC ＋ 长效 token 骨架 ＋ LimitRange/Quota/NetworkPolicy。
+# token 值不进仓；Omnara 侧用 API URL + CA + token 远端调用，不依赖同集群。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: omnara-machines
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/omnara-machines
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: flux-system
+  wait: true

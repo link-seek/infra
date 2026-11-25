@@ -1,0 +1,18 @@
+# 机器 Pod 出站策略（上游 #878 文档要求：封云 metadata 示例 + DNS 放行）。
+# 语义：允许除 169.254.169.254/32 外的一切出站（含 DNS 53，CoreDNS PodIP 段内）。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: omnara-machines-egress
+  namespace: omnara-machines
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/name: omnara-machines
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [169.254.169.254/32]

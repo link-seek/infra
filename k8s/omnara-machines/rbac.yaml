@@ -1,0 +1,39 @@
+# Omnara kubernetes provider 远端调用身份（上游 omnara-ai/omnara#878）。
+# Omnara 独立部署，用此 SA 的长效 token + API URL + CA 调本集群；
+# 禁 in-cluster credential、禁 kubeconfig（EKS/GKE exec 插件风险）。
+# token 不进仓：Secret 清单只声明骨架，k8s 自动填 token；取法见 README。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: omnara-machines
+  namespace: omnara-machines
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/name: omnara-machines
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: omnara-machines
+  namespace: omnara-machines
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/name: omnara-machines
+subjects:
+  - kind: ServiceAccount
+    name: omnara-machines
+    namespace: omnara-machines
+roleRef:
+  kind: Role
+  name: omnara-machines
+  apiGroup: rbac.authorization.k8s.io

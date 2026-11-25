@@ -1,0 +1,35 @@
+# 机器 Pod 磁盘上限（上游 #878 文档要求：LimitRange 封磁盘）。
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: omnara-machines
+  namespace: omnara-machines
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/name: omnara-machines
+spec:
+  limits:
+    - type: Container
+      default:
+        ephemeral-storage: 1Gi
+      defaultRequest:
+        ephemeral-storage: 1Gi
+      max:
+        ephemeral-storage: 10Gi
+---
+# 机器总数护栏（按需调大；先收紧防跑飞）。
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: omnara-machines
+  namespace: omnara-machines
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/name: omnara-machines
+spec:
+  hard:
+    pods: "20"
+    requests.cpu: "40"
+    requests.memory: 80Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
