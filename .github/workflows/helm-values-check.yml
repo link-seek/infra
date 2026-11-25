@@ -1,0 +1,64 @@
+name: helm-values-check
+
+# opencode HelmRelease 内联 values 门禁：用 SWR 上的 chart（opencode-chart.yaml ref tag）
+# 渲染三实例，kubeconform 校验（第三方 CRD IngressRoute 跳过）。
+# 作用：inline values 与 chart schema/模板的兼容性在 CI 即拦，不等 Flux 干跑失败。
+on:
+  pull_request:
+    paths:
+      - clusters/k3s/helmrelease-opencode-*.yaml
+      - clusters/k3s/opencode-chart.yaml
+  push:
+    branches: [main]
+    paths:
+      - clusters/k3s/helmrelease-opencode-*.yaml
+      - clusters/k3s/opencode-chart.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REG: swr.cn-north-9.myhuaweicloud.com/link-seek
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install helm + kubeconform (pinned)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/helm.tgz https://get.helm.sh/helm-v3.22.1-linux-amd64.tar.gz
+          tar xzf /tmp/helm.tgz -C /tmp
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          V=v0.7.0
+          curl -fsSL -o /tmp/kc.tgz "https://github.com/yannh/kubeconform/releases/download/${V}/kubeconform-linux-amd64.tar.gz"
+          tar xzf /tmp/kc.tgz -C /tmp
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+      - name: pull chart + render + conform
+        run: |
+          set -euo pipefail
+          TAG=$(python3 -c "import yaml; print(yaml.safe_load(open('clusters/k3s/opencode-chart.yaml'))['spec']['ref']['tag'])")
+          echo "chart tag: $TAG"
+          echo "$SWR_LOGIN_PASS" | helm registry login swr.cn-north-9.myhuaweicloud.com -u "$SWR_LOGIN_USER" --password-stdin
+          helm pull "oci://$REG/opencode" --version "$TAG" -d /tmp/charts
+          helm registry logout swr.cn-north-9.myhuaweicloud.com >/dev/null 2>&1 || true
+          mkdir -p /tmp/render
+          python3 - <<'PYEOF'
+          import yaml
+          for inst in ["team", "xieyucheng", "yingxin"]:
+              d = yaml.safe_load(open(f"clusters/k3s/helmrelease-opencode-{inst}.yaml"))
+              vals = d["spec"]["values"]
+              assert vals.get("namespace") == d["spec"]["targetNamespace"], inst
+              with open(f"/tmp/values-{inst}.yaml", "w") as f:
+                  yaml.safe_dump(vals, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+              print("extracted", inst)
+          PYEOF
+          helm template opencode-team /tmp/charts/opencode-*.tgz -n opencode-team -f /tmp/values-team.yaml > /tmp/render/team.yaml
+          helm template opencode-xieyucheng /tmp/charts/opencode-*.tgz -n opencode-xieyucheng -f /tmp/values-xieyucheng.yaml > /tmp/render/xie.yaml
+          helm template opencode-yingxin /tmp/charts/opencode-*.tgz -n opencode-yingxin -f /tmp/values-yingxin.yaml > /tmp/render/ying.yaml
+          kubeconform -strict -ignore-missing-schemas -skip IngressRoute /tmp/render/team.yaml /tmp/render/xie.yaml /tmp/render/ying.yaml
+          echo VALUES-RENDER-OK
