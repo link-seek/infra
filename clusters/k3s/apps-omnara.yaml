@@ -1,0 +1,16 @@
+# Flux Kustomization: omnara 自托管（omnara.linkseek.net.cn）。
+# 由 flux-system（path ./clusters/k3s）收编 → merge 即下发。
+# Secret（omnara-env）不进仓：Infisical proj omnara（iac/infisical/apps.json + k8s/omnara/infisical.yaml）。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: omnara
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/omnara
+  prune: true
+  sourceRef:
+    kind: OCIRepository
+    name: docker-images
+  wait: true
