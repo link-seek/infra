@@ -112,4 +112,3 @@ spec:
       annotations: {}
     rbac:
       create: true
-    replicaCount: 0

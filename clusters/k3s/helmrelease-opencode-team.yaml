@@ -109,4 +109,3 @@ spec:
     rbac:
       create: true
       pvc: true
-    replicaCount: 0

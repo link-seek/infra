@@ -96,4 +96,3 @@ spec:
           LE certs)
     rbac:
       create: false
-    replicaCount: 0
