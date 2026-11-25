@@ -5,5 +5,6 @@
   {"slug": "opencode-yingxin",    "identity": "opencode-yingxin-operator",    "role": "viewer", "ua": {"name": "opencode-yingxin-ua",    "namespace": "opencode-yingxin"}},
   {"slug": "browserless",         "identity": "browserless-operator",         "role": "viewer", "ua": {"name": "browserless-ua",         "namespace": "opencode-team"}},
   {"slug": "erpnext",             "identity": "erpnext-operator",             "role": "viewer", "ua": {"name": "erpnext-ua",             "namespace": "erpnext"}},
-  {"slug": "traefik-edge",        "identity": "traefik-operator",             "role": "admin",  "ua": {"name": "traefik-ua",             "namespace": "kube-system"}}
+  {"slug": "traefik-edge",        "identity": "traefik-operator",             "role": "admin",  "ua": {"name": "traefik-ua",             "namespace": "kube-system"}},
+  {"slug": "omnara",                 "identity": "omnara-operator",                 "role": "viewer", "ua": {"name": "omnara-ua",                 "namespace": "omnara"}}
 ]

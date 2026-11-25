@@ -729,6 +729,26 @@ resource "cloudflare_dns_record" "linkseek_net_cn_18" {
   zone_id = "4cdd8779bc924de8f682abf0a765f51c"
 }
 
+resource "cloudflare_dns_record" "linkseek_net_cn_19" {
+  comment                 = "omnara self-hosted (infra #926 machines pool; docker-images #358)"
+  content                 = "120.77.76.20"
+  data                    = null
+  include_shadow_metadata = false
+  name                    = "omnara.linkseek.net.cn"
+  priority                = null
+  private_routing         = null
+  proxied                 = false
+  settings = {
+    flatten_cname = null
+    ipv4_only     = null
+    ipv6_only     = null
+  }
+  tags    = []
+  ttl     = 600
+  type    = "A"
+  zone_id = "4cdd8779bc924de8f682abf0a765f51c"
+}
+
 # __generated__ by Terraform from "4cdd8779bc924de8f682abf0a765f51c/fac7a8e64c1387aa02b06b5a766d0f87"
 resource "cloudflare_dns_record" "linkseek_net_cn_14" {
   comment                 = "pilot frontend #706"
