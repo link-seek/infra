@@ -20,7 +20,6 @@ spec:
     remediation:
       retries: 3
   values:
-    # team 实例：与 values.yaml 默认值的差异。
     namespace: opencode-team
     appName: opencode
     appLabel: opencode-team
@@ -28,52 +27,52 @@ spec:
       repository: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-team
       digest: sha256:40380fab65ab05cbce7fded42ed4ed2fb92a2f6f07c31cf2dd2b2539d15f9943
     env:
-      - name: PIPELINE_MANAGED
-        value: "true"
-      - name: TMPDIR
-        value: /tmp
-      - name: LITELLM_BASE_URL
-        value: http://litellm-gateway.litellm.svc.cluster.local:4000
-      - name: SSH_TARGETS
-        value: "mesh-hw-21 mesh-hw-41"
-      - name: SMTP_HOST
-        value: smtp.163.com
-      - name: SMTP_PORT
-        value: "465"
-      - name: SMTP_USER
-        value: "122306789@163.com"
-      - name: SMTP_FROM
-        value: "122306789@163.com"
-      - name: MAIL_DEFAULT_TO
-        value: xieyucheng@outlook.com
-      - name: BROWSER_CDP_URL
-        value: ws://browserless.opencode-team.svc.cluster.local:3000/chromium
-      - name: OPEN_DESIGN_BROWSER_URL
-        value: http://browserless.opencode-team.svc.cluster.local:3000
-      - name: LITELLM_API_KEY
-        secretKey: LITELLM_API_KEY
-      - name: MAAS_KEY
-        secretKey: MAAS_KEY
-      - name: OBS_AK
-        secretKey: OBS_AK
-      - name: OBS_SK
-        secretKey: OBS_SK
-      - name: OBS_ENDPOINT
-        value: https://obs.cn-north-9.myhuaweicloud.com
-      - name: GH_TOKEN
-        secretKey: GH_TOKEN
-      - name: OPENCODE_SERVER_PASSWORD
-        secretKey: OPENCODE_SERVER_PASSWORD
-      - name: V100_SSH_KEY
-        secretKey: V100_SSH_KEY
-      - name: OPENCODE_SERVER_USERNAME
-        value: team
-      - name: CLOUDFLARE_API_TOKEN
-        secretKey: CLOUDFLARE_API_TOKEN
-      - name: CF_AI_TOKEN
-        secretKey: CF_AI_TOKEN
-      - name: SMTP_PASS
-        secretKey: SMTP_PASS
+    - name: PIPELINE_MANAGED
+      value: 'true'
+    - name: TMPDIR
+      value: /tmp
+    - name: LITELLM_BASE_URL
+      value: http://litellm-gateway.litellm.svc.cluster.local:4000
+    - name: SSH_TARGETS
+      value: mesh-hw-21 mesh-hw-41
+    - name: SMTP_HOST
+      value: smtp.163.com
+    - name: SMTP_PORT
+      value: '465'
+    - name: SMTP_USER
+      value: 122306789@163.com
+    - name: SMTP_FROM
+      value: 122306789@163.com
+    - name: MAIL_DEFAULT_TO
+      value: xieyucheng@outlook.com
+    - name: BROWSER_CDP_URL
+      value: ws://browserless.opencode-team.svc.cluster.local:3000/chromium
+    - name: OPEN_DESIGN_BROWSER_URL
+      value: http://browserless.opencode-team.svc.cluster.local:3000
+    - name: LITELLM_API_KEY
+      secretKey: LITELLM_API_KEY
+    - name: MAAS_KEY
+      secretKey: MAAS_KEY
+    - name: OBS_AK
+      secretKey: OBS_AK
+    - name: OBS_SK
+      secretKey: OBS_SK
+    - name: OBS_ENDPOINT
+      value: https://obs.cn-north-9.myhuaweicloud.com
+    - name: GH_TOKEN
+      secretKey: GH_TOKEN
+    - name: OPENCODE_SERVER_PASSWORD
+      secretKey: OPENCODE_SERVER_PASSWORD
+    - name: V100_SSH_KEY
+      secretKey: V100_SSH_KEY
+    - name: OPENCODE_SERVER_USERNAME
+      value: team
+    - name: CLOUDFLARE_API_TOKEN
+      secretKey: CLOUDFLARE_API_TOKEN
+    - name: CF_AI_TOKEN
+      secretKey: CF_AI_TOKEN
+    - name: SMTP_PASS
+      secretKey: SMTP_PASS
     browserless:
       enabled: true
       replicas: 1
@@ -93,7 +92,7 @@ spec:
     nodeHostname: ecs-ies-euleros-jmupervm-zhangzhirui
     workHostPath: /var/lib/opencode-team/work
     dataHostPath: /var/lib/opencode-team/data
-    cogneeMcpRev: "9437d3ea"
+    cogneeMcpRev: 9437d3ea
     vpc:
       enabled: true
       httpPort: 44097
@@ -102,10 +101,12 @@ spec:
       enabled: true
       name: team-agent-staging-tls
       hosts:
-        - team-agent.xieyucheng.top
-        - team-agent.internal.linkseek.net.cn
+      - team-agent.xieyucheng.top
+      - team-agent.internal.linkseek.net.cn
       annotations:
-        route-comment: staging DNS-01 via IngressRoute (Ingress provider can't store LE certs)
+        route-comment: staging DNS-01 via IngressRoute (Ingress provider can't store
+          LE certs)
     rbac:
       create: true
       pvc: true
+    replicaCount: 0

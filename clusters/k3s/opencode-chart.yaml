@@ -7,5 +7,5 @@ metadata:
 spec:
   interval: 5m0s
   url: oci://swr.cn-north-9.myhuaweicloud.com/link-seek/opencode
-  ref: {tag: 0.2.2}
+  ref: {tag: 0.2.3}
   secretRef: {name: swr-pull}
