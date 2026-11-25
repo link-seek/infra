@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omnara-machines
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/name: omnara-machines
+    # restricted 会拒绝机器 Pod（shareProcessNamespace 等），见上游 #878；
+    # 本 ns 只 enforce baseline，restricted 仅 warn。
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
