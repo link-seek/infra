@@ -1,0 +1,15 @@
+# Flux Kustomization: opencode 数据卷（NFS nfs-omnara，Retain）。
+# PVC 与应用 release 解耦：数据生命周期独立于 HelmRelease，删 chart 不丢数据。
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: opencode-data
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./k8s/opencode-data
+  prune: false
+  sourceRef:
+    kind: OCIRepository
+    name: flux-system
+  wait: true

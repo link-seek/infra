@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opencode-work
+  namespace: opencode-team
+  labels:
+    app.kubernetes.io/name: opencode
+    app.kubernetes.io/instance: opencode-team
+    app.kubernetes.io/managed-by: Flux
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: nfs-omnara
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opencode-data
+  namespace: opencode-team
+  labels:
+    app.kubernetes.io/name: opencode
+    app.kubernetes.io/instance: opencode-team
+    app.kubernetes.io/managed-by: Flux
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: nfs-omnara
+  resources:
+    requests:
+      storage: 5Gi
