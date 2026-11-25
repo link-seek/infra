@@ -1,7 +1,7 @@
 # Flux source（Gitless）：从 SWR 拉 docker-images OCI 制品（应用清单跟镜像走）。
 # 发布纪律：pin 到不可变 manifest digest，不用 :latest。
 # 升级 = 改下面 digest 的 PR（tag 仅作注释，方便人查）。
-# release: auto-631ac57b5071
+# release: auto-59098527a9f
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
@@ -11,4 +11,4 @@ spec:
   interval: 5m0s
   url: oci://swr.cn-north-9.myhuaweicloud.com/link-seek/docker-images-manifests
   ref:
-    digest: sha256:857146a2f5fc1f1d5f6f22dd0fa58e0acf9b7459bdf79a75d8cdc4013f49a6c7
+    digest: sha256:15c82c3f0e19786b7eb83abf00b47148645a8c1db72fe05b5ed4dd2232eb156e
