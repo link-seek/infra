@@ -19,12 +19,80 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
-  valuesFiles:
-    - values-yingxin.yaml
   values:
-    # digest pin（唯一需手动物料 bump 处；结构全部走 chart 内 values-yingxin.yaml）。
+    # yingxin 实例：与 values.yaml 默认值的差异。
+    namespace: opencode-yingxin
     image:
+      repository: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools
       digest: sha256:4334606278b024d91c654a4e2fadb4cca767a7f1d3c4c66e4208b9f573e13cd4
+    env:
+      - name: PIPELINE_MANAGED
+        value: "true"
+      - name: LITELLM_BASE_URL
+        value: http://litellm-gateway.litellm.svc.cluster.local:4000
+      - name: SSH_TARGETS
+        value: "mesh-hw-21 mesh-hw-41"
+      - name: SMTP_HOST
+        value: smtp.163.com
+      - name: SMTP_PORT
+        value: "465"
+      - name: SMTP_USER
+        value: "122306789@163.com"
+      - name: SMTP_FROM
+        value: "122306789@163.com"
+      - name: MAIL_DEFAULT_TO
+        value: xieyucheng@outlook.com
+      - name: BROWSER_CDP_URL
+        value: ws://browserless.opencode-team.svc.cluster.local:3000/chromium
+      - name: OPEN_DESIGN_BROWSER_URL
+        value: http://browserless.opencode-team.svc.cluster.local:3000
+      - name: LITELLM_API_KEY
+        secretKey: LITELLM_API_KEY
+      - name: GH_TOKEN
+        secretKey: GH_TOKEN
+      - name: OPENCODE_SERVER_PASSWORD
+        secretKey: OPENCODE_SERVER_PASSWORD
+      - name: V100_SSH_KEY
+        secretKey: V100_SSH_KEY
+      - name: CLOUDFLARE_API_TOKEN
+        secretKey: CLOUDFLARE_API_TOKEN
+      - name: CF_AI_TOKEN
+        secretKey: CF_AI_TOKEN
+      - name: HCLOUD_AK
+        secretKey: HCLOUD_AK
+      - name: HCLOUD_SK
+        secretKey: HCLOUD_SK
+      - name: SMTP_PASS
+        secretKey: SMTP_PASS
     browserless:
+      replicas: 0
       image:
+        repository: swr.cn-north-9.myhuaweicloud.com/link-seek/browserless-chrome-cjk
         digest: sha256:d9040011a12b23af21637e21be2b22e6ba144ad4b5f458dbc803a367aca9e92d
+      concurrent: 10
+      queued: 10
+    tmpdir: false
+    rootHomeSeed: false
+    privilegedSsh: false
+    features:
+      cognee: false
+      obsutil: false
+      hcloud: true
+    gitUser: opencode-prod
+    nodeHostname: ""
+    workHostPath: /var/lib/opencode-yingxin/work
+    dataHostPath: /var/lib/opencode-yingxin/data
+    cogneeMcpRev: ""
+    vpc:
+      enabled: true
+      httpPort: 44099
+      sshPort: 2224
+    ingress:
+      enabled: true
+      name: yingxin-staging-tls
+      hosts:
+        - opencode.yingxin.net.cn
+      annotations:
+        route-comment: staging DNS-01 via IngressRoute (Ingress provider can't store LE certs)
+    rbac:
+      create: false
