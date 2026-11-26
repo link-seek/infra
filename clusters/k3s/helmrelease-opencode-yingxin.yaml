@@ -23,14 +23,16 @@ spec:
     namespace: opencode-yingxin
     image:
       repository: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools
-      digest: sha256:a56f9ab62e0801133389c487adf56fce0ea1f72b0ca77cfb4db450351e8db2a7
+      digest: sha256:4b9982e7609fee69fc4c96a5b22c24026466243dcf09abebb3375cbd20cec07f
     env:
     - name: PIPELINE_MANAGED
       value: 'true'
     - name: COGNEE_BASE_URL
       value: http://cognee.cognee-trial.svc.cluster.local:8001
-    - name: COGNEE_USERS
-      secretKey: COGNEE_USERS
+    - name: COGNEE_BROKER_URL
+      value: http://cognee-token-broker.cognee-trial.svc.cluster.local:8787
+    - name: COGNEE_BROKER_TOKEN
+      secretKey: COGNEE_BROKER_TOKEN
     - name: COGNEE_ALLOW_DEFAULT_IDENTITY
       value: "0"
     - name: COGNEE_IDLE_DEBOUNCE_MS
