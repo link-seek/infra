@@ -25,10 +25,22 @@ spec:
     appLabel: opencode
     image:
       repository: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools
-      digest: sha256:4334606278b024d91c654a4e2fadb4cca767a7f1d3c4c66e4208b9f573e13cd4
+      digest: sha256:52425e7a01ea8e06e7356a45f4848890cd68e212098b1b74aa7949be4c012811
     env:
     - name: PIPELINE_MANAGED
       value: 'true'
+    - name: COGNEE_BASE_URL
+      value: http://cognee.cognee-trial.svc.cluster.local:8001
+    - name: COGNEE_USERS
+      secretKey: COGNEE_USERS
+    - name: COGNEE_ALLOW_DEFAULT_IDENTITY
+      value: "0"
+    - name: COGNEE_IDLE_DEBOUNCE_MS
+      value: "60000"
+    - name: COGNEE_MIN_TRANSCRIPT_CHARS
+      value: "80"
+    - name: COGNEE_DEBUG
+      value: "1"
     - name: LITELLM_BASE_URL
       value: http://litellm-gateway.litellm.svc.cluster.local:4000
     - name: SSH_TARGETS
