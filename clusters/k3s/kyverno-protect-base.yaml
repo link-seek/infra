@@ -41,7 +41,9 @@ spec:
          'system:serviceaccount:flux-system:image-reflector-controller',
          'system:serviceaccount:flux-system:image-automation-controller',
          'system:serviceaccount:kube-system:local-path-provisioner-service-account',
-         'system:serviceaccount:nfs:nfs-provisioner']
+         'system:serviceaccount:nfs:nfs-provisioner',
+         'system:serviceaccount:kube-system:persistent-volume-binder',
+         'system:kube-controller-manager']
   validations:
     - expression: >-
         variables.trustedControllers.exists(u, u == request.userInfo.username)
