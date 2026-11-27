@@ -9,7 +9,7 @@
 #     便于「先用 opencode-tools 跑通，再切 opencode-ops」而 compose 不变。
 services:
   opencode-ops:
-    image: ${OPENCODE_OPS_IMAGE:-swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-ops:${OPENCODE_OPS_TAG:?set in /etc/opencode-ops/.env}}
+    image: ${OPENCODE_OPS_IMAGE:-swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-ops:${OPENCODE_OPS_TAG:-pin-required}}
     container_name: opencode-ops
     network_mode: host
     restart: unless-stopped
