@@ -25,7 +25,7 @@ spec:
     appLabel: opencode-team
     image:
       repository: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-team
-      digest: sha256:dc7275dde1bba22d91e3f60e14477e718a622cb3f3218003f544fccded901f24
+      digest: sha256:1e801ee4986eb976ece8abb35cf2b20f28cb95c6c3d9942df70ac2a5305b0350
     env:
     - name: PIPELINE_MANAGED
       value: 'true'
