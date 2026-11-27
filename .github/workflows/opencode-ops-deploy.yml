@@ -1,0 +1,102 @@
+name: opencode-ops-deploy
+# HW21 宿主机 opencode-ops 下发（Route A：docker-ce + compose + systemd）。
+# 触发：push 改 ops/opencode-ops/** 即自动部署；或手动 dispatch（可覆盖 repo/tag 先跑 opencode-tools）。
+# 全程直连 tailnet（tag:github），无跳板；密钥取组织级 secrets，注入远端 /etc/opencode-ops/.env（add-mask）。
+on:
+  workflow_dispatch:
+    inputs:
+      app_repo:
+        description: "覆盖镜像仓库名（默认读 VERSION 旁的 opencode-ops；首次可用 opencode-tools）"
+        required: false
+        type: string
+      app_tag:
+        description: "覆盖镜像 tag（首次可填 opencode-tools 的 tag/digest）"
+        required: false
+        type: string
+  push:
+    branches: [main]
+    paths: ['ops/opencode-ops/**']
+permissions:
+  contents: read
+concurrency:
+  group: opencode-ops-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+      SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+      HCLOUD_AK: ${{ secrets.PROD_HCLOUD_AK }}
+      HCLOUD_SK: ${{ secrets.PROD_HCLOUD_SK }}
+      SWR_LOGIN_USER: ${{ secrets.SWR_LOGIN_USER }}
+      SWR_LOGIN_PASS: ${{ secrets.SWR_LOGIN_PASS }}
+      OPS_WEB_PW: ${{ secrets.PROD_OPENCODE_SERVER_PASSWORD }}
+      GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+      INPUT_REPO: ${{ inputs.app_repo }}
+      INPUT_TAG: ${{ inputs.app_tag }}
+      H: "100.100.246.95"   # HW21 tailnet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: join tailnet (tag:github)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://tailscale.com/install.sh | sh
+          TSKEY="$(printf '%s' "${TS_API_KEY:-}" | tr -d '\r\n ')"
+          MINTED="$(curl -sS -m 30 -X POST -H "Authorization: Bearer $TSKEY" -H 'Content-Type: application/json' \
+            -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:github"]}}},"expirySeconds":3600}' \
+            https://api.tailscale.com/api/v2/tailnet/-/keys | python3 -c "import json,sys;print(json.load(sys.stdin).get('key',''))")"
+          [ -n "$MINTED" ] || { echo "FAIL: mint key"; exit 1; }
+          echo "::add-mask::$MINTED"
+          sudo tailscale up --authkey="$MINTED" --hostname="ci-opsdeploy-$GITHUB_RUN_ID" --accept-routes=false --accept-dns=false
+
+      - name: deploy on HW21
+        run: |
+          set -euo pipefail
+          for v in "$HCLOUD_AK" "$HCLOUD_SK" "$SWR_LOGIN_PASS" "$OPS_WEB_PW" "$GH_TOKEN"; do echo "::add-mask::$v"; done
+          REPO="${INPUT_REPO:-opencode-ops}"
+          TAG="${INPUT_TAG:-$(tr -d '[:space:]' < ops/opencode-ops/VERSION)}"
+          if printf '%s' "$TAG" | grep -q '^sha256:'; then
+            IMG="swr.cn-north-9.myhuaweicloud.com/link-seek/${REPO}@${TAG}"
+          else
+            IMG="swr.cn-north-9.myhuaweicloud.com/link-seek/${REPO}:${TAG}"
+          fi
+          echo "deploy image=${IMG}"
+          mkdir -p ~/.ssh && printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
+          SOPT="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/ci_key"
+          # 0) 目标目录
+          ssh $SOPT root@$H "install -d -m755 /opt/opencode-ops /etc/opencode-ops /var/lib/opencode-ops/workspace"
+          # 1) 同步部署文件
+          scp $SOPT ops/opencode-ops/compose.yaml ops/opencode-ops/opencode-ops.service ops/opencode-ops/ensure-docker.sh ops/opencode-ops/VERSION root@$H:/opt/opencode-ops/
+          # 2) 安装 docker-ce（幂等）
+          ssh $SOPT root@$H "bash /opt/opencode-ops/ensure-docker.sh"
+          # 3) 渲染 .env（600）
+          ssh $SOPT root@$H "cat > /etc/opencode-ops/.env <<EOF
+          OPENCODE_OPS_REPO=$REPO
+          OPENCODE_OPS_TAG=$TAG
+          OPENCODE_OPS_IMAGE=$IMG
+          LITELLM_BASE_URL=https://litellm.linkseek.net.cn/v1
+          OPENCODE_SERVER_PASSWORD=$OPS_WEB_PW
+          HCLOUD_REGION=cn-north-4
+          HCLOUD_AK=$HCLOUD_AK
+          HCLOUD_SK=$HCLOUD_SK
+          GH_TOKEN=$GH_TOKEN
+          GIT_AUTHOR_NAME=opencode-ops
+          GIT_AUTHOR_EMAIL=opencode-ops@local
+          EOF
+          chmod 600 /etc/opencode-ops/.env"
+          # 4) SWR 登录
+          echo "$SWR_LOGIN_PASS" | ssh $SOPT root@$H "docker login swr.cn-north-9.myhuaweicloud.com -u '$SWR_LOGIN_USER' --password-stdin"
+          # 5) compose pull + up
+          ssh $SOPT root@$H "cd /opt/opencode-ops && docker compose --env-file /etc/opencode-ops/.env pull && docker compose --env-file /etc/opencode-ops/.env up -d --remove-orphans"
+          # 6) systemd 守护 + tailscale serve
+          ssh $SOPT root@$H "install -m644 /opt/opencode-ops/opencode-ops.service /etc/systemd/system/opencode-ops.service && systemctl daemon-reload && systemctl enable opencode-ops.service; command -v tailscale >/dev/null && tailscale serve --bg http://127.0.0.1:4097 || true"
+          # 7) 冒烟
+          ssh $SOPT root@$H "docker compose ps; sleep 3; curl -fsS -o /dev/null -w 'web=%{http_code}\n' http://127.0.0.1:4097/ || true; kubectl get nodes | head -6"
+          shred -u ~/.ssh/ci_key
+
+      - name: 退出 tailnet
+        if: always()
+        run: sudo tailscale logout || true
