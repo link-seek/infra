@@ -25,7 +25,7 @@ spec:
     appLabel: opencode-team
     image:
       repository: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-team
-      digest: sha256:40380fab65ab05cbce7fded42ed4ed2fb92a2f6f07c31cf2dd2b2539d15f9943
+      digest: sha256:943c59e91325eaf3c4e383b624b3ed6ae301a32353ccb35c8b6894de0703ce43
     env:
     - name: PIPELINE_MANAGED
       value: 'true'
@@ -67,6 +67,10 @@ spec:
       secretKey: V100_SSH_KEY
     - name: OPENCODE_SERVER_USERNAME
       value: team
+    - name: COGNEE_BROKER_URL
+      value: http://cognee-token-broker.cognee-trial.svc.cluster.local:8787
+    - name: COGNEE_BROKER_TOKEN
+      secretKey: COGNEE_BROKER_TOKEN
     - name: CLOUDFLARE_API_TOKEN
       secretKey: CLOUDFLARE_API_TOKEN
     - name: CF_AI_TOKEN
