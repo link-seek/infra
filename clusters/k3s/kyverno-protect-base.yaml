@@ -49,6 +49,9 @@ spec:
         variables.trustedControllers.exists(u, u == request.userInfo.username)
         || request.userInfo.groups.exists(g, g == 'system:masters')
         || request.userInfo.groups.exists(g, g == 'system:serviceaccounts:kyverno')
+        // Storage provisioners and the PV binder write cluster-scoped volumes;
+        // their identities differ across distributions, so exempt the resource.
+        || request.resource.resource == 'persistentvolumes'
         || (request.namespace != ''
             && !(variables.baseNamespaces.exists(ns, ns == request.namespace)))
       message: >-
