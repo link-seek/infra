@@ -23,7 +23,7 @@ spec:
     namespace: opencode-yingxin
     image:
       repository: swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-tools
-      digest: sha256:0cb7ae06eedb1b67dec5f8886af43a5328d692c6084b7a5a3f30c781bec6ee1d
+      digest: sha256:e3ecd5a610158db70d8b512c2885def650f8dc3fcc2c58e8cfc94ac375309e16
     env:
     - name: PIPELINE_MANAGED
       value: 'true'
