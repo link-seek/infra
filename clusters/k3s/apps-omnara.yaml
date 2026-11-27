@@ -8,7 +8,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m0s
-  path: ./k8s/omnara
+  path: ./k8s/omnara-overlays/kubernetes-provider
   prune: true
   sourceRef:
     kind: OCIRepository
