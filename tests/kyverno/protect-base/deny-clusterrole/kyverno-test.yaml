@@ -1,0 +1,16 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: deny-clusterrole
+policies:
+  - ../../../../clusters/k3s/kyverno-protect-base.yaml
+resources:
+  - resources/denied-clusterrole.yaml
+userinfo: userinfo.yaml
+results:
+  - isValidatingPolicy: true
+    kind: ClusterRole
+    policy: protect-base-namespaces
+    resources:
+      - no-way
+    result: fail
