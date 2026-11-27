@@ -77,6 +77,7 @@ jobs:
           OPENCODE_OPS_REPO=$REPO
           OPENCODE_OPS_TAG=$TAG
           OPENCODE_OPS_IMAGE=$IMG
+          OPENCODE_OPS_BIND=$H
           LITELLM_BASE_URL=https://litellm.linkseek.net.cn/v1
           OPENCODE_SERVER_PASSWORD=$OPS_WEB_PW
           HCLOUD_REGION=cn-north-4

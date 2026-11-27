@@ -1,11 +1,12 @@
 # opencode-ops —— K3S 维护台（HW21 宿主机 docker，最佳实践姿势）
 #
-# 设计：docker-ce(华为镜像站, cgroup v2 OK) + docker compose v2 + systemd。
-#   - 应用真相 = 本 compose.yaml；镜像 digest/tag 单点 pin 在 ops/opencode-ops/VERSION。
+# 设计：docker-ce(华为镜像站, cgroup v2) + docker compose v2 + systemd。
+#   - 应用真相 = 本 compose.yaml；镜像单点 pin 在 ops/opencode-ops/VERSION（或 OPENCODE_OPS_IMAGE）。
 #   - 守护 = systemd 包 `docker compose up -d`；compose restart: unless-stopped 兜底。
 #   - 与 k3s 共存：daemon.json 关 iptables/bridge（容器 network_mode: host）。
-#   - kubeconfig 只读挂宿主 k3s.yaml；SSH 复用宿主 mesh_id；数据卷持久化。
-# 下发：`.github/workflows/opencode-ops-deploy.yml`（push ops/opencode-ops/** 或手动 dispatch）。
+#   - 安全：默认只绑 tailscale IP（OPENCODE_OPS_BIND），不暴露 eth0/公网。
+#   - 入口用内联 sh：无论镜像是否带 ops-entrypoint 都能就地准备 kubeconfig/mesh_id，
+#     便于「先用 opencode-tools 跑通，再切 opencode-ops」而 compose 不变。
 services:
   opencode-ops:
     image: ${OPENCODE_OPS_IMAGE:-swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-ops:${OPENCODE_OPS_TAG:?set in /etc/opencode-ops/.env}}
@@ -14,8 +15,22 @@ services:
     restart: unless-stopped
     env_file:
       - /etc/opencode-ops/.env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /root/.kube /root/.ssh
+        cp /etc/opencode-ops/kubeconfig /root/.kube/config
+        cp /etc/opencode-ops/mesh_id /root/.ssh/mesh_id
+        chmod 600 /root/.kube/config /root/.ssh/mesh_id
+        printf '%s\n' \
+          'Host 192.168.1.* 100.* 127.0.0.1' \
+          '  IdentityFile /root/.ssh/mesh_id' \
+          '  StrictHostKeyChecking no' \
+          '  UserKnownHostsFile /dev/null' > /root/.ssh/config
+        chmod 600 /root/.ssh/config
+        exec opencode serve --port 4097 --hostname "${OPENCODE_OPS_BIND:-0.0.0.0}"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:4097/ || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://${OPENCODE_OPS_BIND:-127.0.0.1}:4097/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -24,5 +39,3 @@ services:
       - /etc/opencode-ops:/etc/opencode-ops:ro
       - /var/lib/opencode-ops:/root/.local/share/opencode
       - /var/lib/opencode-ops/workspace:/workspace
-      - /etc/rancher/k3s/k3s.yaml:/etc/opencode-ops/kubeconfig:ro
-      - /root/.ssh/mesh_id:/etc/opencode-ops/mesh_id:ro

@@ -1,7 +1,7 @@
 [Unit]
 Description=OpenCode Ops (host-app via docker compose; independent of k3s)
-After=network-online.target docker.service
-Wants=network-online.target docker.service
+After=network-online.target docker.service tailscaled.service
+Wants=network-online.target docker.service tailscaled.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
