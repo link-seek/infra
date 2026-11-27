@@ -1,0 +1,12 @@
+# Base-plane guardrails: changes here need a human owner review; the agent
+# flow (branches + PRs) keeps working, direct push to main is already blocked
+# by branch protection.
+# Agent pods may propose changes to app namespaces, but base paths below must
+# have a human approval before merge.
+/clusters/k3s/flux-system/ @xieyucheng123
+/clusters/k3s/rbac-* @xieyucheng123
+/clusters/k3s/kyverno-* @xieyucheng123
+/clusters/k3s/apps-kyverno* @xieyucheng123
+/clusters/k3s/apps-flux-system* @xieyucheng123
+/k8s/kube-system/ @xieyucheng123
+/.github/workflows/flux-artifact.yml @xieyucheng123

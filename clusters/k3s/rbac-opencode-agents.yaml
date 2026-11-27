@@ -1,0 +1,247 @@
+---
+# Agent identity visibility: read-only across the cluster (no secrets anywhere).
+# Pods run as `default` SA in their own namespace; these bindings name that SA
+# explicitly per instance namespace. Secrets are deliberately excluded: pods
+# already carry their own credentials as env, but must not read other
+# namespaces' Secrets via the API.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opencode-read
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "configmaps", "services", "endpoints", "persistentvolumeclaims", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opencode-read-xieyucheng
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-xieyucheng
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opencode-read
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opencode-read-yingxin
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-yingxin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opencode-read
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opencode-read-team
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opencode-read
+---
+# Bounded write inside each instance's own namespace (trial edits; Flux remains
+# source of truth and reverts drift). Secrets/RBAC objects excluded on purpose.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opencode-app-write
+  namespace: opencode-xieyucheng
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+rules:
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
+    resources: ["pods", "pods/log", "deployments", "replicasets", "statefulsets", "jobs", "cronjobs", "services", "configmaps", "persistentvolumeclaims", "ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-app-write
+  namespace: opencode-xieyucheng
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-xieyucheng
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opencode-app-write
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opencode-app-write
+  namespace: opencode-yingxin
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+rules:
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
+    resources: ["pods", "pods/log", "deployments", "replicasets", "statefulsets", "jobs", "cronjobs", "services", "configmaps", "persistentvolumeclaims", "ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-app-write
+  namespace: opencode-yingxin
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-yingxin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opencode-app-write
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opencode-app-write
+  namespace: opencode-team
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+rules:
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
+    resources: ["pods", "pods/log", "deployments", "replicasets", "statefulsets", "jobs", "cronjobs", "services", "configmaps", "persistentvolumeclaims", "ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-app-write
+  namespace: opencode-team
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opencode-app-write
+---
+# Sandbox: full admin for manual trial deploys. Production rollout still goes
+# through the repo + Flux; anything here never promotes automatically.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opencode-sandbox
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-sandbox-admin-xieyucheng
+  namespace: opencode-sandbox
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-xieyucheng
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-sandbox-admin-yingxin
+  namespace: opencode-sandbox
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-yingxin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencode-sandbox-admin-team
+  namespace: opencode-sandbox
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: opencode-team
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+---
+# Sandbox guardrails: bounded blast radius.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: opencode-sandbox-quota
+  namespace: opencode-sandbox
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+spec:
+  hard:
+    cpu: "4"
+    memory: 8Gi
+    pods: "20"
+    services: "10"
+    persistentvolumeclaims: "5"

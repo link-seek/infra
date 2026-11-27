@@ -1,0 +1,45 @@
+---
+# Backstop: nobody except the Flux controllers and human cluster-admins may
+# mutate base namespaces. Agent identities have no bindings there anyway (RBAC
+# default-deny); this policy survives even a leaked kubeconfig/admin token
+# scoped to the wrong hands — only the listed controller SAs + system:masters
+# pass. Admission-only: never touches existing objects.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: protect-base-namespaces
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+spec:
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["*/*"]
+  variables:
+    - name: baseNamespaces
+      expression: "['kube-system', 'kube-public', 'kube-node-lease', 'flux-system', 'kyverno']"
+    - name: fluxControllers
+      expression: >-
+        ['system:serviceaccount:flux-system:source-controller',
+         'system:serviceaccount:flux-system:kustomize-controller',
+         'system:serviceaccount:flux-system:helm-controller',
+         'system:serviceaccount:flux-system:notification-controller',
+         'system:serviceaccount:flux-system:image-reflector-controller',
+         'system:serviceaccount:flux-system:image-automation-controller']
+  validations:
+    - expression: >-
+        !(variables.baseNamespaces.exists(ns, ns == object.metadata.namespace))
+        || variables.fluxControllers.exists(u, u == request.userInfo.username)
+        || request.userInfo.groups.exists(g, g == 'system:masters')
+      message: >-
+        Base namespaces (kube-system, kube-public, kube-node-lease, flux-system,
+        kyverno) are Flux-managed: humans change them via repo PR, agents must not
+        touch them. Only Flux controllers and cluster-admins may write here.
