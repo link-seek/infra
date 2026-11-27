@@ -2,6 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - install.yaml
+  - pdb-admission.yaml
 # 镜像为 SWR 私有 → Kyverno ns 需 swr-pull（见 README）。
 patches:
   - target:
@@ -12,3 +13,34 @@ patches:
         path: /spec/template/spec/imagePullSecrets
         value:
           - name: swr-pull
+  # 2026-11-27 事故加固（#949）：admission webhook 是全集群写入路径的单点。
+  # failurePolicy=Fail + 单副本 = Kyverno 一崩，所有写（含 kubelet 心跳）fail-closed
+  # 全拒 → 节点 NotReady 滚雪球（当天实况：informer sync 失败 → crash loop → 3 节点熔断）。
+  # HA：2 副本 + 主机名拓扑分散 + PDB（见 pdb-admission.yaml）；
+  # 资源上调：100m CPU 在重试风暴下节流 → 10s webhook 超时 → 假死。
+  - target:
+      kind: Deployment
+      name: kyverno-admission-controller
+    patch: |-
+      - op: add
+        path: /spec/replicas
+        value: 2
+      - op: add
+        path: /spec/template/spec/topologySpreadConstraints
+        value:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: admission-controller
+                app.kubernetes.io/instance: kyverno
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi

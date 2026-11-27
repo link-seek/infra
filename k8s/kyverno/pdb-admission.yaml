@@ -1,0 +1,17 @@
+# 2026-11-27（#949）：admission-controller 双副本的驱逐预算——
+# 节点维护/驱逐时至少保住 1 个 webhook endpoint，避免 fail-closed 全拒窗口。
+# 与 kustomization.yaml 里的 replicas=2 补丁配套；单副本时本 PDB 会阻止唯一副本被驱逐。
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kyverno-admission-controller
+  namespace: kyverno
+  labels:
+    app.kubernetes.io/component: admission-controller
+    app.kubernetes.io/instance: kyverno
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: admission-controller
+      app.kubernetes.io/instance: kyverno

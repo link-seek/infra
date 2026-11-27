@@ -1,0 +1,16 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: deny-agent-configmap
+policies:
+  - ../../../../clusters/k3s/kyverno-protect-base.yaml
+resources:
+  - resources/cm.yaml
+userinfo: userinfo.yaml
+results:
+  - isValidatingPolicy: true
+    kind: ConfigMap
+    policy: protect-base-namespaces
+    resources:
+      - agent-write
+    result: fail

@@ -1,0 +1,8 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: UserInfo
+userInfo:
+  username: system:serviceaccount:nfs:nfs-provisioner
+  groups:
+    - system:authenticated
+    - system:serviceaccounts
+    - system:serviceaccounts:nfs

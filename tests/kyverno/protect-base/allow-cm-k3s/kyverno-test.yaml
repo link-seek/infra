@@ -1,0 +1,16 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: allow-cm-k3s
+policies:
+  - ../../../../clusters/k3s/kyverno-protect-base.yaml
+resources:
+  - resources/endpoints.yaml
+userinfo: userinfo.yaml
+results:
+  - isValidatingPolicy: true
+    kind: Endpoints
+    policy: protect-base-namespaces
+    resources:
+      - source-controller
+    result: pass
