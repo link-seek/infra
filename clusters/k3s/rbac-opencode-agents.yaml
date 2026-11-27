@@ -245,3 +245,22 @@ spec:
     pods: "20"
     services: "10"
     persistentvolumeclaims: "5"
+---
+# Default requests/limits so plain `kubectl create deploy` works under the quota.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: opencode-sandbox-defaults
+  namespace: opencode-sandbox
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: infra
+spec:
+  limits:
+    - default:
+        cpu: "500m"
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      type: Container
