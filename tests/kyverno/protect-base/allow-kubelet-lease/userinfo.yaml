@@ -1,7 +1,0 @@
-apiVersion: cli.kyverno.io/v1alpha1
-kind: UserInfo
-userInfo:
-  username: system:node:ecs-ies-euleros-jmupervm-xieyucheng
-  groups:
-    - system:nodes
-    - system:authenticated
