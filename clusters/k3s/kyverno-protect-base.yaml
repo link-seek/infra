@@ -27,7 +27,11 @@ spec:
         resources: ["*/*"]
   variables:
     - name: baseNamespaces
-      expression: "['kube-system', 'kube-public', 'kube-node-lease', 'flux-system', 'kyverno']"
+      # NOTE: kube-system is intentionally NOT listed: Kyverno excludes it (and
+      # its own namespace) at the webhook level to avoid breaking core control-plane
+      # writes (leader election, GC). kube-system stays protected by RBAC default-deny
+      # (verified: agent SAs have zero grants there).
+      expression: "['kube-public', 'kube-node-lease', 'flux-system', 'kyverno']"
     - name: fluxControllers
       expression: >-
         ['system:serviceaccount:flux-system:source-controller',
@@ -41,10 +45,11 @@ spec:
         variables.fluxControllers.exists(u, u == request.userInfo.username)
         || request.userInfo.groups.exists(g, g == 'system:masters')
         || request.userInfo.groups.exists(g, g == 'system:serviceaccounts:kyverno')
-        || (has(object.metadata.namespace)
-            && !(variables.baseNamespaces.exists(ns, ns == object.metadata.namespace)))
+        || (request.namespace != ''
+            && !(variables.baseNamespaces.exists(ns, ns == request.namespace)))
       message: >-
-        Base namespaces (kube-system, kube-public, kube-node-lease, flux-system,
-        kyverno) are Flux-managed: humans change them via repo PR, agents must not
-        touch them. Cluster-scoped writes are likewise restricted. Only Flux
-        controllers, kyverno itself and cluster-admins may write here.
+        Protected namespaces (kube-public, kube-node-lease, flux-system, kyverno;
+        kube-system is RBAC-protected, Kyverno cannot cover it by design) are
+        Flux-managed: humans change them via repo PR, agents must not touch them.
+        Cluster-scoped writes are likewise restricted. Only Flux controllers,
+        kyverno itself and cluster-admins may write here.
