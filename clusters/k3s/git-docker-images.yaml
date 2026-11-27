@@ -11,4 +11,4 @@ spec:
   interval: 5m0s
   url: oci://swr.cn-north-9.myhuaweicloud.com/link-seek/docker-images-manifests
   ref:
-    digest: sha256:93466d5490dd79d7e768c581117a3eff0d454799f7738e64fef4308c1b4aec10
+    digest: sha256:f5c62196c001eff636db4a92af95458ab887998b15c260d7ff6c639757124d8b
