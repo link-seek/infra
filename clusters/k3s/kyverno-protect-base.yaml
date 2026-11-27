@@ -32,17 +32,19 @@ spec:
       # writes (leader election, GC). kube-system stays protected by RBAC default-deny
       # (verified: agent SAs have zero grants there).
       expression: "['kube-public', 'kube-node-lease', 'flux-system', 'kyverno']"
-    - name: fluxControllers
+    - name: trustedControllers
       expression: >-
         ['system:serviceaccount:flux-system:source-controller',
          'system:serviceaccount:flux-system:kustomize-controller',
          'system:serviceaccount:flux-system:helm-controller',
          'system:serviceaccount:flux-system:notification-controller',
          'system:serviceaccount:flux-system:image-reflector-controller',
-         'system:serviceaccount:flux-system:image-automation-controller']
+         'system:serviceaccount:flux-system:image-automation-controller',
+         'system:serviceaccount:kube-system:local-path-provisioner-service-account',
+         'system:serviceaccount:nfs:nfs-provisioner']
   validations:
     - expression: >-
-        variables.fluxControllers.exists(u, u == request.userInfo.username)
+        variables.trustedControllers.exists(u, u == request.userInfo.username)
         || request.userInfo.groups.exists(g, g == 'system:masters')
         || request.userInfo.groups.exists(g, g == 'system:serviceaccounts:kyverno')
         || (request.namespace != ''
@@ -51,5 +53,5 @@ spec:
         Protected namespaces (kube-public, kube-node-lease, flux-system, kyverno;
         kube-system is RBAC-protected, Kyverno cannot cover it by design) are
         Flux-managed: humans change them via repo PR, agents must not touch them.
-        Cluster-scoped writes are likewise restricted. Only Flux controllers,
-        kyverno itself and cluster-admins may write here.
+        Cluster-scoped writes are restricted to Flux, the storage provisioners,
+        kyverno itself and cluster-admins.
