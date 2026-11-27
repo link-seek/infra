@@ -32,6 +32,8 @@ spec:
       # writes (leader election, GC). kube-system stays protected by RBAC default-deny
       # (verified: agent SAs have zero grants there).
       expression: "['kube-public', 'kube-node-lease', 'flux-system', 'kyverno']"
+    # Storage provisioners and the PV binder write cluster-scoped volumes;
+    # their identities differ across distributions, so the resource is exempted above.
     - name: trustedControllers
       expression: >-
         ['system:serviceaccount:flux-system:source-controller',
@@ -49,8 +51,6 @@ spec:
         variables.trustedControllers.exists(u, u == request.userInfo.username)
         || request.userInfo.groups.exists(g, g == 'system:masters')
         || request.userInfo.groups.exists(g, g == 'system:serviceaccounts:kyverno')
-        // Storage provisioners and the PV binder write cluster-scoped volumes;
-        // their identities differ across distributions, so exempt the resource.
         || request.resource.resource == 'persistentvolumes'
         || (request.namespace != ''
             && !(variables.baseNamespaces.exists(ns, ns == request.namespace)))
