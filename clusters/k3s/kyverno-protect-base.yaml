@@ -12,6 +12,8 @@ metadata:
     app.kubernetes.io/managed-by: flux
     app.kubernetes.io/part-of: infra
 spec:
+  validationActions:
+    - Deny
   evaluation:
     admission:
       enabled: true
