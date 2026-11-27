@@ -47,12 +47,14 @@ spec:
          'system:serviceaccount:kube-system:persistent-volume-binder',
          'system:kube-controller-manager']
   validations:
+    # has() guard below: request.namespace is absent on cluster-scoped objects;
+    # absent namespace + non-exempt caller falls through to deny.
     - expression: >-
         variables.trustedControllers.exists(u, u == request.userInfo.username)
         || request.userInfo.groups.exists(g, g == 'system:masters')
         || request.userInfo.groups.exists(g, g == 'system:serviceaccounts:kyverno')
         || request.resource.resource == 'persistentvolumes'
-        || (request.namespace != ''
+        || (has(request.namespace) && request.namespace != ''
             && !(variables.baseNamespaces.exists(ns, ns == request.namespace)))
       message: >-
         Protected namespaces (kube-public, kube-node-lease, flux-system, kyverno;

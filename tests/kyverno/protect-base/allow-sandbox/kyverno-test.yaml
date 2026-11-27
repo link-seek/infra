@@ -1,0 +1,16 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: allow-sandbox
+policies:
+  - ../../../../clusters/k3s/kyverno-protect-base.yaml
+resources:
+  - resources/allowed-sandbox.yaml
+userinfo: userinfo.yaml
+results:
+  - isValidatingPolicy: true
+    kind: Deployment
+    policy: protect-base-namespaces
+    resources:
+      - ok
+    result: pass
