@@ -66,8 +66,8 @@ jobs:
           echo "deploy image=${IMG}"
           mkdir -p ~/.ssh && printf '%s\n' "$SSH_KEY" > ~/.ssh/ci_key && chmod 600 ~/.ssh/ci_key
           SOPT="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i ~/.ssh/ci_key"
-          # 0) 目标目录
-          ssh $SOPT root@$H "install -d -m755 /opt/opencode-ops /etc/opencode-ops /var/lib/opencode-ops/workspace"
+          # 0) 目标目录 + 铺 kubeconfig/mesh_id（供容器内 kubectl/ssh）
+          ssh $SOPT root@$H "install -d -m700 /etc/opencode-ops; install -d -m755 /opt/opencode-ops /var/lib/opencode-ops/workspace; cp -f /etc/rancher/k3s/k3s.yaml /etc/opencode-ops/kubeconfig; chmod 600 /etc/opencode-ops/kubeconfig; cp -f /root/.ssh/mesh_id /etc/opencode-ops/mesh_id; chmod 600 /etc/opencode-ops/mesh_id"
           # 1) 同步部署文件
           scp $SOPT ops/opencode-ops/compose.yaml ops/opencode-ops/opencode-ops.service ops/opencode-ops/ensure-docker.sh ops/opencode-ops/VERSION root@$H:/opt/opencode-ops/
           # 2) 安装 docker-ce（幂等）
@@ -98,8 +98,8 @@ jobs:
           ssh $SOPT root@$H "cd /opt/opencode-ops && docker compose --env-file /etc/opencode-ops/.env pull && docker compose --env-file /etc/opencode-ops/.env up -d --remove-orphans"
           # 6) systemd 守护 + tailscale serve
           ssh $SOPT root@$H "install -m644 /opt/opencode-ops/opencode-ops.service /etc/systemd/system/opencode-ops.service && systemctl daemon-reload && systemctl enable opencode-ops.service; command -v tailscale >/dev/null && tailscale serve --bg http://127.0.0.1:4097 || true"
-          # 7) 冒烟
-          ssh $SOPT root@$H "docker compose ps; sleep 3; curl -fsS -o /dev/null -w 'web=%{http_code}\n' http://127.0.0.1:4097/ || true; kubectl get nodes | head -6"
+          # 7) 冒烟（绑 tailscale IP；宿主无 kubectl，用 k3s kubectl）
+          ssh $SOPT root@$H "cd /opt/opencode-ops && docker compose --env-file /etc/opencode-ops/.env -f compose.yaml ps; curl -fsS -o /dev/null -w 'web=%{http_code}\n' http://$H:4097/ || true; KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/bin/k3s kubectl get nodes | head -6"
           shred -u ~/.ssh/ci_key
 
       - name: 退出 tailnet
