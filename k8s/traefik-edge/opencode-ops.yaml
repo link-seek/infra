@@ -1,0 +1,61 @@
+# opencode-ops 公网入口：Host → Aliyun edge(mesh-ali-gz:443) Traefik → tailnet HW21:4097。
+# 同款先例见同目录 home-oc.yaml（home PC 的 opencode）。
+# 安全：cluster-admin 维护台，故在 Traefik 层加 BasicAuth（middleware opencode-ops-auth）。
+# 所需 Secret `opencode-ops-basicauth`（namespace kube-system, key=users）不在仓内，
+#   由 bootstrap 时生成 / 或后续走 Infisical 同步（见 docs/opencode-ops.md）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: opencode-ops-backend
+  namespace: kube-system
+  labels: {app.kubernetes.io/part-of: traefik-edge}
+spec:
+  clusterIP: None
+  ports:
+    - name: http
+      port: 4097
+      targetPort: 4097
+      protocol: TCP
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: opencode-ops-backend
+  namespace: kube-system
+  labels: {app.kubernetes.io/part-of: traefik-edge}
+subsets:
+  - addresses:
+      - ip: 100.100.246.95
+    ports:
+      - name: http
+        port: 4097
+        protocol: TCP
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: opencode-ops-auth
+  namespace: kube-system
+  labels: {app.kubernetes.io/part-of: traefik-edge}
+spec:
+  basicAuth:
+    secret: opencode-ops-basicauth
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: opencode-ops
+  namespace: kube-system
+  labels: {app.kubernetes.io/part-of: traefik-edge}
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`opencode-ops.xieyucheng.top`)
+      kind: Rule
+      middlewares:
+        - name: opencode-ops-auth
+      services:
+        - name: opencode-ops-backend
+          port: 4097
+  tls:
+    certResolver: le-prod

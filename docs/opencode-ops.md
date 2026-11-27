@@ -32,7 +32,16 @@ ops/opencode-ops/
 - 故本机走 docker-ce，并按最佳实践姿势组织：compose 为真相 + digest/tag pin + systemd `Type=oneshot/RemainAfterExit` 守护 + healthcheck + `--remove-orphans`。
 - 若日后要正统 podman-quadlet：把本维护台迁到 openEuler/Ubuntu 小 ECS，用 `.container` + `AutoUpdate=registry` + `podman-auto-update.timer`。
 
+## 公网入口（2026-11-27 上线）
+- `https://opencode-ops.xieyucheng.top` → Cloudflare A `120.77.76.20`（Aliyun edge，proxied=false）→ Traefik(edge) → tailnet `100.100.246.95:4097`。
+- TLS：Traefik `certResolver: le-prod`（Let's Encrypt DNS-01，Cloudflare）。
+- 准入：Traefik **BasicAuth** middleware `opencode-ops-auth`（user `ops`）+ 应用层 `OPENCODE_SERVER_PASSWORD`。
+- BasicAuth 口令不进仓：当前在 HW21 `/etc/opencode-ops/basic-auth.txt`(600)；Secret `opencode-ops-basicauth`(kube-system) 需 bootstrap 生成或走 Infisical。
+- 路由清单：`k8s/traefik-edge/opencode-ops.yaml`；DNS：`iac/terraform/cloudflare/dns.tf`（含 import 块，首次 apply 后删除）。
+- 强烈建议下一步加 **Cloudflare Access**（DNS 改 proxied=true + Zero Trust 策略），对 cluster-admin 台子做身份门禁。
+
 ## 安全
-- 无公网端口；仅 tailnet + Web 口令。
+- 公网仅暴露 443（经 edge），HW21 无入站端口；容器只绑 tailnet IP。
+- 双口令：Traefik BasicAuth + 应用 `OPENCODE_SERVER_PASSWORD`。
 - kubeconfig 只读挂宿主 k3s.yaml；SSH 复用宿主 mesh_id；云 AK/密钥走组织 secrets 注入，不进仓库、不进镜像。
-- kubeconfig 为 admin：本机即"救火台"，务必限制登录（tailnet ACL + 口令）。
+- kubeconfig 为 admin：本机即"救火台"，务必限制登录。
