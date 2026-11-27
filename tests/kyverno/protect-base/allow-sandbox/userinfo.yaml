@@ -1,8 +1,0 @@
-apiVersion: cli.kyverno.io/v1alpha1
-kind: UserInfo
-userInfo:
-  username: system:serviceaccount:opencode-xieyucheng:default
-  groups:
-    - system:authenticated
-    - system:serviceaccounts
-    - system:serviceaccounts:opencode-xieyucheng
