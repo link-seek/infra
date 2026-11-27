@@ -1,8 +1,7 @@
 # opencode-ops 公网入口：Host → Aliyun edge(mesh-ali-gz:443) Traefik → tailnet HW21:4097。
 # 同款先例见同目录 home-oc.yaml（home PC 的 opencode）。
-# 安全：cluster-admin 维护台，故在 Traefik 层加 BasicAuth（middleware opencode-ops-auth）。
-# 所需 Secret `opencode-ops-basicauth`（namespace kube-system, key=users）不在仓内，
-#   由 bootstrap 时生成 / 或后续走 Infisical 同步（见 docs/opencode-ops.md）。
+# 认证：只用应用层 OPENCODE_SERVER_PASSWORD（单层，与 opencode/home-oc 一致）；
+#   如需更强门禁，后续上 Cloudflare Access（proxied=true + Zero Trust），不要在 Traefik 再叠一层口令。
 apiVersion: v1
 kind: Service
 metadata:
@@ -32,16 +31,6 @@ subsets:
         protocol: TCP
 ---
 apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: opencode-ops-auth
-  namespace: kube-system
-  labels: {app.kubernetes.io/part-of: traefik-edge}
-spec:
-  basicAuth:
-    secret: opencode-ops-basicauth
----
-apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: opencode-ops
@@ -52,8 +41,6 @@ spec:
   routes:
     - match: Host(`opencode-ops.xieyucheng.top`)
       kind: Rule
-      middlewares:
-        - name: opencode-ops-auth
       services:
         - name: opencode-ops-backend
           port: 4097
