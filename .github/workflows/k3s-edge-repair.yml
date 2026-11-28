@@ -26,6 +26,26 @@ on:
         description: "二次确认：必须与 node_hostname 一致"
         required: true
         type: string
+      k3s_bin_url:
+        description: "k3s 二进制国内中转 URL（留空=官方 GitHub；国内/跨云节点建议填 OBS 预签名，勿入库）"
+        required: false
+        default: ""
+        type: string
+      k3s_sha_url:
+        description: "k3s sha256 校验 URL（同上）"
+        required: false
+        default: ""
+        type: string
+      bin_source:
+        description: "二进制源：auto|obs|github"
+        required: false
+        default: "auto"
+        type: string
+      pause_image:
+        description: "agent pause 镜像（SWR 常驻，国内可拉）"
+        required: false
+        default: "swr.cn-north-9.myhuaweicloud.com/link-seek/edge-pause:3.10.2"
+        type: string
 
 permissions:
   contents: read
@@ -75,6 +95,10 @@ jobs:
           server_tail: ${{ inputs.server_tail }}
           ssh_key: ${{ secrets.CADDY_SSH_KEY }}
           ts_api_key: ${{ secrets.TS_API_KEY }}
+          k3s_bin_url: ${{ inputs.k3s_bin_url }}
+          k3s_sha_url: ${{ inputs.k3s_sha_url }}
+          bin_source: ${{ inputs.bin_source }}
+          pause_image: ${{ inputs.pause_image }}
 
       - name: 焚毁（跳板钥匙＋runner 身份）
         if: always()
