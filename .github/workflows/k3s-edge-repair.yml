@@ -1,0 +1,83 @@
+name: k3s-edge-repair
+
+# 声明式节点修复（仅 edge agent）：对「节点 Ready 但配置漂移」的 agent 走官方安装器幂等重装。
+# 背景：k3s-join-edge 的 join 有「已 Ready 直接跳过」的幂等门，修不了“Ready 但漂移”的节点；
+#       本链直接用 .github/actions/edge-join（装机段唯一正本）强制重装，按 node/node-config.yaml
+#       声明的 node_ip + flannel-iface=tailscale0 重建 systemd unit 的 ExecStart。
+# 纪律：**禁止手改 /etc/systemd/system/k3s-{agent,}.service 的 ExecStart**；agent 修复一律走本链。
+# 收尾：修完请再跑 k3s-node-config（mode=verify）确认 NODE-OK；server 走 k3s-node-config apply。
+on:
+  workflow_dispatch:
+    inputs:
+      node_hostname:
+        description: "要修复的 edge agent node 名（须在 node/node-config.yaml 且 role=agent）"
+        required: true
+        type: string
+      agent_ip:
+        description: "该 agent 的 tailnet IP（= node-config.yaml 的 node_ip）"
+        required: true
+        type: string
+      server_tail:
+        description: "取号/跳板 server tailnet IP"
+        required: false
+        default: "100.93.119.21"
+        type: string
+      confirm_hostname:
+        description: "二次确认：必须与 node_hostname 一致"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3s-edge-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 二次确认 + 校验声明（role=agent 且 IP 匹配）
+        run: |
+          set -euo pipefail
+          [ "${{ inputs.confirm_hostname }}" = "${{ inputs.node_hostname }}" ] || { echo "FAIL: confirm_hostname 与 node_hostname 不一致，拒绝执行"; exit 1; }
+          python3 - <<'PY'
+          import yaml, sys, os
+          name=os.environ["IN_NAME"]; ip=os.environ["IN_IP"]
+          hosts={h["name"]:h for h in yaml.safe_load(open("node/node-config.yaml"))["hosts"]}
+          h=hosts.get(name)
+          if not h:
+              sys.exit(f"FAIL: {name} 不在 node-config.yaml")
+          if h.get("role") != "agent":
+              sys.exit(f"FAIL: {name} role={h.get('role')}，本链只修 agent；server 走 k3s-node-config apply")
+          if h.get("node_ip") != ip:
+              sys.exit(f"FAIL: agent_ip={ip} 与声明 node_ip={h.get('node_ip')} 不一致")
+          if h.get("flannel_iface") != "tailscale0":
+              sys.exit(f"FAIL: 声明 flannel_iface={h.get('flannel_iface')}，非 tailscale0，人工确认")
+          print(f"OK: {name} role=agent node_ip={ip}")
+          PY
+        env:
+          IN_NAME: ${{ inputs.node_hostname }}
+          IN_IP: ${{ inputs.agent_ip }}
+
+      - name: 幂等重装（edge-join action，remote=true，按声明重建 ExecStart）
+        uses: ./.github/actions/edge-join
+        with:
+          remote: "true"
+          node_name: ${{ inputs.node_hostname }}
+          node_ip: ${{ inputs.agent_ip }}
+          server_tail: ${{ inputs.server_tail }}
+          ssh_key: ${{ secrets.CADDY_SSH_KEY }}
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+
+      - name: 焚毁（跳板钥匙＋runner 身份）
+        if: always()
+        run: |
+          sudo tailscale ssh root@"${{ inputs.server_tail }}" 'shred -u /tmp/ci-edge.key 2>/dev/null; echo KEY-BURNED' || true
+          sudo tailscale logout || true

@@ -2,10 +2,14 @@ name: k3s-node-config
 
 # 声明式节点配置（k3s over TS underlay），覆盖全部 5 节点（3 server + 2 edge agent）。
 #   verify（默认）：只读核对 config.yaml/unit 关键项 + flannel.1 运行时（local/dev/mtu）+ public-ip，
-#                   并核对 flannel 数据面：远端路由数/形状、网关邻居、FDB、TX 计数/tx_dropped、tailscale ip rule。
-#                   任一漂移即 fail（2026-11-27 事故中路由/FDB/邻居全丢但节点仍 Ready，旧 verify 未覆盖）。
+#                   + flannel 数据面（远端路由数/形状、邻居、FDB、TX/tx_dropped、tailscale ip rule）
+#                   + L7 网关可用性（egress-proxy→opencode.ai；并打印集群 DNS ClusterIP 供参考）。
+#                   unit 关键项改用 `systemctl show -p ExecStart --value` 的“实际解析结果”比对，
+#                   避免旧实现 tr 拼行把「续行符丢失、后续 flag 被 systemd 丢弃」这种漂移掩盖成 NODE-OK。
+#                   任一漂移即 fail；失败自动开/追加 issue（drift 告警闭环，见文件末尾）。
 #   apply：仅对 server 写入缺失/不符的 config 行（备份），restart=yes 才重启对应服务（重启后请再跑 verify）。
 #          agent 的参数在 systemd unit 的 ExecStart（--node-ip/--flannel-iface），本链只 verify，不 sed unit。
+#          修复 agent 走 k3s-edge-repair（幂等重装），禁止手改 ExecStart。
 # 定时 verify 作为漂移巡检。
 on:
   workflow_dispatch:
@@ -27,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: k3s-node-config
@@ -81,6 +86,7 @@ jobs:
           [ -s /tmp/hosts.tsv ] || { echo "FAIL: hosts.tsv 为空（node-config.yaml 解析失败？）"; exit 1; }
           echo "hosts: $(wc -l < /tmp/hosts.tsv)"
           FAIL=0
+          { echo "# k3s-node-config drift report"; echo "时间: $(date -u +%FT%TZ)"; echo; } > drift-report.md
           while IFS='|' read -r NAME SSH ROLE SVC NIP EIP IFACE MTU PEERS; do
             [ -n "$NAME" ] || continue
             echo "===== $NAME ($SSH) role=$ROLE svc=$SVC ====="
@@ -88,18 +94,19 @@ jobs:
           set -uo pipefail
           CFG=/etc/rancher/k3s/config.yaml
           SVC="${SVC:-k3s}"
-          # agent 的 flag 在 unit ExecStart，且可能是多行+单引号（--node-ip \n '1.2.3.4'），先规整成单行
-          UNIT_NORM="$(systemctl cat "$SVC" 2>/dev/null | tr -d "'" | tr -d '\\' | tr '\n\t' '  ' | tr -s ' ')"
+          # 用 systemd 真正解析出的 ExecStart（续行符丢失时后续 flag 会缺失）来比对，避免 tr 拼行掩盖漂移。
+          # 注意：不能 `tr -d '\\'` 拼行——那会把「丢了续行符、systemd 实际没解析到 flag」的坏 unit 判成 OK。
+          PARSED_EXEC="$(systemctl show "$SVC" -p ExecStart --value 2>/dev/null || true)"
           drift=0
-          has_kv() { # $1=key $2=val: yaml "key: val" 或 unit "--key val"/"--key=val"
+          has_kv() { # $1=key $2=val: config.yaml "key: val" 或 systemd 解析后的 ExecStart "--key val"/"--key=val"
             local k="$1" v="$2" vre
             vre="$(printf '%s' "$v" | sed 's/\./\\./g')"
             grep -qE "^[[:space:]]*${k}:[[:space:]]*\"?${vre}\"?[[:space:]]*$" "$CFG" 2>/dev/null && return 0
-            printf '%s' "$UNIT_NORM" | grep -qE -- "--${k}[=[:space:]]+${vre}([[:space:]\"']|$)" && return 0
+            printf '%s' "$PARSED_EXEC" | grep -qE -- "--${k}[=[:space:]]+${vre}([[:space:];]|$)" && return 0
             return 1
           }
           echo "--- config.yaml/unit 关键项 ---"
-          { grep -E "node-ip|node-external-ip|flannel-iface" "$CFG" 2>/dev/null || true; printf '%s\n' "$UNIT_NORM" | grep -oE -- "--(node-ip|node-external-ip|flannel-iface)[=[:space:]]+[0-9a-zA-Z./]+" || true; } | head
+          { grep -E "node-ip|node-external-ip|flannel-iface" "$CFG" 2>/dev/null || true; printf '%s\n' "$PARSED_EXEC" | grep -oE -- "--(node-ip|node-external-ip|flannel-iface)[=[:space:]]+[0-9a-zA-Z./]+" || true; } | head
           for kv in "node-ip $NIP" "flannel-iface $IFACE"; do
             set -- $kv; has_kv "$1" "$2" || { echo "DRIFT-MISSING $1=$2"; drift=1; }
           done
@@ -168,8 +175,37 @@ jobs:
           REMOTE
             )
             echo "$OUT"
+            { echo "### $NAME ($SSH) role=$ROLE"; echo '```'; echo "$OUT"; echo '```'; echo; } >> drift-report.md
             echo "$OUT" | grep -q NODE-OK || FAIL=1
           done < /tmp/hosts.tsv
+          # ---- L7 网关可用性探针（egress-proxy→opencode.ai；节点 host 不解析 .svc，用 ClusterIP）----
+          echo "===== egress L7 探针 ====="
+          EG_SSH=$(awk -F'|' '$3=="server"{print $2; exit}' /tmp/hosts.tsv)
+          EG_SVCIP=$(ssh $SOPT root@$EG_SSH "KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl -n egress get svc egress-proxy -o jsonpath='{.spec.clusterIP}'" 2>/dev/null || true)
+          echo "egress-proxy clusterIP=$EG_SVCIP"
+          EG_CODE=000
+          [ -n "$EG_SVCIP" ] && EG_CODE=$(ssh $SOPT root@$EG_SSH "curl -sS -m 20 -x http://$EG_SVCIP:3128 -o /dev/null -w '%{http_code}' https://opencode.ai" 2>/dev/null || echo 000)
+          echo "egress squid->opencode.ai http=$EG_CODE (expect 200)"
+          if [ "$EG_CODE" != "200" ]; then echo "DRIFT-EGRESS squid->opencode.ai http=$EG_CODE"; echo "### L7 egress squid->opencode.ai http=$EG_CODE" >> drift-report.md; FAIL=1; fi
+          DNSIP=$(ssh $SOPT root@$EG_SSH "KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}'" 2>/dev/null || true)
+          echo "cluster dns ip=$DNSIP"
           shred -u ~/.ssh/ci_key 2>/dev/null || true
           if [ "$FAIL" != 0 ]; then echo "RESULT: FAIL（mode=$MODE）"; exit 1; fi
           if [ "$MODE" = apply ]; then echo "APPLY 完成（restart=$RESTART；请再跑一次 verify）"; else echo "RESULT: 全节点无漂移"; fi
+
+      - name: 失败自动开/追加 issue（drift 告警闭环）
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ ! -s drift-report.md ]; then echo "无 drift-report.md，跳过"; exit 0; fi
+          TITLE="[drift] k3s-node-config 巡检失败"
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          BODY="$(printf '模式: %s\n运行: %s\n\n%s\n' "${MODE:-verify}" "$RUN_URL" "$(cat drift-report.md)")"
+          NUM=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "[drift] k3s-node-config"' --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          if [ -n "$NUM" ]; then
+            gh issue comment "$NUM" --repo "$GITHUB_REPOSITORY" --body "$BODY" || echo "追加 issue 失败（权限？）"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY" || echo "开 issue 失败（权限？）"
+          fi
