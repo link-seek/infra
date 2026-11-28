@@ -33,8 +33,11 @@ spec:
       value: http://cognee-token-broker.cognee-trial.svc.cluster.local:8787
     - name: COGNEE_BROKER_TOKEN
       secretKey: COGNEE_BROKER_TOKEN
+    # 单人实例：没有 SSO 网关注入 auth.user_id 时，回退到实例主人身份（否则记忆 fail-closed 全禁）
+    - name: COGNEE_DEFAULT_USER
+      value: yingxin
     - name: COGNEE_ALLOW_DEFAULT_IDENTITY
-      value: "0"
+      value: "1"
     - name: COGNEE_IDLE_DEBOUNCE_MS
       value: "60000"
     - name: COGNEE_MIN_TRANSCRIPT_CHARS

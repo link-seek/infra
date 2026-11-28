@@ -67,6 +67,11 @@ spec:
       secretKey: V100_SSH_KEY
     - name: OPENCODE_SERVER_USERNAME
       value: team
+    # team 是多人在用的共享实例，但记忆按约定为团队共享：未注入 auth.user_id 时回退到 team 身份
+    - name: COGNEE_DEFAULT_USER
+      value: team
+    - name: COGNEE_ALLOW_DEFAULT_IDENTITY
+      value: "1"
     - name: COGNEE_BROKER_URL
       value: http://cognee-token-broker.cognee-trial.svc.cluster.local:8787
     - name: COGNEE_BROKER_TOKEN
