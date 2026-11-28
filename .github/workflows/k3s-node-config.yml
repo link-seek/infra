@@ -1,7 +1,9 @@
 name: k3s-node-config
 
 # 声明式节点配置（k3s over TS underlay），覆盖全部 5 节点（3 server + 2 edge agent）。
-#   verify（默认）：只读核对 config.yaml/unit 关键项 + flannel.1 运行时（local/dev/mtu）+ public-ip，有漂移即 fail。
+#   verify（默认）：只读核对 config.yaml/unit 关键项 + flannel.1 运行时（local/dev/mtu）+ public-ip，
+#                   并核对 flannel 数据面：远端路由数/形状、网关邻居、FDB、TX 计数/tx_dropped、tailscale ip rule。
+#                   任一漂移即 fail（2026-11-27 事故中路由/FDB/邻居全丢但节点仍 Ready，旧 verify 未覆盖）。
 #   apply：仅对 server 写入缺失/不符的 config 行（备份），restart=yes 才重启对应服务（重启后请再跑 verify）。
 #          agent 的参数在 systemd unit 的 ExecStart（--node-ip/--flannel-iface），本链只 verify，不 sed unit。
 # 定时 verify 作为漂移巡检。
@@ -67,20 +69,22 @@ jobs:
           python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml || pip3 install --quiet pyyaml || { echo "FAIL: pyyaml 不可用"; exit 1; }
           python3 - <<'PY' > /tmp/hosts.tsv
           import yaml
-          for h in yaml.safe_load(open('node/node-config.yaml'))['hosts']:
-              print('\t'.join([
+          hosts = yaml.safe_load(open('node/node-config.yaml'))['hosts']
+          peers = len(hosts) - 1
+          for h in hosts:
+              print('|'.join([
                   h['name'], h['ssh'], h.get('role','server'), h.get('service','k3s'),
                   h['node_ip'], h.get('node_external_ip','') or '', h['flannel_iface'],
-                  str(h['expect_flannel_mtu']),
+                  str(h['expect_flannel_mtu']), str(peers),
               ]))
           PY
           [ -s /tmp/hosts.tsv ] || { echo "FAIL: hosts.tsv 为空（node-config.yaml 解析失败？）"; exit 1; }
           echo "hosts: $(wc -l < /tmp/hosts.tsv)"
           FAIL=0
-          while IFS=$'\t' read -r NAME SSH ROLE SVC NIP EIP IFACE MTU; do
+          while IFS='|' read -r NAME SSH ROLE SVC NIP EIP IFACE MTU PEERS; do
             [ -n "$NAME" ] || continue
             echo "===== $NAME ($SSH) role=$ROLE svc=$SVC ====="
-            OUT=$(ssh $SOPT root@$SSH "MODE=$MODE RESTART=$RESTART ROLE=$ROLE SVC=$SVC NIP=$NIP EIP=$EIP IFACE=$IFACE MTU=$MTU bash -s" <<'REMOTE' || true
+            OUT=$(ssh $SOPT root@$SSH "MODE=$MODE RESTART=$RESTART ROLE=$ROLE SVC=$SVC NIP=$NIP EIP=$EIP IFACE=$IFACE MTU=$MTU PEERS=$PEERS bash -s" <<'REMOTE' || true
           set -uo pipefail
           CFG=/etc/rancher/k3s/config.yaml
           SVC="${SVC:-k3s}"
@@ -109,6 +113,37 @@ jobs:
           if [ -n "${EIP:-}" ]; then
             pub=$(KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl get node "$(hostname)" -o jsonpath='{.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip}' 2>/dev/null || true)
             echo "public-ip=$pub"; [ "$pub" = "$EIP" ] || { echo "DRIFT-PUB [$pub]"; drift=1; }
+          fi
+          # ---- flannel 数据面：接口重建后路由/邻居/FDB 可能全丢而节点仍 Ready（k3s#12436/#14142）----
+          echo "--- flannel 数据面 ---"
+          peers="${PEERS:-0}"
+          routes=$(ip route show dev flannel.1 2>/dev/null | grep -c ' onlink' || true)
+          echo "routes=$routes expect=$peers"
+          [ "$routes" -eq "$peers" ] || { echo "DRIFT-ROUTE-COUNT $routes != $peers"; drift=1; }
+          bad_rt=$(ip route show dev flannel.1 2>/dev/null | awk '/ onlink/ {t=$1; sub(/\/.*/,"",t); if ($3 != t) print}')
+          [ -z "$bad_rt" ] || { echo "DRIFT-ROUTE-SHAPE"; printf '%s\n' "$bad_rt"; drift=1; }
+          neigh_ok=$(ip neigh show dev flannel.1 2>/dev/null | grep -cE ' (PERMANENT|REACHABLE)( |$)' || true)
+          neigh_bad=$(ip neigh show dev flannel.1 2>/dev/null | grep -cE ' (INCOMPLETE|FAILED)' || true)
+          echo "neigh-ok=$neigh_ok expect=$peers neigh-bad=$neigh_bad"
+          { [ "$neigh_ok" -eq "$peers" ] && [ "$neigh_bad" -eq 0 ]; } || { echo "DRIFT-NEIGH"; ip neigh show dev flannel.1 2>/dev/null; drift=1; }
+          fdb=$(bridge fdb show dev flannel.1 2>/dev/null | grep -c ' dst .* self permanent' || true)
+          echo "fdb=$fdb expect=$peers"
+          [ "$fdb" -eq "$peers" ] || { echo "DRIFT-FDB $fdb != $peers"; bridge fdb show dev flannel.1 2>/dev/null; drift=1; }
+          st=/sys/class/net/flannel.1/statistics
+          t0=$(cat "$st/tx_packets" 2>/dev/null || echo 0); d0=$(cat "$st/tx_dropped" 2>/dev/null || echo 0)
+          sleep 5
+          t1=$(cat "$st/tx_packets" 2>/dev/null || echo 0); d1=$(cat "$st/tx_dropped" 2>/dev/null || echo 0)
+          sleep 5
+          d2=$(cat "$st/tx_dropped" 2>/dev/null || echo 0)
+          echo "tx_packets=$t1 tx_dropped=$d0->$d1->$d2"
+          [ "$t1" -gt 0 ] || { echo "DRIFT-TX-ZERO"; drift=1; }
+          # 连续两个采样窗口都在增长 => 持续丢包（单次抖动不判失败）
+          { [ "$d1" -gt "$d0" ] && [ "$d2" -gt "$d1" ]; } && { echo "DRIFT-TX-DROPPED growing"; drift=1; }
+          if [ "$IFACE" = tailscale0 ]; then
+            rules=$(ip rule show 2>/dev/null)
+            for r in 5210 5230 5250 5270; do
+              printf '%s\n' "$rules" | grep -q "^$r:" || { echo "DRIFT-IPRULE missing $r"; drift=1; }
+            done
           fi
           if [ "${MODE:-verify}" = apply ] && [ "$drift" = 1 ]; then
             if [ "${ROLE}" != server ]; then
