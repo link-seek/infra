@@ -133,8 +133,13 @@ jobs:
           if rb.status>=300: print("put bin fail",rb.status); sys.exit(1)
           rs=c.putContent(bucket,ks,sha.encode())
           if rs.status>=300: print("put sha fail",rs.status); sys.exit(1)
-          ub=c.createSignedUrl('GET', bucketName=bucket, objectKey=kb, expires=3600)['SignedUrl']
-          us=c.createSignedUrl('GET', bucketName=bucket, objectKey=ks, expires=3600)['SignedUrl']
+          import base64,hmac,hashlib,time as _t,urllib.parse as _up
+          def sign_v2(key):
+              e=int(_t.time())+3600
+              sts="GET\n\n\n%d\n/%s/%s"%(e,bucket,key)
+              sig=base64.b64encode(hmac.new(sk.encode(),sts.encode(),hashlib.sha1).digest()).decode()
+              return "https://%s.%s/%s?AWSAccessKeyId=%s&Expires=%d&Signature=%s"%(bucket,endpoint,_up.quote(key,safe='/'),_up.quote(ak),e,_up.quote(sig,safe=''))
+          ub=sign_v2(kb); us=sign_v2(ks)
           with open(os.environ["GITHUB_OUTPUT"],"a") as f:
               f.write(f"bin_url={ub}\n"); f.write(f"sha_url={us}\n")
           print("OBS presigned OK:",kb)
