@@ -94,3 +94,37 @@ kubectl get vpol
 kubectl get validatingwebhookconfiguration -o json | jq -r '.items[].webhooks[].name'   # 不应出现 catch-all
 kubectl get policyreports -A | awk 'NR>1 {p+=$5; f+=$6; e+=$7; w+=$8} END {print p,f,e,w}'
 ```
+
+## 4. 节点 unit 漂移（ExecStart 续行符丢失 / 参数被 systemd 丢弃）
+
+### 症状
+
+- `k3s-node-config` 定时 verify 报 `DRIFT-FLANNEL`（`flannel.1 local 10.0.0.x dev ens3` 而非 `... dev tailscale0`）、`DRIFT-MTU`，甚至 `DRIFT-MISSING node-ip/flannel-iface`。
+- 节点 `Ready`，但跨云 Pod 网络 / 集群 DNS 不通；该节点上的 `hostNetwork` 组件（如 `egress-proxy`）解析不了 CoreDNS → 业务 503（Squid `ERR_DNS_FAIL`）。
+- `systemctl show k3s-agent -p ExecStart --value` 里**看不到** `--node-ip/--flannel-iface`——因为 unit 的 `--token` 行尾漏了续行符 `\`，其后参数整段被 systemd 丢弃。
+
+### 根因
+
+带外（out-of-band）**手改** `/etc/systemd/system/k3s-agent.service`（如为同步 token）改坏了多行 ExecStart 的续行符。**不在声明式流水线内**（`link-seek/infra` 无此步骤）。
+
+### 诊断
+
+```bash
+systemctl show k3s-agent -p ExecStart --value | grep -oE -- '--(node-ip|flannel-iface)[= ][0-9a-zA-Z./]+'  # 期望两条都在
+systemctl cat k3s-agent | sed -n '/^ExecStart=/,$p'                                                       # 逐行确认续行以 \ 结尾
+ip -d link show flannel.1 | grep -o 'local [0-9.]* dev [a-z0-9]*'                                          # 期望 local <tailnet-ip> dev tailscale0
+```
+
+### 恢复（【根治】）
+
+- **agent**：走 `k3s-edge-repair`（`workflow_dispatch`：`node_hostname` + `agent_ip` + `confirm_hostname`），用官方安装器按 `node/node-config.yaml` 幂等重装、重建 ExecStart。**不要手改 unit。**
+- **server**：走 `k3s-node-config`（`mode=apply`）合并 `config.yaml`，必要时 `restart=yes`。
+- 修完再跑 `k3s-node-config`（`mode=verify`）确认 `NODE-OK`。
+- 若只是 flannel 数据面表项丢失（unit 正常、仅 route/neigh/FDB 空）→ 参见 §1（重启 `k3s`/`k3s-agent`）。**注意：unit 本身坏了时，单纯重启无效。**
+
+### 纪律（明文规则）
+
+- **禁止手改** `/etc/systemd/system/k3s.service`、`/etc/systemd/system/k3s-agent.service` 的 `ExecStart`。
+- 所有节点级变更必须走：`k3s-node-config`（apply，server）或 `k3s-edge-repair` / `k3s-join-edge`（agent 重装）。
+- token 轮换**不得**通过改 unit 同步；agent 入簇只应使用短时 bootstrap token（`k3s token create`），**不把 server token 写进 agent unit**。
+
