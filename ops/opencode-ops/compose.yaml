@@ -36,6 +36,11 @@ services:
           git -C /workspace config user.email "${GIT_AUTHOR_EMAIL:-opencode-ops@local}"
           git -C /workspace commit --allow-empty -m init >/dev/null 2>&1
         fi
+        # 本地 embedding 模型（镜像烘焙）首次 seed 到持久卷；之后完全离线
+        if [ -d /opt/opencode-mem/.cache ] && [ ! -d /root/.local/share/opencode/opencode-mem/.cache ]; then
+          mkdir -p /root/.local/share/opencode/opencode-mem
+          cp -a /opt/opencode-mem/.cache /root/.local/share/opencode/opencode-mem/.cache
+        fi
         exec opencode serve --port 4097 --hostname "${OPENCODE_OPS_BIND:-0.0.0.0}"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://${OPENCODE_OPS_BIND:-127.0.0.1}:4097/ || exit 1"]
