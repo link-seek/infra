@@ -831,3 +831,35 @@ resource "cloudflare_dns_record" "xieyucheng_top_17" {
   type    = "AAAA"
   zone_id = "f46e66f694af4a9e8f8830d0673822b9"
 }
+
+# =============================================================================
+# opencode-ops 公网入口（HW21 宿主维护台）
+#   Cloudflare A → Aliyun edge 120.77.76.20（proxied=false，与 opencode/home-oc 同款）
+#   → Traefik edge → tailnet 100.100.246.95:4097（清单见 k8s/traefik-edge/opencode-ops.yaml）
+# 2026-11-27 先经 API 创建以即时可用；import 块让首次 terraform apply 收编，
+#   apply 成功后即可删除 import 块（资源已在 state）。
+# =============================================================================
+import {
+  to = cloudflare_dns_record.xieyucheng_top_opencode_ops
+  id = "f46e66f694af4a9e8f8830d0673822b9/9ef8b9843c7fd1b0cf255f7d67a8f82d"
+}
+
+resource "cloudflare_dns_record" "xieyucheng_top_opencode_ops" {
+  comment                 = "opencode-ops HW21 host app via traefik edge"
+  content                 = "120.77.76.20"
+  data                    = null
+  include_shadow_metadata = false
+  name                    = "opencode-ops.xieyucheng.top"
+  priority                = null
+  private_routing         = null
+  proxied                 = false
+  settings = {
+    flatten_cname = null
+    ipv4_only     = null
+    ipv6_only     = null
+  }
+  tags    = []
+  ttl     = 600
+  type    = "A"
+  zone_id = "f46e66f694af4a9e8f8830d0673822b9"
+}

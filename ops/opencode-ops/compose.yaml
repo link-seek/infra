@@ -1,0 +1,49 @@
+# opencode-ops —— K3S 维护台（HW21 宿主机 docker，最佳实践姿势）
+#
+# 设计：docker-ce(华为镜像站, cgroup v2) + docker compose v2 + systemd。
+#   - 应用真相 = 本 compose.yaml；镜像单点 pin 在 ops/opencode-ops/VERSION（或 OPENCODE_OPS_IMAGE）。
+#   - 守护 = systemd 包 `docker compose up -d`；compose restart: unless-stopped 兜底。
+#   - 与 k3s 共存：daemon.json 关 iptables/bridge（容器 network_mode: host）。
+#   - 安全：默认只绑 tailscale IP（OPENCODE_OPS_BIND），不暴露 eth0/公网。
+#   - 入口用内联 sh：无论镜像是否带 ops-entrypoint 都能就地准备 kubeconfig/mesh_id，
+#     便于「先用 opencode-tools 跑通，再切 opencode-ops」而 compose 不变。
+services:
+  opencode-ops:
+    image: ${OPENCODE_OPS_IMAGE:-swr.cn-north-9.myhuaweicloud.com/link-seek/opencode-ops:${OPENCODE_OPS_TAG:-pin-required}}
+    container_name: opencode-ops
+    network_mode: host
+    restart: unless-stopped
+    working_dir: /workspace
+    env_file:
+      - /etc/opencode-ops/.env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /root/.kube /root/.ssh
+        cp /etc/opencode-ops/kubeconfig /root/.kube/config
+        cp /etc/opencode-ops/mesh_id /root/.ssh/mesh_id
+        chmod 600 /root/.kube/config /root/.ssh/mesh_id
+        printf '%s\n' \
+          'Host 192.168.1.* 100.* 127.0.0.1' \
+          '  IdentityFile /root/.ssh/mesh_id' \
+          '  StrictHostKeyChecking no' \
+          '  UserKnownHostsFile /dev/null' > /root/.ssh/config
+        chmod 600 /root/.ssh/config
+        # /workspace 必须是 git 仓库，OpenCode worktree 才能工作（对齐 k8s 实例 entrypoint）
+        if [ ! -d /workspace/.git ]; then
+          git init -b main /workspace >/dev/null 2>&1
+          git -C /workspace config user.name "${GIT_AUTHOR_NAME:-opencode-ops}"
+          git -C /workspace config user.email "${GIT_AUTHOR_EMAIL:-opencode-ops@local}"
+          git -C /workspace commit --allow-empty -m init >/dev/null 2>&1
+        fi
+        exec opencode serve --port 4097 --hostname "${OPENCODE_OPS_BIND:-0.0.0.0}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://${OPENCODE_OPS_BIND:-127.0.0.1}:4097/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    volumes:
+      - /etc/opencode-ops:/etc/opencode-ops:ro
+      - /var/lib/opencode-ops:/root/.local/share/opencode
+      - /var/lib/opencode-ops/workspace:/workspace

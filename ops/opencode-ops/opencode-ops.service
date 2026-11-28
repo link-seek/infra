@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenCode Ops (host-app via docker compose; independent of k3s)
+After=network-online.target docker.service tailscaled.service
+Wants=network-online.target docker.service tailscaled.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/opencode-ops/.env
+WorkingDirectory=/opt/opencode-ops
+ExecStart=/usr/bin/docker compose --env-file /etc/opencode-ops/.env -f /opt/opencode-ops/compose.yaml up -d --remove-orphans
+ExecReload=/usr/bin/docker compose --env-file /etc/opencode-ops/.env -f /opt/opencode-ops/compose.yaml pull
+ExecStop=/usr/bin/docker compose --env-file /etc/opencode-ops/.env -f /opt/opencode-ops/compose.yaml down
+TimeoutStartSec=300
+[Install]
+WantedBy=multi-user.target
