@@ -78,6 +78,9 @@ jobs:
             echo "::warning::image $IMG not available yet; skip deploy (dispatch bake-ops first)"
             exit 0
           fi
+          # 2.6) 取模型网关 key（集群 Secret；不入仓、不回显）
+          LITELLM_KEY="$(ssh $SOPT root@$H "KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/bin/k3s kubectl -n opencode-xieyucheng get secret opencode-xieyucheng-env -o go-template='{{index .data \"LITELLM_API_KEY\"}}' | base64 -d")"
+          [ -n "$LITELLM_KEY" ] && echo "::add-mask::$LITELLM_KEY"
           # 3) 渲染 .env（600）
           ssh $SOPT root@$H "cat > /etc/opencode-ops/.env <<EOF
           OPENCODE_OPS_REPO=$REPO
@@ -85,6 +88,7 @@ jobs:
           OPENCODE_OPS_IMAGE=$IMG
           OPENCODE_OPS_BIND=$H
           LITELLM_BASE_URL=https://litellm.linkseek.net.cn/v1
+          LITELLM_API_KEY=$LITELLM_KEY
           OPENCODE_SERVER_PASSWORD=$OPS_WEB_PW
           HCLOUD_REGION=cn-north-4
           HCLOUD_AK=$HCLOUD_AK
