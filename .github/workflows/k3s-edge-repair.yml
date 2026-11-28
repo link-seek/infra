@@ -133,8 +133,8 @@ jobs:
           if rb.status>=300: print("put bin fail",rb.status); sys.exit(1)
           rs=c.putContent(bucket,ks,sha.encode())
           if rs.status>=300: print("put sha fail",rs.status); sys.exit(1)
-          ub=c.createSignedUrl('GET',bucket,kb,3600)['SignedUrl']
-          us=c.createSignedUrl('GET',bucket,ks,3600)['SignedUrl']
+          ub=c.createSignedUrl('GET', bucketName=bucket, objectKey=kb, expires=3600)['SignedUrl']
+          us=c.createSignedUrl('GET', bucketName=bucket, objectKey=ks, expires=3600)['SignedUrl']
           with open(os.environ["GITHUB_OUTPUT"],"a") as f:
               f.write(f"bin_url={ub}\n"); f.write(f"sha_url={us}\n")
           print("OBS presigned OK:",kb)
