@@ -25,6 +25,8 @@
 		{"action": "accept", "src": ["tag:pc"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "users": ["root"]},
 		// CI deploy runner root 登节点（节点开 Tailscale SSH）。
 		{"action": "accept", "src": ["tag:github"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "users": ["root"]},
+		// 节点间 root ssh：edge-join 的“跳板 server → 目标 edge”架构需要（节点已全端口互通，同信任模型）。
+		{"action": "accept", "src": ["tag:hw", "tag:ali", "tag:oci"], "dst": ["tag:hw", "tag:ali", "tag:oci"], "users": ["root"]},
 		// 管理员安全网。
 		{"action": "accept", "src": ["autogroup:admin"], "dst": ["tag:hw", "tag:ali", "tag:oci", "tag:github", "tag:pc"], "users": ["root"]},
 		// 成员自己的设备互登（check）。
@@ -35,6 +37,7 @@
 		{"src": "tag:hw", "allow": ["100.73.221.121:14443"]},
 		{"src": "tag:pc", "allow": ["100.100.246.95:22", "100.73.182.4:22", "100.93.119.21:22"]},
 		{"src": "tag:github", "allow": ["100.100.246.95:22", "100.73.182.4:6443"]},
+		{"src": "tag:hw", "allow": ["100.85.128.116:22"]},
 		{"src": "tag:ali", "allow": ["100.69.220.112:4096"]}
 	]
 }
