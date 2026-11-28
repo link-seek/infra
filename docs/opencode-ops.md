@@ -22,6 +22,7 @@ ops/opencode-ops/
 3. 访问：tailnet 内 `https://mesh-hw-21-1.<tailnet>/`（`tailscale serve`）+ `OPENCODE_SERVER_PASSWORD`。
 
 ## 日常/升级
+- `/workspace` 首次启动自动 `git init`（容器 `WorkingDir=/workspace`），OpenCode 的 worktree 功能依赖此 git 仓库。
 - 升级镜像：改 `ops/opencode-ops/VERSION` → 合 PR → 流水线 `compose pull && up -d`。
 - 手动重建：`systemctl restart opencode-ops`。
 - 回滚：`VERSION` 改回旧 tag 合 PR。
