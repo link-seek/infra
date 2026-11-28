@@ -8,5 +8,7 @@
 /clusters/k3s/kyverno-* @xieyucheng123
 /clusters/k3s/apps-kyverno* @xieyucheng123
 /clusters/k3s/apps-flux-system* @xieyucheng123
+/k8s/kyverno/ @xieyucheng123
+/k8s/kyverno-policies/ @xieyucheng123
 /k8s/kube-system/ @xieyucheng123
 /.github/workflows/flux-artifact.yml @xieyucheng123
