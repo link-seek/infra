@@ -55,6 +55,11 @@ bridge fdb show dev flannel.1 | wc -l        # 节点数-1
 ip -s link show flannel.1                    # TX 增长、tx_dropped 不再增长
 ```
 
+已知限制（2026-11-28 实测，v1.37.2+k3s1）：重启会按租约重放路由/neigh/FDB，**但 ARP 广播解析仍可能不可用**。
+验证方法：删掉一条远端 neigh 再发流量，若邻居变成 `INCOMPLETE`、跨节点流量中断，说明 ARP 仍坏，
+必须把静态邻居加回来——此时下面的 workaround 仍是必需的，不能只靠重启。
+
+
 重启前确认该节点不是唯一承载关键单副本组件的位置（如 Kyverno admission 副本、ingress），必要时先迁移。
 
 **【临时】** 静态邻居兜底（只恢复单播转发，不修 ARP 泛洪）：
