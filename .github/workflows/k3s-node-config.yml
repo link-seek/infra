@@ -184,7 +184,11 @@ jobs:
           EG_SVCIP=$(ssh $SOPT root@$EG_SSH "KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl -n egress get svc egress-proxy -o jsonpath='{.spec.clusterIP}'" 2>/dev/null || true)
           echo "egress-proxy clusterIP=$EG_SVCIP"
           EG_CODE=000
-          [ -n "$EG_SVCIP" ] && EG_CODE=$(ssh $SOPT root@$EG_SSH "curl -sS -m 20 -x http://$EG_SVCIP:3128 -o /dev/null -w '%{http_code}' https://opencode.ai" 2>/dev/null || echo 000)
+          # 注意：不要把 `|| echo 000` 放在命令替换里面——ssh 非零退出但已打印 200 时会拼成 "200000"（假漂移）。
+          if [ -n "$EG_SVCIP" ]; then
+            EG_CODE=$(ssh $SOPT root@$EG_SSH "curl -sS -m 20 -x http://$EG_SVCIP:3128 -o /dev/null -w '%{http_code}' https://opencode.ai" 2>/dev/null) || EG_CODE=000
+            case "$EG_CODE" in [0-9][0-9][0-9]) ;; *) EG_CODE=000 ;; esac
+          fi
           echo "egress squid->opencode.ai http=$EG_CODE (expect 200)"
           if [ "$EG_CODE" != "200" ]; then echo "DRIFT-EGRESS squid->opencode.ai http=$EG_CODE"; echo "### L7 egress squid->opencode.ai http=$EG_CODE" >> drift-report.md; FAIL=1; fi
           DNSIP=$(ssh $SOPT root@$EG_SSH "KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}'" 2>/dev/null || true)
