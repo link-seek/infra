@@ -7,6 +7,12 @@
 1. **真值进 git**：节点参数、路由、DNS、ACL、镜像白名单等以仓内声明文件为准，commit diff 即审计底账。
 2. **密钥不进仓**：Tailscale / SSH / Cloudflare / 云 AK 等走 GitHub org secrets；应用运行时 Secret（`litellm-env`、`opencode-*-env`、`browserless-env`、`erpnext` 等）走自建 Infisical（`k8s/infisical`），由 Infisical Operator 按 `k8s/infisical-apps/*` 的 `InfisicalSecret` 同步成 k8s Secret，仓库不留密文。
 3. **GitOps**：合 PR → CI 打包 OCI 制品 → 集群 Flux 自动对账（见下）。改仓即部署。
+4. **准入策略有变更纪律**（硬规则，2026-11-27 事故教训）：新增/扩大 admission policy 必须
+   **先 Audit 观察 ≥1 周**（PolicyReport 无高危误报）**再切 Deny**；集群级/全资源匹配（`*/*`、无 namespace 限定）
+   必须单独过 blast-radius 评审，写清失败半径、系统身份豁免与回滚动作。细则见 [`docs/runbook.md`](docs/runbook.md) §3。
+   集群层只放"集群存活必需"，应用策略作用域限定在应用命名空间。
+5. **应急处置走 runbook**：flannel 数据面故障、break-glass 序列见 [`docs/runbook.md`](docs/runbook.md)；
+   临时 workaround 必须登记并在维护窗口内被根治取代。
 
 ## 部署模型（Gitless GitOps）
 

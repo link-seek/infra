@@ -1,0 +1,176 @@
+name: k3s-edge-repair
+
+# 声明式节点修复（仅 edge agent）：对「节点 Ready 但配置漂移」的 agent 走官方安装器幂等重装。
+# 背景：k3s-join-edge 的 join 有「已 Ready 直接跳过」的幂等门，修不了“Ready 但漂移”的节点；
+#       本链直接用 .github/actions/edge-join（装机段唯一正本）强制重装，按 node/node-config.yaml
+#       声明的 node_ip + flannel-iface=tailscale0 重建 systemd unit 的 ExecStart。
+# 纪律：**禁止手改 /etc/systemd/system/k3s-{agent,}.service 的 ExecStart**；agent 修复一律走本链。
+# 收尾：修完请再跑 k3s-node-config（mode=verify）确认 NODE-OK；server 走 k3s-node-config apply。
+on:
+  workflow_dispatch:
+    inputs:
+      node_hostname:
+        description: "要修复的 edge agent node 名（须在 node/node-config.yaml 且 role=agent）"
+        required: true
+        type: string
+      agent_ip:
+        description: "该 agent 的 tailnet IP（= node-config.yaml 的 node_ip）"
+        required: true
+        type: string
+      server_tail:
+        description: "取号/跳板 server tailnet IP"
+        required: false
+        default: "100.93.119.21"
+        type: string
+      confirm_hostname:
+        description: "二次确认：必须与 node_hostname 一致"
+        required: true
+        type: string
+      k3s_bin_url:
+        description: "k3s 二进制国内中转 URL（留空=官方 GitHub；国内/跨云节点建议填 OBS 预签名，勿入库）"
+        required: false
+        default: ""
+        type: string
+      k3s_sha_url:
+        description: "k3s sha256 校验 URL（同上）"
+        required: false
+        default: ""
+        type: string
+      bin_source:
+        description: "二进制源：auto|obs|github"
+        required: false
+        default: "auto"
+        type: string
+      pause_image:
+        description: "agent pause 镜像（SWR 常驻，国内可拉）"
+        required: false
+        default: "swr.cn-north-9.myhuaweicloud.com/link-seek/edge-pause:3.10.2"
+        type: string
+      k3s_version:
+        description: "k3s 版本（自动 OBS 中转用；默认对齐现网）"
+        required: false
+        default: "v1.37.2+k3s1"
+        type: string
+      dry_run:
+        description: "仅验证 OBS 上传+预签名，不真正重装节点"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3s-edge-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TS_API_KEY: ${{ secrets.TS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 二次确认 + 校验声明（role=agent 且 IP 匹配）
+        run: |
+          set -euo pipefail
+          [ "${{ inputs.confirm_hostname }}" = "${{ inputs.node_hostname }}" ] || { echo "FAIL: confirm_hostname 与 node_hostname 不一致，拒绝执行"; exit 1; }
+          python3 - <<'PY'
+          import yaml, sys, os
+          name=os.environ["IN_NAME"]; ip=os.environ["IN_IP"]
+          hosts={h["name"]:h for h in yaml.safe_load(open("node/node-config.yaml"))["hosts"]}
+          h=hosts.get(name)
+          if not h:
+              sys.exit(f"FAIL: {name} 不在 node-config.yaml")
+          if h.get("role") != "agent":
+              sys.exit(f"FAIL: {name} role={h.get('role')}，本链只修 agent；server 走 k3s-node-config apply")
+          if h.get("node_ip") != ip:
+              sys.exit(f"FAIL: agent_ip={ip} 与声明 node_ip={h.get('node_ip')} 不一致")
+          if h.get("flannel_iface") != "tailscale0":
+              sys.exit(f"FAIL: 声明 flannel_iface={h.get('flannel_iface')}，非 tailscale0，人工确认")
+          print(f"OK: {name} role=agent node_ip={ip}")
+          PY
+        env:
+          IN_NAME: ${{ inputs.node_hostname }}
+          IN_IP: ${{ inputs.agent_ip }}
+
+      - name: OBS 中转准备（用 org AK/SK 从 GitHub 取二进制 → 传 OBS → 预签名；best-effort）
+        id: obs
+        if: ${{ inputs.k3s_bin_url == '' && inputs.bin_source != 'github' }}
+        continue-on-error: true
+        env:
+          OBS_AK: ${{ secrets.PROD_HCLOUD_AK }}
+          OBS_SK: ${{ secrets.PROD_HCLOUD_SK }}
+          OBS_ENDPOINT: obs.cn-north-9.myhuaweicloud.com
+          OBS_BUCKET: linkseek
+          K3S_VER: ${{ inputs.k3s_version }}
+        run: |
+          set -uo pipefail
+          echo "OBS_BUCKET=$OBS_BUCKET ENDPOINT=$OBS_ENDPOINT VER=$K3S_VER"
+          python3 -m pip install --quiet --break-system-packages esdk-obs-python || python3 -m pip install --quiet esdk-obs-python || { echo "WARN: esdk-obs-python 安装失败，回落 github 下载"; exit 0; }
+          python3 - <<'PY' || { echo "WARN: OBS 中转失败，回落 github 下载"; exit 0; }
+          import os,sys,re,hashlib,urllib.request
+          from obs import ObsClient
+          ak=os.environ["OBS_AK"]; sk=os.environ["OBS_SK"]
+          endpoint=os.environ["OBS_ENDPOINT"]; bucket=os.environ["OBS_BUCKET"]
+          ver=os.environ["K3S_VER"]; run=os.environ.get("GITHUB_RUN_ID","0")
+          if not ak or not sk:
+              print("no AK/SK"); sys.exit(1)
+          base=f"https://github.com/k3s-io/k3s/releases/download/{ver.replace('+','%2B')}"
+          def get(u):
+              with urllib.request.urlopen(u,timeout=180) as r: return r.read()
+          print("download:",base)
+          data=get(base+"/k3s"); sha=get(base+"/sha256sum-amd64.txt").decode()
+          line=[l for l in sha.splitlines() if re.search(r'\bk3s$',l.strip())]
+          h=hashlib.sha256(data).hexdigest()
+          if not line or h not in line[0]:
+              print("sha mismatch"); sys.exit(1)
+          prefix=f"k3s/edge-repair/{run}"; kb=f"{prefix}/k3s"; ks=f"{prefix}/sha256sum-amd64.txt"
+          c=ObsClient(access_key_id=ak,secret_access_key=sk,server="https://"+endpoint)
+          rb=c.putContent(bucket,kb,data)
+          if rb.status>=300: print("put bin fail",rb.status); sys.exit(1)
+          rs=c.putContent(bucket,ks,sha.encode())
+          if rs.status>=300: print("put sha fail",rs.status); sys.exit(1)
+          import base64,hmac,hashlib,time as _t,urllib.parse as _up
+          def sign_v2(key):
+              e=int(_t.time())+3600
+              sts="GET\n\n\n%d\n/%s/%s"%(e,bucket,key)
+              sig=base64.b64encode(hmac.new(sk.encode(),sts.encode(),hashlib.sha1).digest()).decode()
+              return "https://%s.%s/%s?AWSAccessKeyId=%s&Expires=%d&Signature=%s"%(bucket,endpoint,_up.quote(key,safe='/'),_up.quote(ak),e,_up.quote(sig,safe=''))
+          ub=sign_v2(kb); us=sign_v2(ks)
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              f.write(f"bin_url={ub}\n"); f.write(f"sha_url={us}\n")
+          print("OBS presigned OK:",kb)
+          PY
+
+      - name: 验证预签名（dry_run）
+        if: ${{ inputs.dry_run }}
+        run: |
+          set -uo pipefail
+          if [ -z "${{ steps.obs.outputs.bin_url }}" ]; then echo "FAIL: 未拿到预签名（OBS 步骤失败）"; exit 1; fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -r 0-0 "${{ steps.obs.outputs.bin_url }}" || echo 000)
+          echo "presigned bin range http=$code"
+          [ "$code" = "200" ] || [ "$code" = "206" ] || { echo "FAIL: 预签名不可用"; exit 1; }
+
+      - name: 幂等重装（edge-join action，remote=true，按声明重建 ExecStart）
+        if: ${{ !inputs.dry_run }}
+        uses: ./.github/actions/edge-join
+        with:
+          remote: "true"
+          node_name: ${{ inputs.node_hostname }}
+          node_ip: ${{ inputs.agent_ip }}
+          server_tail: ${{ inputs.server_tail }}
+          ssh_key: ${{ secrets.CADDY_SSH_KEY }}
+          ts_api_key: ${{ secrets.TS_API_KEY }}
+          k3s_bin_url: ${{ steps.obs.outputs.bin_url || inputs.k3s_bin_url }}
+          k3s_sha_url: ${{ steps.obs.outputs.sha_url || inputs.k3s_sha_url }}
+          bin_source: ${{ inputs.bin_source }}
+          pause_image: ${{ inputs.pause_image }}
+
+      - name: 焚毁（跳板钥匙＋runner 身份）
+        if: ${{ always() && !inputs.dry_run }}
+        run: |
+          sudo tailscale ssh root@"${{ inputs.server_tail }}" 'shred -u /tmp/ci-edge.key 2>/dev/null; echo KEY-BURNED' || true
+          sudo tailscale logout || true
