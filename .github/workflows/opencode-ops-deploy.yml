@@ -100,8 +100,8 @@ jobs:
           chmod 600 /etc/opencode-ops/.env"
           # 4) compose pull + up
           ssh $SOPT root@$H "cd /opt/opencode-ops && docker compose --env-file /etc/opencode-ops/.env pull && docker compose --env-file /etc/opencode-ops/.env up -d --remove-orphans"
-          # 6) systemd 守护 + tailscale serve
-          ssh $SOPT root@$H "install -m644 /opt/opencode-ops/opencode-ops.service /etc/systemd/system/opencode-ops.service && systemctl daemon-reload && systemctl enable opencode-ops.service; command -v tailscale >/dev/null && tailscale serve --bg http://127.0.0.1:4097 || true"
+          # 6) systemd 守护（不调用 tailscale serve：tailnet 未启用 Serve，访问走 tailnet IP）
+          ssh $SOPT root@$H "install -m644 /opt/opencode-ops/opencode-ops.service /etc/systemd/system/opencode-ops.service && systemctl daemon-reload && systemctl enable opencode-ops.service"
           # 7) 冒烟（绑 tailscale IP；宿主无 kubectl，用 k3s kubectl）
           ssh $SOPT root@$H "cd /opt/opencode-ops && docker compose --env-file /etc/opencode-ops/.env -f compose.yaml ps; curl -fsS -o /dev/null -w 'web=%{http_code}\n' http://$H:4097/ || true; KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/bin/k3s kubectl get nodes | head -6"
           shred -u ~/.ssh/ci_key
